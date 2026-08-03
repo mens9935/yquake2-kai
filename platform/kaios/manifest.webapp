@@ -1,0 +1,28 @@
+{
+  "name": "Quake II",
+  "description": "Yamagi Quake II, ported to asm.js for KaiOS 2.5.x",
+  "launch_path": "/index.html",
+  "type": "privileged",
+  "icons": {
+    "56": "/icon-56.png",
+    "112": "/icon-112.png"
+  },
+  "developer": {
+    "name": "yquake2-kai"
+  },
+  "default_locale": "en",
+  "orientation": ["portrait"],
+  "fullscreen": "true",
+  "chrome": {
+    "navigation": false
+  },
+  "permissions": {
+    "device-storage:sdcard": {
+      "access": "readonly",
+      "description": "Read baseq2 game data from the SD card"
+    }
+  },
+  "b2g_features": {
+    "acceleration": "disabled"
+  }
+}

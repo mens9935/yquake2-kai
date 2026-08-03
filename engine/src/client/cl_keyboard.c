@@ -853,6 +853,40 @@ Key_StringToKeynum(char *str)
 	return -1;
 }
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+/*
+ * KaiOS input bridge. KaiOS feature phones send DOM KeyboardEvent "key"
+ * values (SoftLeft, SoftRight, Call, EndCall, ...) that Emscripten's
+ * SDL2 port has no scancode mapping for -- there's no physical
+ * keyboard to map from in the first place. Rather than teaching SDL2
+ * about phone keys, the KaiOS shell (platform/kaios/app.js) listens
+ * for keydown/keyup itself and calls straight in here with the same
+ * key names used in configs/binds (e.g. "UPARROW", "ENTER", "1"),
+ * reusing Key_StringToKeynum() and going directly to Key_Event(),
+ * bypassing SDL2 input entirely.
+ */
+EMSCRIPTEN_KEEPALIVE
+void
+KaiOS_KeyEvent(char *keyname, int down)
+{
+	int keynum = Key_StringToKeynum(keyname);
+
+	if (keynum == -1)
+	{
+		return;
+	}
+
+	/* Mirrors how input/sdl2.c decides "special": printable ASCII
+	 * (typable in the console/menus) is not special, everything else
+	 * (arrows, ESCAPE, ENTER, ...) is. */
+	qboolean special = !((keynum >= ' ') && (keynum < K_BACKSPACE));
+
+	Key_Event(keynum, down ? true : false, special);
+}
+#endif /* __EMSCRIPTEN__ */
+
 /*
  * Returns a string (either a single ascii char,
  * or a K_* name) for the given keynum.

@@ -84,8 +84,7 @@ CLIENT_SRCS = \
 	src/server/sv_save.c \
 	src/server/sv_send.c \
 	src/server/sv_user.c \
-	src/server/sv_world.c \
-	src/kaios/kaios_input.c
+	src/server/sv_world.c
 
 REFSOFT_SRCS = \
 	src/client/refresh/soft/sw_aclip.c \

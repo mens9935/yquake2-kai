@@ -1,0 +1,4 @@
+# Build outputs copied here by platform/emscripten/build.sh
+/quake2-kaios.js
+/quake2-kaios.js.mem
+/autoexec.cfg.js

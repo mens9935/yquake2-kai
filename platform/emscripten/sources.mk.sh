@@ -74,7 +74,6 @@ CLIENT_SRCS=(
 	"src/server/sv_send.c"
 	"src/server/sv_user.c"
 	"src/server/sv_world.c"
-	"src/kaios/kaios_input.c"
 )
 
 REFSOFT_SRCS=(

@@ -57,7 +57,7 @@ EMCC_LINK_FLAGS=(
 	-s TOTAL_MEMORY=67108864
 	-s ALLOW_MEMORY_GROWTH=0
 	-s FORCE_FILESYSTEM=1
-	-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS']
+	-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS','callMain']
 	-s EXIT_RUNTIME=0
 	-s ENVIRONMENT=web
 )
@@ -98,4 +98,20 @@ emcc "${COMMON_FLAGS[@]}" "${EMCC_LINK_FLAGS[@]}" \
 	"${OBJS[@]}" \
 	-o "$OUT/quake2-kaios.js"
 
-echo "==> Build complete: $OUT/quake2-kaios.js (+ .js.mem)"
+KAIOS_DIR="$ROOT/platform/kaios"
+
+echo "==> Generating $KAIOS_DIR/autoexec.cfg.js from autoexec.cfg"
+python3 - "$KAIOS_DIR/autoexec.cfg" "$KAIOS_DIR/autoexec.cfg.js" <<'PYEOF'
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+	text = f.read()
+with open(dst, 'w') as f:
+	f.write('// Generated from autoexec.cfg by build.sh -- do not edit directly.\n')
+	f.write('window.KAIOS_AUTOEXEC_CFG = ' + json.dumps(text) + ';\n')
+PYEOF
+
+echo "==> Copying engine build into $KAIOS_DIR"
+cp "$OUT/quake2-kaios.js" "$OUT/quake2-kaios.js.mem" "$KAIOS_DIR/"
+
+echo "==> Build complete: $KAIOS_DIR/ is ready to package/sideload"
