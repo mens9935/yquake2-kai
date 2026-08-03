@@ -111,9 +111,11 @@ main(int argc, char **argv)
 		}
 	}
 
-#ifndef __HAIKU__
+#if !defined(__HAIKU__) && !defined(__EMSCRIPTEN__)
 	/* Prevent running Quake II as root. Only very mad
-	   minded or stupid people even think about it. :) */
+	   minded or stupid people even think about it. :)
+	   Meaningless in a browser sandbox (no real uids), and
+	   Emscripten's libc reports a static uid 0 there anyway. */
 	if (getuid() == 0)
 	{
 		printf("Quake II shouldn't be run as root! Backing out to save your ass. If\n");
@@ -124,6 +126,7 @@ main(int argc, char **argv)
 	}
 #endif
 
+#ifndef __EMSCRIPTEN__
 	// Enforce the real UID to prevent setuid crap
 	if (getuid() != geteuid())
 	{
@@ -134,6 +137,7 @@ main(int argc, char **argv)
 
 		return 1;
 	}
+#endif
 
 	// enforce C locale
 	setenv("LC_ALL", "C", 1);

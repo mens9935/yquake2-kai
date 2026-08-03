@@ -27,6 +27,10 @@
 #include "header/common.h"
 #include <setjmp.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 cvar_t *developer;
 cvar_t *modder;
 cvar_t *timescale;
@@ -164,6 +168,38 @@ Qcommon_Buildstring(void)
 	printf("Architecture: %s\n", YQ2ARCH);
 }
 
+#ifdef __EMSCRIPTEN__
+/* The browser drives the loop (via requestAnimationFrame), so there's
+ * no blocking wait/sleep here -- Qcommon_Frame() is just invoked once
+ * per tick. A blocking while(1) would freeze the tab forever, since
+ * control never returns to the browser's event loop. */
+static void
+Qcommon_EmscriptenTick(void *arg)
+{
+	static long long oldtime;
+
+	if (!oldtime)
+	{
+		oldtime = Sys_Microseconds();
+	}
+
+	long long newtime = Sys_Microseconds();
+
+	curtime = (int)(newtime / 1000ll);
+
+	Qcommon_Frame(newtime - oldtime);
+	oldtime = newtime;
+}
+
+static void
+Qcommon_Mainloop(void)
+{
+	/* fps==0 -> pace with the browser's requestAnimationFrame;
+	 * simulate_infinite_loop==1 -> Qcommon_Init() below never "returns"
+	 * from the caller's point of view, matching every other platform. */
+	emscripten_set_main_loop_arg(Qcommon_EmscriptenTick, NULL, 0, 1);
+}
+#else
 static void
 Qcommon_Mainloop(void)
 {
@@ -214,6 +250,7 @@ Qcommon_Mainloop(void)
 		oldtime = newtime;
 	}
 }
+#endif /* __EMSCRIPTEN__ */
 
 void Qcommon_ExecConfigs(qboolean gameStartUp)
 {

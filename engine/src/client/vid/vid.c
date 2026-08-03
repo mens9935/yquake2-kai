@@ -407,6 +407,16 @@ VID_LoadRenderer(void)
 	VID_GetRendererLibPath(vid_renderer->string, reflib_path, sizeof(reflib_path));
 	Com_Printf("Loading library: %s\n", reflib_name);
 
+#ifdef __EMSCRIPTEN__
+	/* Emscripten's asm.js output has no dynamic linking, so the
+	 * (single, statically linked) renderer is compiled directly
+	 * into this binary. Call the linked-in symbol instead of
+	 * dlopen()'ing a "ref_*.so". */
+	{
+		extern refexport_t Q2_GetRefAPI_link(refimport_t) asm("GetRefAPI");
+		GetRefAPI = Q2_GetRefAPI_link;
+	}
+#else
 	// Check if the renderer libs exists.
 	if (!VID_HasRenderer(vid_renderer->string))
 	{
@@ -426,6 +436,7 @@ VID_LoadRenderer(void)
 
 		return false;
 	}
+#endif /* __EMSCRIPTEN__ */
 
 	// Fill in the struct exported to the renderer.
 	// FIXME: Do we really need all these?
@@ -591,7 +602,12 @@ VID_Init(void)
 	// Console variables
 	vid_gamma = Cvar_Get("vid_gamma", "1.0", CVAR_ARCHIVE);
 	vid_fullscreen = Cvar_Get("vid_fullscreen", "0", CVAR_ARCHIVE);
+#ifdef __EMSCRIPTEN__
+	/* the only renderer statically linked into the KaiOS build */
+	vid_renderer = Cvar_Get("vid_renderer", "soft", CVAR_ARCHIVE);
+#else
 	vid_renderer = Cvar_Get("vid_renderer", "gl3", CVAR_ARCHIVE);
+#endif
 
 	// Commands
 	Cmd_AddCommand("vid_restart", VID_Restart_f);

@@ -40,7 +40,15 @@
 // Switch of the thread local stuff. Breaks mingw under Windows.
 #define STBI_NO_THREAD_LOCALS
 // include implementation part of stb_image into this file
+//
+// Exception: on Emscripten the renderer is statically linked into the
+// same binary as the client, and cl_image.c already provides the one
+// and only STB_IMAGE_IMPLEMENTATION with the very same config macros
+// (see above) -- so just pull in the declarations here instead of
+// duplicating the implementation, which would be a link error.
+#ifndef __EMSCRIPTEN__
 #define STB_IMAGE_IMPLEMENTATION
+#endif
 #include "stb_image.h"
 
 // include resize implementation

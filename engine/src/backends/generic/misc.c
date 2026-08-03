@@ -29,8 +29,8 @@
 
 #include "../../common/header/shared.h"
 
-#if defined(__linux) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__sun) || defined(__APPLE__)
-#include <unistd.h> // readlink(), amongst others
+#if defined(__linux) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__sun) || defined(__APPLE__) || defined(__EMSCRIPTEN__)
+#include <unistd.h> // readlink(), amongst others, and getcwd() for Sys_GetCwd()
 #endif
 
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__DragonFly__)

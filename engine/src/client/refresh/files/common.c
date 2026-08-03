@@ -41,6 +41,14 @@ R_Printf(int level, const char* msg, ...)
 	va_end(argptr);
 }
 
+#ifndef __EMSCRIPTEN__
+/* On every other platform the renderer is a separate DLL/.so, loaded
+ * with dlopen(), and needs its own copies of these forwarding to the
+ * client's ri.* import table. On Emscripten's asm.js target there's
+ * no dynamic linking: the renderer is statically linked into the same
+ * binary as the client, which already provides the real Sys_Error(),
+ * Com_Printf(), Com_DPrintf() and Com_Error() -- defining them again
+ * here would just be duplicate symbols. */
 void
 Sys_Error(const char *error, ...)
 {
@@ -84,6 +92,7 @@ Com_Error(int code, const char *fmt, ...)
 
 	ri.Sys_Error(code, "%s", text);
 }
+#endif /* !__EMSCRIPTEN__ */
 
 /* shared variables */
 refdef_t r_newrefdef;

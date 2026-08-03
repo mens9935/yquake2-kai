@@ -420,6 +420,14 @@ Sys_UnloadGame(void)
 void *
 Sys_GetGameAPI(void *parms)
 {
+#ifdef __EMSCRIPTEN__
+	/* Emscripten's asm.js output has no dynamic linking, so the
+	 * game code is compiled directly into this binary. Call the
+	 * linked-in symbol instead of dlopen()'ing a "game.so". */
+	extern void *Q2_GetGameAPI_link(void *) asm("GetGameAPI");
+
+	return Q2_GetGameAPI_link(parms);
+#else
 	typedef void *(*fnAPI)(void *);
 	fnAPI GetGameAPI;
 
@@ -507,6 +515,7 @@ Sys_GetGameAPI(void *parms)
 	}
 
 	return GetGameAPI(parms);
+#endif /* __EMSCRIPTEN__ */
 }
 
 /* ================================================================ */

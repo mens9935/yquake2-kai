@@ -181,7 +181,12 @@ GetGameAPI(game_import_t *import)
 /*
  * this is only here so the functions
  * in shared source files can link
+ *
+ * On Emscripten the game code is statically linked into the same
+ * binary as the client/server, which already provides the real
+ * Sys_Error()/Com_Printf() -- skip these to avoid duplicate symbols.
  */
+#ifndef __EMSCRIPTEN__
 void
 Sys_Error(const char *error, ...)
 {
@@ -207,6 +212,7 @@ Com_Printf(const char *msg, ...)
 
 	gi.dprintf("%s", text);
 }
+#endif /* !__EMSCRIPTEN__ */
 
 /* ====================================================================== */
 
