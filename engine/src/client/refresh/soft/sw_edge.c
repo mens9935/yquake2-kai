@@ -161,9 +161,37 @@ static void
 R_StepActiveU (edge_t *pedge)
 {
 	edge_t	*pnext_edge, *pwedge;
+#ifdef __EMSCRIPTEN__
+	/* Temporary watchdog: chasing a real-device hang confirmed (via
+	 * KAIOS_DEBUG prints in R_ScanEdges) to be somewhere inside this
+	 * function, on a specific scanline partway through the screen --
+	 * not from the very first call, so data-dependent. Both loops here
+	 * assume a finite, correctly-sorted doubly-linked edge list bounded
+	 * by edge_head/edge_tail/edge_aftertail sentinels; if that
+	 * invariant ever breaks (e.g. from the 12.20 fixed-point overflow
+	 * this file's own comments elsewhere already warn is a risk) either
+	 * loop could spin forever over a corrupted or cyclic list instead
+	 * of erroring. Bail loudly with diagnostic state after an iteration
+	 * count no legitimate edge list (only ~760 edges this frame, per
+	 * R_EdgeDrawing's own diagnostic) should ever come close to. */
+	int outer_iters = 0;
+	int inner_iters = 0;
+#endif
 
 	while (1)
 	{
+#ifdef __EMSCRIPTEN__
+		if (++outer_iters > 100000)
+		{
+			fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: outer loop stuck! "
+				"pedge=%p u=%d u_step=%d prev=%p prev->u=%d next=%p "
+				"edge_head=%p edge_tail=%p edge_aftertail=%p\n",
+				(void *)pedge, pedge->u, pedge->u_step,
+				(void *)pedge->prev, pedge->prev->u, (void *)pedge->next,
+				(void *)&edge_head, (void *)&edge_tail, (void *)&edge_aftertail);
+			return;
+		}
+#endif
 		pedge->u += pedge->u_step;
 		if (pedge->u < pedge->prev->u)
 		{
@@ -185,8 +213,22 @@ R_StepActiveU (edge_t *pedge)
 			// find out where the edge goes in the edge list
 			pwedge = pedge->prev->prev;
 
+#ifdef __EMSCRIPTEN__
+			inner_iters = 0;
+#endif
 			while (pwedge->u > pedge->u)
 			{
+#ifdef __EMSCRIPTEN__
+				if (++inner_iters > 100000)
+				{
+					fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: inner loop stuck! "
+						"pwedge=%p pwedge->u=%d pedge=%p pedge->u=%d "
+						"edge_head=%p edge_head.u=%d\n",
+						(void *)pwedge, pwedge->u, (void *)pedge, pedge->u,
+						(void *)&edge_head, edge_head.u);
+					return;
+				}
+#endif
 				pwedge = pwedge->prev;
 			}
 
