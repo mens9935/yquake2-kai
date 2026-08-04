@@ -325,6 +325,11 @@ function writeAutoexec() {
 var bootedOnce = false;
 
 function bootEngine() {
+	// Temporary diagnostic, see also the matching one at the top of
+	// main() (backends/unix/main.c) -- chasing a report of the engine
+	// appearing to boot twice in one session.
+	console.log('[kaios] bootEngine() called, bootedOnce=' + bootedOnce);
+
 	// Never call Module.callMain() more than once, from wherever it
 	// might get triggered -- main() isn't designed to run twice in the
 	// same module instance, and it's a cheap, unconditional guard
@@ -381,6 +386,9 @@ function bootEngine() {
 // worth revisiting later (e.g. chunking the persisted write manually
 // instead of relying on IDBFS's own per-file sync).
 function start() {
+	// Temporary diagnostic, see the note by bootEngine().
+	console.log('[kaios] start() called, document.readyState=' + document.readyState);
+
 	installKeyHandlers();
 
 	if (!navigator.getDeviceStorage) {
