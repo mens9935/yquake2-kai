@@ -1608,6 +1608,26 @@ R_GammaCorrectAndSetPalette( const unsigned char *palette )
 	// Replace palette
 	for ( i = 0; i < 256; i++ )
 	{
+#ifdef __EMSCRIPTEN__
+		/* win_surface (see RE_InitContext) is SDL_PIXELFORMAT_BGR888
+		 * (fixed by Emscripten's SDL2 port), not the ARGB8888/
+		 * BGRA8888 the non-Emscripten SDL_Texture path below builds
+		 * this table for -- red and blue swap position (byte order
+		 * red,green,blue,X instead of blue,green,red,alpha) to match,
+		 * or every frame would render with red and blue channels
+		 * swapped. */
+		if (sw_state.currentpalette[i * 4 + 0] != sw_state.gammatable[palette[i * 4 + 0]] ||
+			sw_state.currentpalette[i * 4 + 1] != sw_state.gammatable[palette[i * 4 + 1]] ||
+			sw_state.currentpalette[i * 4 + 2] != sw_state.gammatable[palette[i * 4 + 2]])
+		{
+			sw_state.currentpalette[i * 4 + 0] = sw_state.gammatable[palette[i * 4 + 0]]; // red
+			sw_state.currentpalette[i * 4 + 1] = sw_state.gammatable[palette[i * 4 + 1]]; // green
+			sw_state.currentpalette[i * 4 + 2] = sw_state.gammatable[palette[i * 4 + 2]]; // blue
+
+			sw_state.currentpalette[i * 4 + 3] = 255; // unused (X in XBGR)
+			palette_changed = true;
+		}
+#else
 		if (sw_state.currentpalette[i * 4 + 0] != sw_state.gammatable[palette[i * 4 + 2]] ||
 			sw_state.currentpalette[i * 4 + 1] != sw_state.gammatable[palette[i * 4 + 1]] ||
 			sw_state.currentpalette[i * 4 + 2] != sw_state.gammatable[palette[i * 4 + 0]])
@@ -1619,6 +1639,7 @@ R_GammaCorrectAndSetPalette( const unsigned char *palette )
 			sw_state.currentpalette[i * 4 + 3] = 255; // alpha
 			palette_changed = true;
 		}
+#endif
 	}
 }
 
@@ -1775,6 +1796,54 @@ static SDL_Window	*window = NULL;
 static SDL_Texture	*texture = NULL;
 static SDL_Renderer	*renderer = NULL;
 
+#ifdef __EMSCRIPTEN__
+/* A real KaiOS device hung (never returned, no error) inside
+ * SDL_CreateRenderer() requesting SDL_RENDERER_ACCELERATED -- confirmed via
+ * KAIOS_DEBUG fprintf bracketing, see RE_InitContext(). Emscripten's SDL2
+ * port only registers a WebGL-backed renderer driver at all (confirmed
+ * separately: requesting SDL_RENDERER_SOFTWARE alone fails outright with
+ * "Couldn't find matching render driver" rather than falling back to a
+ * non-GL path), so there is no way to get a working SDL_Renderer on this
+ * device: accelerated hangs, software isn't offered.
+ *
+ * SDL_GetWindowSurface()/SDL_UpdateWindowSurface() is a separate, lower-
+ * level API that Emscripten's SDL2 port implements without touching WebGL
+ * at all (src/video/emscripten/SDL_emscriptenframebuffer.c calls
+ * Module.createContext(canvas, /* useWebGL *\/ false, true) and blits via
+ * plain Canvas2D putImageData). This engine already rasterizes everything
+ * itself in software into vid_buffer; what texture/renderer above did was
+ * just the final upload+blit to screen, which win_surface now does
+ * instead, keeping WebGL out of the picture entirely on this platform.
+ */
+static SDL_Surface	*win_surface = NULL;
+
+static int
+KaiOS_LockPixels(void **pixels, int *pitch)
+{
+	if (SDL_LockSurface(win_surface) < 0)
+	{
+		return -1;
+	}
+
+	*pixels = win_surface->pixels;
+	*pitch = win_surface->pitch;
+
+	return 0;
+}
+
+static void
+KaiOS_UnlockPixels(void)
+{
+	SDL_UnlockSurface(win_surface);
+}
+
+static void
+KaiOS_PresentPixels(void)
+{
+	SDL_UpdateWindowSurface(window);
+}
+#endif
+
 /*
 ============
 RE_SetSky
@@ -1876,6 +1945,15 @@ RE_Draw_StretchRawColor(int x, int y, int w, int h, int cols, int rows,
 		return;
 	}
 
+#ifndef __EMSCRIPTEN__
+	/* No SDL_Texture on Emscripten -- see RE_InitContext(). This whole
+	 * function is a fast-path optimization only (RE_Draw_StretchRaw()
+	 * above already wrote this frame's data into vid_buffer the normal
+	 * way); skipping it there just means every frame goes through the
+	 * ordinary RE_CopyFrame() palette-driven path in RE_FlushFrame()
+	 * below, instead of this raw 32-bit direct write.
+	 */
+
 	/* Full screen update should be faster */
 #ifdef USE_SDL3
 	if (!SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch))
@@ -1915,6 +1993,7 @@ RE_Draw_StretchRawColor(int x, int y, int w, int h, int cols, int rows,
 	SDL_UnlockTexture(texture);
 
 	texture_high_color = true;
+#endif /* !__EMSCRIPTEN__ */
 }
 
 /*
@@ -2007,6 +2086,24 @@ RE_InitContext(void *win)
 	snprintf(title, sizeof(title), "Yamagi Quake II %s - Soft Render", YQ2VERSION);
 	SDL_SetWindowTitle(window, title);
 
+#ifdef __EMSCRIPTEN__
+	/* win_surface replaces both renderer and texture below -- see the
+	 * big comment by its declaration for why: SDL_CreateRenderer() was
+	 * confirmed (via the KAIOS_DEBUG fprintfs this replaces) to hang
+	 * forever on a real KaiOS device when requesting
+	 * SDL_RENDERER_ACCELERATED, and SDL_RENDERER_SOFTWARE alone isn't
+	 * offered as a fallback by Emscripten's SDL2 port at all. */
+	win_surface = SDL_GetWindowSurface(window);
+	if (!win_surface)
+	{
+		Com_Printf("Can't get window surface: %s\n", SDL_GetError());
+		return false;
+	}
+
+	SDL_FillRect(win_surface, NULL,
+		SDL_MapRGB(win_surface->format, 0, 0, 0));
+	SDL_UpdateWindowSurface(window);
+#else
 	/* NOTE: on Emscripten, requesting SDL_RENDERER_SOFTWARE alone
 	 * fails outright ("Couldn't find matching render driver") --
 	 * tested and confirmed. Emscripten's SDL2 Renderer API (as
@@ -2017,15 +2114,9 @@ RE_InitContext(void *win)
 	 * goes through WebGL regardless. Left as upstream (try
 	 * accelerated, fall back to software) rather than a KaiOS-specific
 	 * path, since the software-only request doesn't work here at all.
+	 * (Moot on Emscripten now -- see win_surface above -- but this is
+	 * still how every other platform gets its SDL_Renderer.)
 	 */
-#ifdef __EMSCRIPTEN__
-	/* Temporary diagnostic: chasing a report of the engine hanging
-	 * (no more console output, no crash) right around here on a real
-	 * KaiOS device, immediately after "Real display mode: ...\n" --
-	 * narrow down which specific call it's stuck in. */
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: about to SDL_CreateRenderer\n");
-#endif
-
 	if (r_vsync->value)
 	{
 #ifdef USE_SDL3
@@ -2058,10 +2149,6 @@ RE_InitContext(void *win)
 		return false;
 	}
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: renderer created, about to clear+present\n");
-#endif
-
 	/* Select the color for drawing. It is set to black here. */
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
 
@@ -2071,10 +2158,7 @@ RE_InitContext(void *win)
 	/* Up until now everything was drawn behind the scenes.
 	   This will show the new, black contents of the window. */
 	SDL_RenderPresent(renderer);
-
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: presented, about to SDL_CreateTexture\n");
-#endif
+#endif /* __EMSCRIPTEN__ */
 
 #if SDL_VERSION_ATLEAST(2, 26, 0)
 	// Figure out if we are high dpi aware.
@@ -2099,6 +2183,7 @@ RE_InitContext(void *win)
 		vid_buffer_width = vid.width;
 	}
 
+#ifndef __EMSCRIPTEN__
 	/* just buffer for 8bit -> 32bit covert and render */
 	texture = SDL_CreateTexture(renderer,
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
@@ -2114,22 +2199,10 @@ RE_InitContext(void *win)
 		Com_Printf("Can't create texture: %s\n", SDL_GetError());
 		return false;
 	}
-
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: texture created, about to R_InitGraphics\n");
-#endif
+#endif /* !__EMSCRIPTEN__ */
 
 	R_InitGraphics(vid_buffer_width, vid_buffer_height);
-
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: R_InitGraphics done, about to SWimp_CreateRender\n");
-#endif
-
 	SWimp_CreateRender(vid_buffer_width, vid_buffer_height);
-
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: done\n");
-#endif
 
 	return true;
 }
@@ -2139,7 +2212,13 @@ RE_InitContext(void *win)
  */
 void RE_GetDrawableSize(int* width, int* height)
 {
-#ifdef USE_SDL3
+#ifdef __EMSCRIPTEN__
+	/* No SDL_Renderer on this platform -- see RE_InitContext(). The
+	 * window surface is always sized to match the window itself
+	 * (Emscripten_CreateWindowFramebuffer() calls SDL_GetWindowSize()
+	 * for its own dimensions), so this and SDL_GetWindowSize() agree. */
+	SDL_GetWindowSize(window, width, height);
+#elif defined(USE_SDL3)
 	SDL_GetCurrentRenderOutputSize(renderer, width, height);
 #else
 	SDL_GetRendererOutputSize(renderer, width, height);
@@ -2261,6 +2340,12 @@ RE_ShutdownContext(void)
 		SDL_DestroyRenderer(renderer);
 	}
 	renderer = NULL;
+
+#ifdef __EMSCRIPTEN__
+	/* Owned by the window (SDL_GetWindowSurface() docs: do not
+	 * SDL_FreeSurface() it) -- just drop the reference. */
+	win_surface = NULL;
+#endif
 }
 
 /*
@@ -2371,19 +2456,34 @@ RE_CleanFrame(void)
 	memset(swap_buffers, 0,
 		vid_buffer_height * vid_buffer_width * sizeof(pixel_t) * 2);
 
-#ifdef USE_SDL3
+#ifdef __EMSCRIPTEN__
+	if (KaiOS_LockPixels((void**)&pixels, &pitch) < 0)
+	{
+		Com_Printf("Can't lock window surface: %s\n", SDL_GetError());
+		return;
+	}
+#elif defined(USE_SDL3)
 	if (!SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch))
-#else
-	if (SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch))
-#endif
 	{
 		Com_Printf("Can't lock texture: %s\n", SDL_GetError());
 		return;
 	}
+#else
+	if (SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch))
+	{
+		Com_Printf("Can't lock texture: %s\n", SDL_GetError());
+		return;
+	}
+#endif
 
 	// only cleanup texture without flush texture to screen
 	memset(pixels, 0, pitch * vid_buffer_height);
+
+#ifdef __EMSCRIPTEN__
+	KaiOS_UnlockPixels();
+#else
 	SDL_UnlockTexture(texture);
+#endif
 
 	// All changes flushed
 	VID_NoDamageBuffer();
@@ -2427,28 +2527,54 @@ RE_FlushFrame(int vmin, int vmax)
 		rect.w = vid_buffer_width;
 		rect.h = vmax - vmin;
 
-#ifdef USE_SDL3
+#ifdef __EMSCRIPTEN__
+		if (KaiOS_LockPixels((void**)&pixels, &pitch) < 0)
+		{
+			Com_Printf("Can't lock window surface: %s\n", SDL_GetError());
+			return;
+		}
+
+		/* Unlike SDL_LockTexture(texture, &rect, ...), locking a
+		 * whole SDL_Surface always returns a pointer to its very
+		 * top-left corner rather than to the requested sub-rect --
+		 * there is no partial-lock equivalent for surfaces. Offset
+		 * it by hand so RE_CopyFrame() (which assumes pixels already
+		 * points at rect's top-left, matching the SDL_LockTexture
+		 * behavior every other call site here relies on) sees the
+		 * same thing either way. */
+		pixels = (Uint32 *)((byte *)pixels + rect.y * pitch);
+#elif defined(USE_SDL3)
 		if (!SDL_LockTexture(texture, &rect, (void**)&pixels, &pitch))
-#else
-		if (SDL_LockTexture(texture, &rect, (void**)&pixels, &pitch))
-#endif
 		{
 			Com_Printf("Can't lock texture: %s\n", SDL_GetError());
 			return;
 		}
+#else
+		if (SDL_LockTexture(texture, &rect, (void**)&pixels, &pitch))
+		{
+			Com_Printf("Can't lock texture: %s\n", SDL_GetError());
+			return;
+		}
+#endif
 
 		RE_CopyFrame(pixels, pitch / sizeof(Uint32), &rect);
 
+#ifdef __EMSCRIPTEN__
+		KaiOS_UnlockPixels();
+#else
 		SDL_UnlockTexture(texture);
+#endif
 	}
 
-#ifdef USE_SDL3
+#ifdef __EMSCRIPTEN__
+	KaiOS_PresentPixels();
+#elif defined(USE_SDL3)
 	SDL_RenderTexture(renderer, texture, NULL, NULL);
+	SDL_RenderPresent(renderer);
 #else
 	SDL_RenderCopy(renderer, texture, NULL, NULL);
-#endif
-
 	SDL_RenderPresent(renderer);
+#endif
 
 	// replace use next buffer
 	swap_current ++;
