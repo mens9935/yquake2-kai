@@ -84,23 +84,9 @@
 	<div class="bar"><div id="status-bar"></div></div>
 </div>
 
-<canvas id="canvas" width="240" height="320" oncontextmenu="event.preventDefault()"></canvas>
+<canvas id="canvas" width="240" height="320"></canvas>
 
-<script>
-	// Must exist before quake2-kaios.js runs (it checks
-	// "typeof Module !== 'undefined'" at the very top), even though that
-	// script itself is no longer loaded here -- app.js loads it
-	// dynamically, only once a baseq2 folder has been confirmed on the
-	// SD card, via loadEngineScripts(). noInitialRun stays on as
-	// defense in depth (see app.js's Module.callMain guard for the
-	// actual gate).
-	var Module = {
-		canvas: document.getElementById('canvas'),
-		noInitialRun: true,
-		print: function (text) { console.log('[q2] ' + text); },
-		printErr: function (text) { console.log('[q2!] ' + text); }
-	};
-</script>
+<script src="module-init.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

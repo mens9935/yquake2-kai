@@ -32,6 +32,14 @@ var statusTextEl = document.getElementById('status-text');
 var statusBarEl = document.getElementById('status-bar');
 var canvasEl = document.getElementById('canvas');
 
+// Used to be an inline oncontextmenu="..." attribute on the <canvas> tag
+// in index.html -- moved here for the same reason module-init.js exists:
+// privileged KaiOS apps' mandatory CSP silently drops inline scripts
+// *and* inline event handler attributes, so it never actually ran.
+canvasEl.addEventListener('contextmenu', function (ev) {
+	ev.preventDefault();
+});
+
 // ---------------------------------------------------------------------
 // KaiOS keypad -> Quake II key names
 // (names match keynames[] in src/client/cl_keyboard.c / bind syntax)
