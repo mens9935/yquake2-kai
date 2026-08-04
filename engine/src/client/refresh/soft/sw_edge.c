@@ -214,20 +214,24 @@ R_StepActiveU (edge_t *pedge)
 			pwedge = pedge->prev->prev;
 
 			/* edge_head is meant to be an unconditional sentinel (its
-			 * own ->prev is NULL, nothing before it) -- but this loop
-			 * only stops on sort order, trusting pedge->u to never sort
-			 * below edge_head.u. On a real device, at this project's
-			 * unusually small 240-wide viewport, an edge's u legitimately
-			 * went slightly negative (clipping right at the left screen
-			 * edge, not overflow) while edge_head.u was 0, so the search
-			 * walked straight past edge_head into its NULL ->prev.
-			 * Native builds would probably just segfault there and get
-			 * noticed; asm.js/wasm reads near address 0 without
-			 * trapping, so pwedge->u silently came back 0 and the loop
-			 * never terminated. Whatever upstream clipping produces that
-			 * slightly-out-of-bounds edge, edge_head can't stop being a
-			 * hard floor over it -- Com_Printf above already flags this
-			 * exact situation as recognized-but-previously-unhandled. */
+			 * own ->prev is NULL, nothing before it) -- but the initial
+			 * assignment above can land pwedge on NULL directly, without
+			 * ever going through the search loop below: that happens
+			 * exactly when pedge->prev == &edge_head, since edge_head.prev
+			 * is NULL by construction (the "Already in head." case just
+			 * above). On a real device, at this project's unusually small
+			 * 240-wide viewport, an edge's u legitimately went slightly
+			 * negative (clipping right at the left screen edge, not
+			 * overflow) while edge_head.u was 0, so this case is reached.
+			 * Native builds would probably just segfault dereferencing
+			 * pwedge->u below and get noticed; asm.js/wasm reads near
+			 * address 0 without trapping, so the read silently "succeeded"
+			 * and the loop never terminated. edge_head is a hard floor:
+			 * there's nowhere further back than it, so clamp straight to
+			 * it -- the edge belongs right after edge_head. */
+			if (!pwedge)
+				pwedge = &edge_head;
+
 			while (pwedge != &edge_head && pwedge->u > pedge->u)
 			{
 #ifdef __EMSCRIPTEN__
