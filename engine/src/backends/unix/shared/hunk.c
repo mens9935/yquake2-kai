@@ -116,7 +116,19 @@ Hunk_End(void)
 {
 	byte *n = NULL;
 
-#if defined(__linux__)
+#if defined(__EMSCRIPTEN__)
+	/* Emscripten's mmap()/munmap() are a shim over a plain heap
+	 * allocation, not real page-level virtual memory -- there's no
+	 * kernel to hand pages back to, it's all one contiguous typed
+	 * array either way. Shrinking a *portion* of a previously-mapped
+	 * block (exactly what every other branch below does) isn't
+	 * something that emulation supports: confirmed on a real device,
+	 * where the munmap() below reliably failed with errno 28 (ENOSPC)
+	 * the first time a map ever finished loading. Skip the shrink
+	 * attempt entirely -- membase already covers curhunksize, there's
+	 * nothing to actually reclaim here on this platform. */
+	n = membase;
+#elif defined(__linux__)
 	n = (byte *)mremap(membase, maxhunksize, curhunksize + sizeof(size_t), 0);
 #elif defined(__NetBSD__)
 	n = (byte *)mremap(membase, maxhunksize, NULL, curhunksize + sizeof(size_t), 0);
