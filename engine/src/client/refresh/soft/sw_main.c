@@ -2007,6 +2007,17 @@ RE_InitContext(void *win)
 	snprintf(title, sizeof(title), "Yamagi Quake II %s - Soft Render", YQ2VERSION);
 	SDL_SetWindowTitle(window, title);
 
+	/* NOTE: on Emscripten, requesting SDL_RENDERER_SOFTWARE alone
+	 * fails outright ("Couldn't find matching render driver") --
+	 * tested and confirmed. Emscripten's SDL2 Renderer API (as
+	 * opposed to the lower-level SDL_GetWindowSurface/
+	 * SDL_UpdateWindowSurface API, which does use plain Canvas2D
+	 * putImageData) apparently only registers one, WebGL-backed
+	 * driver, so this "software" 3D renderer's final on-screen blit
+	 * goes through WebGL regardless. Left as upstream (try
+	 * accelerated, fall back to software) rather than a KaiOS-specific
+	 * path, since the software-only request doesn't work here at all.
+	 */
 	if (r_vsync->value)
 	{
 #ifdef USE_SDL3
