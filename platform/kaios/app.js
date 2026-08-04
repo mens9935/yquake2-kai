@@ -210,8 +210,15 @@ function mkdirTreeFor(path) {
 // one more thing that can fail for no benefit, we already have exactly
 // the data we need.
 function copyBaseq2(files, root) {
+	// `root` is baseq2's *parent* directory, and is "" when baseq2 sits
+	// right at the SD card root -- root + '/' would then be just "/",
+	// which every single path on the card starts with, copying the
+	// whole card instead of just the baseq2 folder. Scope explicitly to
+	// ".../baseq2/" instead, which is correct whether root is empty or not.
+	var srcPrefix = root + '/' + GAMEDIR + '/';
+
 	var toCopy = files.filter(function (f) {
-		return ('/' + f.name.replace(/^\/+/, '')).indexOf(root + '/') === 0;
+		return ('/' + f.name.replace(/^\/+/, '')).indexOf(srcPrefix) === 0;
 	});
 
 	var i = 0;
@@ -220,7 +227,7 @@ function copyBaseq2(files, root) {
 			return Promise.resolve();
 		}
 		var file = toCopy[i];
-		var rel = ('/' + file.name.replace(/^\/+/, '')).slice(root.length + 1);
+		var rel = ('/' + file.name.replace(/^\/+/, '')).slice(srcPrefix.length);
 		var dest = '/' + GAMEDIR + '/' + rel;
 
 		setStatus('Copying ' + rel, i / toCopy.length);
