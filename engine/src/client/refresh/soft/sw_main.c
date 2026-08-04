@@ -2018,6 +2018,14 @@ RE_InitContext(void *win)
 	 * accelerated, fall back to software) rather than a KaiOS-specific
 	 * path, since the software-only request doesn't work here at all.
 	 */
+#ifdef __EMSCRIPTEN__
+	/* Temporary diagnostic: chasing a report of the engine hanging
+	 * (no more console output, no crash) right around here on a real
+	 * KaiOS device, immediately after "Real display mode: ...\n" --
+	 * narrow down which specific call it's stuck in. */
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: about to SDL_CreateRenderer\n");
+#endif
+
 	if (r_vsync->value)
 	{
 #ifdef USE_SDL3
@@ -2050,6 +2058,10 @@ RE_InitContext(void *win)
 		return false;
 	}
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: renderer created, about to clear+present\n");
+#endif
+
 	/* Select the color for drawing. It is set to black here. */
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
 
@@ -2059,6 +2071,10 @@ RE_InitContext(void *win)
 	/* Up until now everything was drawn behind the scenes.
 	   This will show the new, black contents of the window. */
 	SDL_RenderPresent(renderer);
+
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: presented, about to SDL_CreateTexture\n");
+#endif
 
 #if SDL_VERSION_ATLEAST(2, 26, 0)
 	// Figure out if we are high dpi aware.
@@ -2099,8 +2115,21 @@ RE_InitContext(void *win)
 		return false;
 	}
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: texture created, about to R_InitGraphics\n");
+#endif
+
 	R_InitGraphics(vid_buffer_width, vid_buffer_height);
+
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: R_InitGraphics done, about to SWimp_CreateRender\n");
+#endif
+
 	SWimp_CreateRender(vid_buffer_width, vid_buffer_height);
+
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: done\n");
+#endif
 
 	return true;
 }
