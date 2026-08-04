@@ -469,6 +469,26 @@ function loadScript(src) {
 	});
 }
 
+// Resolves once Emscripten's own runtime (including the asm.js module
+// itself -- Module.asm) has finished its own async instantiation.
+//
+// Found the hard way: with noInitialRun actually working for the first
+// time (module-init.js), Module.callMain([]) below started throwing
+// "TypeError: Module.asm is undefined" instead of ever reaching main().
+// In every earlier round noInitialRun had been silently inert (CSP was
+// dropping the inline <script> that set it -- see module-init.js), so
+// Emscripten's own run()/doRun() -- which only calls callMain() once
+// runDependencies hits 0, i.e. once the asm.js module is actually ready
+// -- was firing main() on its own before our explicit call ever got a
+// chance to race ahead of it. Now that that accidental synchronization
+// is gone, this call has to wait for the same readiness signal doRun()
+// itself waits for: Module.onRuntimeInitialized, called unconditionally
+// once initRuntime()/preMain() finish, regardless of noInitialRun.
+var runtimeReadyResolve;
+var runtimeReadyPromise = new Promise(function (resolve) {
+	runtimeReadyResolve = resolve;
+});
+
 function loadEngineScripts() {
 	if (engineScriptsLoaded) {
 		return Promise.resolve();
@@ -478,38 +498,26 @@ function loadEngineScripts() {
 	}).then(function () {
 		engineScriptsLoaded = true;
 
+		if (Module.calledRun) {
+			// Already ready by the time we got here -- no event left to wait for.
+			runtimeReadyResolve();
+		} else {
+			Module.onRuntimeInitialized = runtimeReadyResolve;
+		}
+
 		// Physically disarm Module.callMain() (only just defined by the
 		// script that just loaded) until bootEngine() explicitly arms it,
 		// after copyBaseq2() confirms the FS is actually populated. Any
 		// call that sneaks in before that logs a stack trace instead of
-		// quietly running main() over an empty filesystem -- which, if it
-		// still happens even with scripts loaded this late, finally pins
-		// down where it's coming from.
+		// quietly running main() over an empty filesystem.
 		var realCallMain = Module.callMain;
-
-		// Temporary diagnostic: chasing a report that this call stopped
-		// producing any output at all (not even the C side's first-line
-		// "main() entered" fprintf) once noInitialRun started actually
-		// working (see module-init.js) -- confirm realCallMain is a real
-		// function before wrapping it.
-		console.log('[kaios] loadEngineScripts: typeof Module.callMain (pre-wrap) = ' + (typeof realCallMain));
-
 		Module.callMain = function (args) {
-			console.log('[kaios] Module.callMain wrapper invoked, callMainArmed=' + callMainArmed);
 			if (!callMainArmed) {
 				console.log('[kaios] BLOCKED premature Module.callMain() -- ' +
 					'baseq2 is not mounted yet.\n' + (new Error().stack || '(no stack)'));
 				return;
 			}
-			console.log('[kaios] about to call realCallMain, typeof=' + (typeof realCallMain));
-			try {
-				var ret = realCallMain.call(Module, args);
-				console.log('[kaios] realCallMain returned: ' + ret);
-				return ret;
-			} catch (e) {
-				console.log('[kaios] realCallMain THREW: ' + e + '\n' + (e && e.stack));
-				throw e;
-			}
+			return realCallMain.call(Module, args);
 		};
 	});
 }
@@ -579,13 +587,17 @@ function bootEngine() {
 	// Only past this point is Module.callMain() allowed to actually do
 	// anything -- see the guard installed at the top of this file.
 	callMainArmed = true;
-	// NOTE: this emsdk version's callMain() ignores its args entirely
-	// (hardcodes argc=0) -- and "vid_width"/"vid_height" were never
-	// real cvars here anyway (r_customwidth/r_customheight are, see
-	// autoexec.cfg, which is what actually sets the resolution).
-	console.log('[kaios] bootEngine: about to call Module.callMain([]), typeof=' + (typeof Module.callMain));
-	Module.callMain([]);
-	console.log('[kaios] bootEngine: Module.callMain([]) call returned');
+
+	// Wait for Module.asm (and the rest of the runtime) to actually be
+	// ready -- see runtimeReadyPromise's comment above for why this is
+	// necessary now and wasn't before.
+	runtimeReadyPromise.then(function () {
+		// NOTE: this emsdk version's callMain() ignores its args entirely
+		// (hardcodes argc=0) -- and "vid_width"/"vid_height" were never
+		// real cvars here anyway (r_customwidth/r_customheight are, see
+		// autoexec.cfg, which is what actually sets the resolution).
+		Module.callMain([]);
+	});
 }
 
 // ---------------------------------------------------------------------
