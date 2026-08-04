@@ -89,6 +89,30 @@ function installKeyHandlers() {
 // Device Storage: find candidate baseq2 folders on the SD card
 // ---------------------------------------------------------------------
 
+// DOMError (used by the B2G/KaiOS Device Storage API for enumerate()
+// failures) doesn't override toString() the way Error does, so
+// '' + err on one gives the useless "[object DOMError]" -- pull out
+// .name/.message by hand instead.
+function describeError(err) {
+	if (err && (err.name || err.message)) {
+		return (err.name || 'Error') + (err.message ? ': ' + err.message : '');
+	}
+	return String(err);
+}
+
+// Blob.prototype.arrayBuffer() is a fairly recent addition (Firefox 69,
+// 2019) that KaiOS 2.5's Gecko-48-class engine predates and almost
+// certainly doesn't have -- read files the old, universally-supported
+// way instead.
+function readFileAsArrayBuffer(file) {
+	return new Promise(function (resolve, reject) {
+		var reader = new FileReader();
+		reader.onload = function () { resolve(reader.result); };
+		reader.onerror = function () { reject(reader.error); };
+		reader.readAsArrayBuffer(file);
+	});
+}
+
 function enumerateStorage(storage, path) {
 	return new Promise(function (resolve, reject) {
 		var files = [];
@@ -181,32 +205,34 @@ function mkdirTreeFor(path) {
 	}
 }
 
-function copyBaseq2(storage, root) {
-	return enumerateStorage(storage, root.replace(/^\//, '')).then(function (files) {
-		var toCopy = files.filter(function (f) {
-			return ('/' + f.name.replace(/^\/+/, '')).indexOf(root + '/') === 0;
-		});
-
-		var i = 0;
-		function next() {
-			if (i >= toCopy.length) {
-				return Promise.resolve();
-			}
-			var file = toCopy[i];
-			var rel = ('/' + file.name.replace(/^\/+/, '')).slice(root.length + 1);
-			var dest = '/' + GAMEDIR + '/' + rel;
-
-			setStatus('Copying ' + rel, i / toCopy.length);
-
-			return file.arrayBuffer().then(function (buf) {
-				mkdirTreeFor(dest);
-				FS.writeFile(dest, new Uint8Array(buf));
-				i++;
-				return next();
-			});
-		}
-		return next();
+// `files` is the full listing already fetched by the top-level scan in
+// start() -- no need to enumerate() the storage a second time, that's
+// one more thing that can fail for no benefit, we already have exactly
+// the data we need.
+function copyBaseq2(files, root) {
+	var toCopy = files.filter(function (f) {
+		return ('/' + f.name.replace(/^\/+/, '')).indexOf(root + '/') === 0;
 	});
+
+	var i = 0;
+	function next() {
+		if (i >= toCopy.length) {
+			return Promise.resolve();
+		}
+		var file = toCopy[i];
+		var rel = ('/' + file.name.replace(/^\/+/, '')).slice(root.length + 1);
+		var dest = '/' + GAMEDIR + '/' + rel;
+
+		setStatus('Copying ' + rel, i / toCopy.length);
+
+		return readFileAsArrayBuffer(file).then(function (buf) {
+			mkdirTreeFor(dest);
+			FS.writeFile(dest, new Uint8Array(buf));
+			i++;
+			return next();
+		});
+	}
+	return next();
 }
 
 function writeAutoexec() {
@@ -268,8 +294,8 @@ function start() {
 
 		function proceed(choice) {
 			setStatus('Copying baseq2...', 0);
-			copyBaseq2(storage, choice.root).then(bootEngine, function (err) {
-				setStatus('Copy failed: ' + err);
+			copyBaseq2(files, choice.root).then(bootEngine, function (err) {
+				setStatus('Copy failed: ' + describeError(err));
 			});
 		}
 
@@ -281,7 +307,7 @@ function start() {
 			showPicker(candidates, proceed);
 		}
 	}, function (err) {
-		setStatus('Could not scan SD card: ' + err);
+		setStatus('Could not scan SD card: ' + describeError(err));
 	});
 }
 
