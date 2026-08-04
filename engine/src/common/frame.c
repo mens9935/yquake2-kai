@@ -437,6 +437,17 @@ Qcommon_Init(int argc, char **argv)
 	// Everythings up, let's add + cmds from command line.
 	if (!Cbuf_AddLateCommands())
 	{
+#if defined(__EMSCRIPTEN__) && !defined(DEDICATED_ONLY)
+		/* Skip the "d1" demo loop (intro cinematic + demos/demo1.dm2)
+		 * entirely: it's not something a phone player wants to sit
+		 * through, and not every baseq2 install includes the bonus
+		 * demo/cinematic files in the first place (many modern
+		 * trimmed re-releases don't) -- trying to play a missing demo
+		 * drives the client through a reconnect/map-change sequence
+		 * that was crashing here. Just drop straight to the main menu,
+		 * same as when the user passed an explicit +command. */
+		SCR_EndLoadingPlaque();
+#else
 		if (!dedicated->value)
 		{
 			// Start demo loop...
@@ -449,6 +460,7 @@ Qcommon_Init(int argc, char **argv)
 		}
 
 		Cbuf_Execute();
+#endif /* __EMSCRIPTEN__ */
 	}
 #ifndef DEDICATED_ONLY
 	else
