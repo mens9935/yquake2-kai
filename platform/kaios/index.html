@@ -88,8 +88,12 @@
 
 <script>
 	// Must exist before quake2-kaios.js runs (it checks
-	// "typeof Module !== 'undefined'" at the very top). noInitialRun
-	// holds off main() until app.js has copied baseq2 into the FS.
+	// "typeof Module !== 'undefined'" at the very top), even though that
+	// script itself is no longer loaded here -- app.js loads it
+	// dynamically, only once a baseq2 folder has been confirmed on the
+	// SD card, via loadEngineScripts(). noInitialRun stays on as
+	// defense in depth (see app.js's Module.callMain guard for the
+	// actual gate).
 	var Module = {
 		canvas: document.getElementById('canvas'),
 		noInitialRun: true,
@@ -97,8 +101,6 @@
 		printErr: function (text) { console.log('[q2!] ' + text); }
 	};
 </script>
-<script src="quake2-kaios.js"></script>
-<script src="autoexec.cfg.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

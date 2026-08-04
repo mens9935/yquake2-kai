@@ -22,33 +22,6 @@
 (function () {
 'use strict';
 
-// Hard gate on top of noInitialRun (set in index.html): a real device
-// showed the engine's C main() running -- and failing on missing FS data
-// -- *before* our own JS ever called Module.callMain() (bootEngine()'s own
-// unconditional entry log did not appear before that first failure).
-// Nothing in this codebase's C source or the compiled glue (checked:
-// Sys_Error/Com_Error's exit() path unwinds cleanly rather than
-// restarting anything, calledRun guards run()/doRun() against firing
-// twice, no onExit/EM_ASM restart hook exists anywhere) explains a
-// legitimate second call, so whatever's triggering it isn't identified
-// yet. Rather than trust noInitialRun alone, physically disarm
-// Module.callMain() here -- before anything else in this file runs --
-// and only arm it in bootEngine(), after copyBaseq2() has confirmed the
-// FS is actually populated. Any call that sneaks in before that now
-// logs a stack trace instead of quietly running main() over an empty
-// filesystem, which also finally pins down *where* it's coming from if
-// it happens again.
-var callMainArmed = false;
-var realCallMain = Module.callMain;
-Module.callMain = function (args) {
-	if (!callMainArmed) {
-		console.log('[kaios] BLOCKED premature Module.callMain() -- ' +
-			'baseq2 is not mounted yet.\n' + (new Error().stack || '(no stack)'));
-		return;
-	}
-	return realCallMain.call(Module, args);
-};
-
 var GAMEDIR = 'baseq2';
 var PAK_MARKER = '/' + GAMEDIR + '/pak0.pak';
 
@@ -459,6 +432,63 @@ function copyBaseq2(files, root) {
 	return next();
 }
 
+// The compiled engine (quake2-kaios.js, ~3MB, plus its .mem file) and its
+// generated autoexec.cfg.js used to load as static <script> tags before
+// app.js even started scanning the SD card -- meaning they'd start
+// running, and quake2-kaios.js's own top-level run()/doRun() sequence
+// would resolve, before we'd even confirmed a baseq2 folder exists, let
+// alone copied anything into it. A real device showed the engine's C
+// main() executing -- and failing on missing FS data -- before our own
+// JS had called Module.callMain() at all, consistent with exactly that
+// ordering (root mechanism still unconfirmed; see the guard this
+// installs below). Loading these scripts on demand, only once a baseq2
+// folder is confirmed and we're about to copy it in, closes that gap
+// instead of just hoping noInitialRun and script tag order cover it.
+//
+// FS/MEMFS (used by copyBaseq2 above) and Module.callMain (used by
+// bootEngine below) don't exist until quake2-kaios.js has actually run,
+// so nothing that touches them can happen before this resolves.
+var callMainArmed = false;
+var engineScriptsLoaded = false;
+
+function loadScript(src) {
+	return new Promise(function (resolve, reject) {
+		var el = document.createElement('script');
+		el.src = src;
+		el.onload = function () { resolve(); };
+		el.onerror = function () { reject(new Error('Failed to load ' + src)); };
+		document.body.appendChild(el);
+	});
+}
+
+function loadEngineScripts() {
+	if (engineScriptsLoaded) {
+		return Promise.resolve();
+	}
+	return loadScript('quake2-kaios.js').then(function () {
+		return loadScript('autoexec.cfg.js');
+	}).then(function () {
+		engineScriptsLoaded = true;
+
+		// Physically disarm Module.callMain() (only just defined by the
+		// script that just loaded) until bootEngine() explicitly arms it,
+		// after copyBaseq2() confirms the FS is actually populated. Any
+		// call that sneaks in before that logs a stack trace instead of
+		// quietly running main() over an empty filesystem -- which, if it
+		// still happens even with scripts loaded this late, finally pins
+		// down where it's coming from.
+		var realCallMain = Module.callMain;
+		Module.callMain = function (args) {
+			if (!callMainArmed) {
+				console.log('[kaios] BLOCKED premature Module.callMain() -- ' +
+					'baseq2 is not mounted yet.\n' + (new Error().stack || '(no stack)'));
+				return;
+			}
+			return realCallMain.call(Module, args);
+		};
+	});
+}
+
 function writeAutoexec() {
 	var text = window.KAIOS_AUTOEXEC_CFG || '';
 	if (!text) {
@@ -577,8 +607,11 @@ function start() {
 		}
 
 		function proceed(choice) {
-			setStatus('Copying baseq2...', 0);
-			copyBaseq2(files, choice.root).then(bootEngine, function (err) {
+			setStatus('Loading engine...', 0);
+			loadEngineScripts().then(function () {
+				setStatus('Copying baseq2...', 0);
+				return copyBaseq2(files, choice.root);
+			}).then(bootEngine, function (err) {
 				setStatus('Copy failed: ' + describeError(err));
 			});
 		}
