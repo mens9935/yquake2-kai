@@ -271,7 +271,11 @@ function bootEngine() {
 	canvasEl.style.display = 'block';
 
 	engineStarted = true;
-	Module.callMain(['+set', 'vid_width', '240', '+set', 'vid_height', '320']);
+	// NOTE: this emsdk version's callMain() ignores its args entirely
+	// (hardcodes argc=0) -- and "vid_width"/"vid_height" were never
+	// real cvars here anyway (r_customwidth/r_customheight are, see
+	// autoexec.cfg, which is what actually sets the resolution).
+	Module.callMain([]);
 }
 
 // ---------------------------------------------------------------------

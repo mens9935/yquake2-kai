@@ -742,5 +742,8 @@ R_ShutdownImages (void)
 	}
 
 	if (d_16to8table)
+	{
 		free(d_16to8table);
+		d_16to8table = NULL;
+	}
 }
