@@ -263,7 +263,35 @@ function writeAutoexec() {
 	} catch (e) { console.log('[kaios] ' + e); }
 }
 
+var bootedOnce = false;
+
 function bootEngine() {
+	// Never call Module.callMain() more than once, from wherever it
+	// might get triggered -- main() isn't designed to run twice in the
+	// same module instance, and it's a cheap, unconditional guard
+	// against any surprise re-entry (e.g. a host runtime that keeps
+	// this page's JS context alive and re-drives it instead of doing a
+	// full reload) calling in with a still-in-progress copy.
+	if (bootedOnce) {
+		return;
+	}
+	bootedOnce = true;
+
+	// Last-ditch sanity check: don't start the engine over data that
+	// isn't actually there. Cheap (just a stat, not a read) and turns
+	// "boots into a wall of missing-file errors" into a clear message.
+	try {
+		var st = FS.stat('/' + GAMEDIR + '/pak0.pak');
+		if (!st || st.size <= 0) {
+			throw new Error('pak0.pak is empty or missing');
+		}
+	} catch (e) {
+		setStatus('baseq2 data is missing or incomplete (' + describeError(e) + ').\n' +
+			'Reopen the app to retry.');
+		bootedOnce = false;
+		return;
+	}
+
 	setStatus('Starting...', 1);
 	writeAutoexec();
 
@@ -279,6 +307,54 @@ function bootEngine() {
 }
 
 // ---------------------------------------------------------------------
+// Persistent storage: copying baseq2 (easily 100+MB) off the SD card
+// is slow, so it should only happen once. IDBFS mounts /baseq2 on top
+// of IndexedDB, which survives across launches (unlike plain MEMFS,
+// which is purely in-memory and gone the moment the page/worker dies).
+// ---------------------------------------------------------------------
+
+var IDB_ROOT = '/' + GAMEDIR;
+
+function initPersistentStorage() {
+	return new Promise(function (resolve) {
+		try {
+			try { FS.mkdir(IDB_ROOT); } catch (e) { /* already exists */ }
+			FS.mount(IDBFS, {}, IDB_ROOT);
+			FS.syncfs(true, function (err) {
+				if (err) {
+					console.log('[kaios] IDBFS load failed, continuing without persistence: ' +
+						describeError(err));
+				}
+				resolve();
+			});
+		} catch (e) {
+			console.log('[kaios] IDBFS unavailable, continuing without persistence: ' +
+				describeError(e));
+			resolve();
+		}
+	});
+}
+
+function persistToIDB() {
+	return new Promise(function (resolve) {
+		FS.syncfs(false, function (err) {
+			if (err) {
+				console.log('[kaios] IDBFS save failed: ' + describeError(err));
+			}
+			resolve();
+		});
+	});
+}
+
+function cachedPak0Size() {
+	try {
+		return FS.stat(IDB_ROOT + '/pak0.pak').size;
+	} catch (e) {
+		return -1;
+	}
+}
+
+// ---------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------
 
@@ -291,34 +367,54 @@ function start() {
 		return;
 	}
 
-	var storage = navigator.getDeviceStorage('sdcard');
-	setStatus('Scanning SD card for baseq2...');
+	setStatus('Loading...');
 
-	enumerateStorage(storage, '').then(function (files) {
-		var candidates = findBaseq2Candidates(files);
+	initPersistentStorage().then(function () {
+		var storage = navigator.getDeviceStorage('sdcard');
+		setStatus('Scanning SD card for baseq2...');
 
-		if (candidates.length === 0) {
-			setStatus('No baseq2/pak0.pak found on the SD card.\n' +
-				'Copy your baseq2 folder to the SD card and reopen the app.');
-			return;
-		}
+		return enumerateStorage(storage, '').then(function (files) {
+			var candidates = findBaseq2Candidates(files);
 
-		function proceed(choice) {
-			setStatus('Copying baseq2...', 0);
-			copyBaseq2(files, choice.root).then(bootEngine, function (err) {
-				setStatus('Copy failed: ' + describeError(err));
-			});
-		}
+			if (candidates.length === 0) {
+				setStatus('No baseq2/pak0.pak found on the SD card.\n' +
+					'Copy your baseq2 folder to the SD card and reopen the app.');
+				return;
+			}
 
-		if (candidates.length === 1) {
-			proceed(candidates[0]);
-		} else {
-			pickerEl.style.display = 'block';
-			statusEl.style.display = 'none';
-			showPicker(candidates, proceed);
-		}
-	}, function (err) {
-		setStatus('Could not scan SD card: ' + describeError(err));
+			function proceed(choice) {
+				// Cheap freshness check: compare the SD card's current
+				// pak0.pak size (already known from the scan, no extra
+				// read) against whatever's cached from a previous run.
+				// A match is a good enough signal to skip a slow full
+				// re-copy on every single launch -- and a fixed/updated
+				// baseq2 on the SD card (different size) is picked up
+				// automatically next launch, no manual cache-clear step
+				// needed.
+				var sdSize = choice.file.size;
+				if (sdSize > 0 && sdSize === cachedPak0Size()) {
+					bootEngine();
+					return;
+				}
+
+				setStatus('Copying baseq2...', 0);
+				copyBaseq2(files, choice.root)
+					.then(persistToIDB)
+					.then(bootEngine, function (err) {
+						setStatus('Copy failed: ' + describeError(err));
+					});
+			}
+
+			if (candidates.length === 1) {
+				proceed(candidates[0]);
+			} else {
+				pickerEl.style.display = 'block';
+				statusEl.style.display = 'none';
+				showPicker(candidates, proceed);
+			}
+		}, function (err) {
+			setStatus('Could not scan SD card: ' + describeError(err));
+		});
 	});
 }
 
