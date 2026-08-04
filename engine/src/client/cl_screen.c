@@ -1758,7 +1758,13 @@ SCR_UpdateScreen(void)
 			/* clear any dirty part of the background */
 			SCR_TileClear();
 
+#ifdef __EMSCRIPTEN__
+			fprintf(stderr, "KAIOS_DEBUG: SCR_UpdateScreen: about to V_RenderView\n");
+#endif
 			V_RenderView(separation[i]);
+#ifdef __EMSCRIPTEN__
+			fprintf(stderr, "KAIOS_DEBUG: SCR_UpdateScreen: V_RenderView done\n");
+#endif
 
 			SCR_DrawStats();
 			SCR_DrawSpeed();

@@ -914,7 +914,13 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 
 		if (!cl.refresh_prepped && (cls.state == ca_active))
 		{
+#ifdef __EMSCRIPTEN__
+			fprintf(stderr, "KAIOS_DEBUG: CL_Frame: about to CL_PrepRefresh\n");
+#endif
 			CL_PrepRefresh();
+#ifdef __EMSCRIPTEN__
+			fprintf(stderr, "KAIOS_DEBUG: CL_Frame: CL_PrepRefresh done\n");
+#endif
 		}
 
 		/* update the screen */
@@ -923,7 +929,14 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 			time_before_ref = Sys_Milliseconds();
 		}
 
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: CL_Frame: about to SCR_UpdateScreen (refresh_prepped=%d)\n",
+			cl.refresh_prepped);
+#endif
 		SCR_UpdateScreen();
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: CL_Frame: SCR_UpdateScreen done\n");
+#endif
 
 		if (host_speeds->value)
 		{
@@ -931,7 +944,13 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 		}
 
 		/* update audio */
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: CL_Frame: about to S_Update\n");
+#endif
 		S_Update(cl.refdef.vieworg, cl.v_forward, cl.v_right, cl.v_up);
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: CL_Frame: S_Update done\n");
+#endif
 
 		/* advance local effects for next frame */
 		CL_RunDLights();
