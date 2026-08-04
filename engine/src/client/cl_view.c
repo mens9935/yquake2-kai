@@ -493,12 +493,22 @@ V_RenderView(float stereo_separation)
 	{
 		cl.force_refdef = false;
 
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: V_RenderView: about to V_ClearScene\n");
+#endif
 		V_ClearScene();
 
 		/* build a refresh entity list and calc cl.sim*
 		   this also calls CL_CalcViewValues which loads
 		   v_forward, etc. */
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: V_RenderView: about to CL_AddEntities\n");
+#endif
 		CL_AddEntities();
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: V_RenderView: CL_AddEntities done, numentities=%d\n",
+			r_numentities);
+#endif
 
 		// before changing viewport we should trace the crosshair position
 		V_Render3dCrosshair();
@@ -579,9 +589,16 @@ V_RenderView(float stereo_separation)
 		cl.refdef.rdflags = cl.frame.playerstate.rdflags;
 
 		/* sort entities for better cache locality */
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: V_RenderView: about to qsort %d entities\n",
+			cl.refdef.num_entities);
+#endif
 		qsort(cl.refdef.entities, cl.refdef.num_entities,
 				sizeof(cl.refdef.entities[0]), (int (*)(const void *, const void *))
 				entitycmpfnc);
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: V_RenderView: qsort done\n");
+#endif
 	} else if (cl.frame.valid && cl_paused->value && gl1_stereo->value) {
 		// We need to adjust the refdef in stereo mode when paused.
 		vec3_t tmp;
@@ -603,7 +620,13 @@ V_RenderView(float stereo_separation)
 	cl.refdef.fov_y = CalcFov(cl.refdef.fov_x, (float)cl.refdef.width,
 				(float)cl.refdef.height);
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: V_RenderView: about to R_RenderFrame\n");
+#endif
 	R_RenderFrame(&cl.refdef);
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: V_RenderView: R_RenderFrame done\n");
+#endif
 
 	if (cl_stats->value)
 	{

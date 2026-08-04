@@ -1376,15 +1376,24 @@ RE_RenderFrame(refdef_t *fd)
 	if (r_speeds->value || r_dspeeds->value)
 		r_time1 = SDL_GetTicks();
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_SetupFrame\n");
+#endif
 	R_SetupFrame ();
 
 	R_SetFrustum(vup, vpn, vright, r_origin, r_newrefdef.fov_x, r_newrefdef.fov_y,
 		frustum);
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_MarkLeaves\n");
+#endif
 	// Using the current view cluster (r_viewcluster), retrieve and decompress
 	// the PVS (Potentially Visible Set)
 	R_MarkLeaves();	// done here so we know if we're in water
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_PushDlights\n");
+#endif
 	// For each dlight_t* passed via r_newrefdef.dlights, mark polygons affected by a light.
 	R_PushDlights(r_worldmodel);
 
@@ -1393,9 +1402,15 @@ RE_RenderFrame(refdef_t *fd)
 	memset(&ent, 0, sizeof(ent));
 	ent.frame = (int)(r_newrefdef.time * 2);
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_EdgeDrawing\n");
+#endif
 	// Build the Global Edge Table and render it via the Active Edge Table
 	// Render the map
 	R_EdgeDrawing (&ent);
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: R_EdgeDrawing done\n");
+#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1415,7 +1430,14 @@ RE_RenderFrame(refdef_t *fd)
 	}
 	// Draw enemies, barrel etc...
 	// Use Z-Buffer mostly in read mode only.
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_DrawEntitiesOnList, numentities=%d\n",
+		r_newrefdef.num_entities);
+#endif
 	R_DrawEntitiesOnList();
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: R_DrawEntitiesOnList done\n");
+#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1424,7 +1446,13 @@ RE_RenderFrame(refdef_t *fd)
 	}
 
 	// Duh !
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_DrawParticles\n");
+#endif
 	R_DrawParticles();
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: R_DrawParticles done\n");
+#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1450,6 +1478,9 @@ RE_RenderFrame(refdef_t *fd)
 
 	// Modify the palette (when taking hit or pickup item) so all colors are modified
 	R_CalcPalette ();
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: reached end\n");
+#endif
 
 	if (sw_aliasstats->value)
 	{
