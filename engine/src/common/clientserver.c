@@ -292,6 +292,22 @@ Com_Error(int code, const char *fmt, ...)
 		logfile = NULL;
 	}
 
+#ifdef __EMSCRIPTEN__
+	/* On every other platform Sys_Error() below calls exit(1) and the
+	 * process genuinely dies, so "recursive" staying true forever
+	 * doesn't matter -- nothing reads it again. Emscripten's asm.js
+	 * runtime doesn't tear down after exit() (EXIT_RUNTIME=0, needed
+	 * to keep the JS environment alive for async callbacks), and
+	 * something can end up re-entering main() later in the same JS
+	 * module instance, where this being a C static means it's still
+	 * sitting at true from the very first fatal error of the session.
+	 * Every later error, however minor and normally recoverable (even
+	 * a plain ERR_DROP for a missing map), was then getting force-
+	 * escalated into this same "recursive error after: <stale first
+	 * error>" hard crash instead of a graceful drop back to the menu. */
+	recursive = false;
+#endif
+
 	Sys_Error("%s", msg);
 	recursive = false;
 }
