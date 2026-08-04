@@ -218,17 +218,35 @@ function installLazyPakFile(dest, file) {
 			}
 			var end = Math.min(position + length, file.size);
 			var size = end - position;
+			var slice = file.slice(position, end);
 
-			var url = URL.createObjectURL(file.slice(position, end));
-			var bytes;
-			try {
-				var xhr = new XMLHttpRequest();
-				xhr.overrideMimeType('text/plain; charset=x-user-defined');
-				xhr.open('GET', url, false);
-				xhr.send(null);
-				bytes = xhr.responseText;
-			} finally {
-				URL.revokeObjectURL(url);
+			// One retry on failure: a real device was seen to have this
+			// read fail on its *second* use in a session while the very
+			// first use (moments earlier) succeeded -- suggestive of a
+			// one-off cold-start hiccup in the browser's sync-XHR/blob-URL
+			// machinery rather than a real, repeatable fault. A single
+			// retry is cheap and turns a transient hiccup into a stall
+			// instead of a fatal engine error; a genuinely broken read
+			// still fails after the retry same as before.
+			var bytes, lastErr;
+			for (var attempt = 0; attempt < 2; attempt++) {
+				var url = URL.createObjectURL(slice);
+				try {
+					var xhr = new XMLHttpRequest();
+					xhr.overrideMimeType('text/plain; charset=x-user-defined');
+					xhr.open('GET', url, false);
+					xhr.send(null);
+					bytes = xhr.responseText;
+					lastErr = null;
+					break;
+				} catch (e) {
+					lastErr = e;
+				} finally {
+					URL.revokeObjectURL(url);
+				}
+			}
+			if (lastErr) {
+				throw lastErr;
 			}
 
 			var n = Math.min(bytes.length, size);
@@ -547,10 +565,19 @@ function start() {
 	});
 }
 
-if (document.readyState === 'loading') {
-	document.addEventListener('DOMContentLoaded', start);
-} else {
+// Wait for the full 'load' event, not just DOMContentLoaded/'interactive'.
+// installLazyPakFile()'s read() is the first thing in this app that does a
+// synchronous XHR against a blob: URL, and on a real device it was seen to
+// fail on its *second* use later in the session (see the "recursive
+// shutdown" / pics/16to8.dat comment in FS_SetGamedir(), filesystem.c)
+// while succeeding on the very first use moments after DOMContentLoaded --
+// consistent with that machinery not being fully settled that early in a
+// KaiOS webview. Waiting for 'load' costs nothing (there's nothing else on
+// this page to finish loading) and removes that variable entirely.
+if (document.readyState === 'complete') {
 	start();
+} else {
+	window.addEventListener('load', start);
 }
 
 })();
