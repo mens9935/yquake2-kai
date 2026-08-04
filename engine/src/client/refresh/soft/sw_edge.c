@@ -650,6 +650,10 @@ R_ScanEdges (entity_t *currententity, const surf_t *surface)
 	//
 	bottom = r_refdef.vrectbottom - 1;
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: scanline loop y=%d bottom=%ld\n",
+		r_refdef.vrect.y, (long)bottom);
+#endif
 	for (iv=r_refdef.vrect.y ; iv<bottom ; iv++)
 	{
 		current_iv = iv;
@@ -658,12 +662,19 @@ R_ScanEdges (entity_t *currententity, const surf_t *surface)
 		// mark that the head (background start) span is pre-included
 		surfaces[1].spanstate = 1;
 
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%ld newedges=%p\n",
+			(long)iv, (void *)newedges[iv]);
+#endif
 		if (newedges[iv])
 		{
 			// Update AET with GET event
 			R_InsertNewEdges (newedges[iv], edge_head.next);
 		}
 
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%ld about to pdrawfunc\n", (long)iv);
+#endif
 		// Generate spans
 		(*pdrawfunc) ();
 
@@ -687,9 +698,15 @@ R_ScanEdges (entity_t *currententity, const surf_t *surface)
 		if (removeedges[iv])
 			R_RemoveEdges (removeedges[iv]);
 
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%ld about to R_StepActiveU\n", (long)iv);
+#endif
 		if (edge_head.next != &edge_tail)
 			R_StepActiveU (edge_head.next);
 	}
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: scanline loop done\n");
+#endif
 
 	// do the last scan (no need to step or sort or remove on the last scan)
 	current_iv = iv;
