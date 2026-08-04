@@ -486,13 +486,30 @@ function loadEngineScripts() {
 		// still happens even with scripts loaded this late, finally pins
 		// down where it's coming from.
 		var realCallMain = Module.callMain;
+
+		// Temporary diagnostic: chasing a report that this call stopped
+		// producing any output at all (not even the C side's first-line
+		// "main() entered" fprintf) once noInitialRun started actually
+		// working (see module-init.js) -- confirm realCallMain is a real
+		// function before wrapping it.
+		console.log('[kaios] loadEngineScripts: typeof Module.callMain (pre-wrap) = ' + (typeof realCallMain));
+
 		Module.callMain = function (args) {
+			console.log('[kaios] Module.callMain wrapper invoked, callMainArmed=' + callMainArmed);
 			if (!callMainArmed) {
 				console.log('[kaios] BLOCKED premature Module.callMain() -- ' +
 					'baseq2 is not mounted yet.\n' + (new Error().stack || '(no stack)'));
 				return;
 			}
-			return realCallMain.call(Module, args);
+			console.log('[kaios] about to call realCallMain, typeof=' + (typeof realCallMain));
+			try {
+				var ret = realCallMain.call(Module, args);
+				console.log('[kaios] realCallMain returned: ' + ret);
+				return ret;
+			} catch (e) {
+				console.log('[kaios] realCallMain THREW: ' + e + '\n' + (e && e.stack));
+				throw e;
+			}
 		};
 	});
 }
@@ -566,7 +583,9 @@ function bootEngine() {
 	// (hardcodes argc=0) -- and "vid_width"/"vid_height" were never
 	// real cvars here anyway (r_customwidth/r_customheight are, see
 	// autoexec.cfg, which is what actually sets the resolution).
+	console.log('[kaios] bootEngine: about to call Module.callMain([]), typeof=' + (typeof Module.callMain));
 	Module.callMain([]);
+	console.log('[kaios] bootEngine: Module.callMain([]) call returned');
 }
 
 // ---------------------------------------------------------------------
