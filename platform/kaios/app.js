@@ -104,12 +104,68 @@ function describeError(err) {
 // 2019) that KaiOS 2.5's Gecko-48-class engine predates and almost
 // certainly doesn't have -- read files the old, universally-supported
 // way instead.
-function readFileAsArrayBuffer(file) {
+function readBlobAsArrayBuffer(blob) {
 	return new Promise(function (resolve, reject) {
 		var reader = new FileReader();
 		reader.onload = function () { resolve(reader.result); };
 		reader.onerror = function () { reject(reader.error); };
-		reader.readAsArrayBuffer(file);
+		reader.readAsArrayBuffer(blob);
+	});
+}
+
+// pak0.pak alone is commonly 70+MB. Reading a file that size in one
+// FileReader call and writing it in one FS.writeFile call means
+// holding the whole thing in memory at once, and running long enough
+// without yielding back to the event loop that the OS can decide the
+// app has hung -- both plausible on a phone. Stream it in small
+// chunks instead: bounded peak memory, and a setTimeout between
+// chunks so the browser/OS sees the page as alive throughout.
+var COPY_CHUNK_SIZE = 512 * 1024;
+
+function copyFileStreaming(file, dest, onProgress) {
+	return new Promise(function (resolve, reject) {
+		var stream;
+		try {
+			mkdirTreeFor(dest);
+			stream = FS.open(dest, 'w');
+		} catch (e) {
+			reject(e);
+			return;
+		}
+
+		var offset = 0;
+
+		function done(err) {
+			try { FS.close(stream); } catch (e) { /* already broken, nothing to do */ }
+			if (err) { reject(err); } else { resolve(); }
+		}
+
+		function readNextChunk() {
+			if (offset >= file.size) {
+				done();
+				return;
+			}
+
+			var end = Math.min(offset + COPY_CHUNK_SIZE, file.size);
+			readBlobAsArrayBuffer(file.slice(offset, end)).then(function (buf) {
+				var chunk = new Uint8Array(buf);
+				try {
+					FS.write(stream, chunk, 0, chunk.length, offset);
+				} catch (e) {
+					done(e);
+					return;
+				}
+				offset = end;
+				if (onProgress) {
+					onProgress(offset / file.size);
+				}
+				// Yield back to the event loop between chunks instead
+				// of racing straight into the next FileReader call.
+				setTimeout(readNextChunk, 0);
+			}, done);
+		}
+
+		readNextChunk();
 	});
 }
 
@@ -232,9 +288,12 @@ function copyBaseq2(files, root) {
 
 		setStatus('Copying ' + rel, i / toCopy.length);
 
-		return readFileAsArrayBuffer(file).then(function (buf) {
-			mkdirTreeFor(dest);
-			FS.writeFile(dest, new Uint8Array(buf));
+		return copyFileStreaming(file, dest, function (fileFraction) {
+			// Large files (pak0.pak alone is commonly 70+MB) can take
+			// a while on their own -- show progress within the file,
+			// not just "still on this same file" with no feedback.
+			setStatus('Copying ' + rel, (i + fileFraction) / toCopy.length);
+		}).then(function () {
 			i++;
 			return next();
 		});
