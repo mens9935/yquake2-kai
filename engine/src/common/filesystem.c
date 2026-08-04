@@ -2066,13 +2066,24 @@ FS_BuildGameSpecificSearchPath(const char *dir)
 		}
 	}
 
+#ifndef __EMSCRIPTEN__
 	// Enforce a renderer and sound backend restart to
 	// purge all internal caches. This is rather hacky
 	// but Quake II doesn't have a better mechanism...
+	//
+	// Skipped on the KaiOS build: this fires on every map change/
+	// reconnect, not just real gamedir switches (there's no UI to
+	// switch mods here anyway, it's always "baseq2"), and the forced
+	// renderer teardown+reinit it queues is what was causing
+	// "R_InitImages: Couldn't load pics/16to8.dat" mid-session even
+	// though the very same lookup had already succeeded once at
+	// startup. There's nothing to purge: one statically linked
+	// renderer, one statically linked sound backend, one gamedir.
 	if ((dedicated != NULL) && (dedicated->value != 1))
 	{
 		Cbuf_AddText("vid_restart\nsnd_restart\n");
 	}
+#endif /* !__EMSCRIPTEN__ */
 
 	// The game was reset to baseq2. Nothing to do here.
 	if (Q_stricmp(dir, BASEDIRNAME) == 0) {
