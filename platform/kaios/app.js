@@ -22,6 +22,33 @@
 (function () {
 'use strict';
 
+// Hard gate on top of noInitialRun (set in index.html): a real device
+// showed the engine's C main() running -- and failing on missing FS data
+// -- *before* our own JS ever called Module.callMain() (bootEngine()'s own
+// unconditional entry log did not appear before that first failure).
+// Nothing in this codebase's C source or the compiled glue (checked:
+// Sys_Error/Com_Error's exit() path unwinds cleanly rather than
+// restarting anything, calledRun guards run()/doRun() against firing
+// twice, no onExit/EM_ASM restart hook exists anywhere) explains a
+// legitimate second call, so whatever's triggering it isn't identified
+// yet. Rather than trust noInitialRun alone, physically disarm
+// Module.callMain() here -- before anything else in this file runs --
+// and only arm it in bootEngine(), after copyBaseq2() has confirmed the
+// FS is actually populated. Any call that sneaks in before that now
+// logs a stack trace instead of quietly running main() over an empty
+// filesystem, which also finally pins down *where* it's coming from if
+// it happens again.
+var callMainArmed = false;
+var realCallMain = Module.callMain;
+Module.callMain = function (args) {
+	if (!callMainArmed) {
+		console.log('[kaios] BLOCKED premature Module.callMain() -- ' +
+			'baseq2 is not mounted yet.\n' + (new Error().stack || '(no stack)'));
+		return;
+	}
+	return realCallMain.call(Module, args);
+};
+
 var GAMEDIR = 'baseq2';
 var PAK_MARKER = '/' + GAMEDIR + '/pak0.pak';
 
@@ -494,6 +521,9 @@ function bootEngine() {
 	canvasEl.style.display = 'block';
 
 	engineStarted = true;
+	// Only past this point is Module.callMain() allowed to actually do
+	// anything -- see the guard installed at the top of this file.
+	callMainArmed = true;
 	// NOTE: this emsdk version's callMain() ignores its args entirely
 	// (hardcodes argc=0) -- and "vid_width"/"vid_height" were never
 	// real cvars here anyway (r_customwidth/r_customheight are, see
