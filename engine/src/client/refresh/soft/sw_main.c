@@ -1196,9 +1196,16 @@ R_EdgeDrawing (entity_t *currententity)
 		rw_time1 = SDL_GetTicks();
 	}
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: about to R_RenderWorld\n");
+#endif
 	// Build the Global Edget Table
 	// Also populate the surface stack and count # surfaces to render (surf_max is the max)
 	R_RenderWorld (currententity);
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: R_RenderWorld done, edge_p-r_edges=%ld surface_p-surfaces=%ld\n",
+		(long)(edge_p - r_edges), (long)(surface_p - surfaces));
+#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1206,7 +1213,13 @@ R_EdgeDrawing (entity_t *currententity)
 		db_time1 = rw_time2;
 	}
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: about to R_DrawBEntitiesOnList\n");
+#endif
 	R_DrawBEntitiesOnList();
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: R_DrawBEntitiesOnList done\n");
+#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1214,9 +1227,15 @@ R_EdgeDrawing (entity_t *currententity)
 		se_time1 = db_time2;
 	}
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: about to R_ScanEdges\n");
+#endif
 	// Use the Global Edge Table to maintin the Active Edge Table: Draw the world as scanlines
 	// Write the Z-Buffer (but no read)
 	R_ScanEdges (currententity, surface_p);
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: R_ScanEdges done\n");
+#endif
 }
 
 //=======================================================================
