@@ -273,8 +273,26 @@ function copyBaseq2(files, root) {
 	// ".../baseq2/" instead, which is correct whether root is empty or not.
 	var srcPrefix = root + '/' + GAMEDIR + '/';
 
+	// save/ and scrnshot/ are pure engine *output* -- the engine
+	// creates them itself under its writable config dir, they're never
+	// something that needs to be supplied as input data. Skipping them
+	// if present on the SD card (e.g. copied back from a previous,
+	// different session) avoids wasting memory on data that isn't
+	// used for anything.
+	var SKIP_PREFIXES = ['save/', 'scrnshot/'];
+
 	var toCopy = files.filter(function (f) {
-		return ('/' + f.name.replace(/^\/+/, '')).indexOf(srcPrefix) === 0;
+		var norm = '/' + f.name.replace(/^\/+/, '');
+		if (norm.indexOf(srcPrefix) !== 0) {
+			return false;
+		}
+		var rel = norm.slice(srcPrefix.length);
+		for (var i = 0; i < SKIP_PREFIXES.length; i++) {
+			if (rel.indexOf(SKIP_PREFIXES[i]) === 0) {
+				return false;
+			}
+		}
+		return true;
 	});
 
 	var i = 0;
