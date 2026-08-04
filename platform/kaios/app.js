@@ -4,7 +4,9 @@
  * Two jobs:
  *   1. Let the user pick the folder on the SD card that holds "baseq2"
  *      (via the Device Storage API -- there's no <input type=file> on
- *      KaiOS) and copy its contents into the Emscripten virtual FS.
+ *      KaiOS) and expose its contents through the Emscripten virtual FS.
+ *      pak0.pak (and any other top-level pakN.pak) is NOT copied in --
+ *      see installLazyPakFile() below -- only loose files are.
  *   2. Translate KaiOS's keypad into the engine's key names and feed
  *      them straight into Key_Event() through the KaiOS_KeyEvent()
  *      bridge added in src/client/cl_keyboard.c, bypassing SDL2 input
@@ -169,6 +171,85 @@ function copyFileStreaming(file, dest, onProgress) {
 	});
 }
 
+// Matches the top-level pak archives (baseq2/pak0.pak, pak1.pak, ...) --
+// these hold effectively all of baseq2's bytes (pak0.pak alone is
+// commonly 70+MB uncompressed) and are exactly what installLazyPakFile()
+// below keeps out of RAM. Everything else (autoexec.cfg, mod dirs, that
+// sort of thing) is small and still goes through copyFileStreaming().
+var PAK_FILE_RE = /^pak\d+\.pak$/i;
+
+// Give a MEMFS node a read() that pulls bytes straight from the SD-card
+// File on demand instead of pre-loading them, so pak0.pak's ~70+MB of
+// decompressed data never sits resident in the page's heap -- only
+// whatever byte range the engine's own fseek()/fread() calls actually
+// touch (the PAK directory at startup, then each asset as it's loaded).
+//
+// The tricky part is that this read() must be synchronous: the engine's
+// C fread() has no concept of waiting on a promise, and this build has
+// no Asyncify support to fake one (it's a plain asm.js build). Blob.slice()
+// gives a cheap, synchronous *view* of just the requested range without
+// touching its bytes; XMLHttpRequest against a blob: URL of that slice,
+// sent synchronously, is what actually pulls the bytes in. Synchronous
+// XHR forbids responseType "arraybuffer" (it throws InvalidAccessError),
+// so this uses the older overrideMimeType('text/plain; charset=x-user-
+// defined') trick instead -- 1 byte in, 1 char code out, no arraybuffer
+// support required. That's also what makes it work on KaiOS's old
+// Gecko-48-class engine, same reasoning as readBlobAsArrayBuffer() above.
+//
+// MEMFS.ops_table.file.{node,stream} are shared objects reused by every
+// plain-file node it creates -- mutating them in place would break reads
+// for every other file, not just this one. node.stream_ops is replaced
+// wholesale with a private object instead.
+function installLazyPakFile(dest, file) {
+	mkdirTreeFor(dest);
+	// 292 = 0444 (r--r--r--). Octal literals are invalid under 'use
+	// strict' unless written as 0o444 -- spelled out in decimal instead
+	// to sidestep the question of whether this build's target engines
+	// all parse the ES6 0o... form.
+	var node = FS.create(dest, 292);
+	node.usedBytes = file.size;
+	node.contents = null;
+
+	node.stream_ops = {
+		llseek: MEMFS.stream_ops.llseek,
+		read: function (stream, buffer, offset, length, position) {
+			if (position >= file.size) {
+				return 0;
+			}
+			var end = Math.min(position + length, file.size);
+			var size = end - position;
+
+			var url = URL.createObjectURL(file.slice(position, end));
+			var bytes;
+			try {
+				var xhr = new XMLHttpRequest();
+				xhr.overrideMimeType('text/plain; charset=x-user-defined');
+				xhr.open('GET', url, false);
+				xhr.send(null);
+				bytes = xhr.responseText;
+			} finally {
+				URL.revokeObjectURL(url);
+			}
+
+			var n = Math.min(bytes.length, size);
+			for (var i = 0; i < n; i++) {
+				buffer[offset + i] = bytes.charCodeAt(i) & 0xff;
+			}
+			return n;
+		},
+		write: function () {
+			// pak files are never written to -- fail loud instead of
+			// silently doing nothing if that assumption ever breaks.
+			// 63 is EPERM in this build's (WASI-derived) errno numbering,
+			// confirmed against FS's own genericErrors[44]===ENOENT and
+			// llseek's negative-position throw(28)===EINVAL above.
+			throw new FS.ErrnoError(63 /* EPERM */);
+		}
+	};
+
+	return node;
+}
+
 function enumerateStorage(storage, path) {
 	return new Promise(function (resolve, reject) {
 		var files = [];
@@ -304,12 +385,26 @@ function copyBaseq2(files, root) {
 		var rel = ('/' + file.name.replace(/^\/+/, '')).slice(srcPrefix.length);
 		var dest = '/' + GAMEDIR + '/' + rel;
 
+		if (PAK_FILE_RE.test(rel)) {
+			// The bulk of baseq2's bytes live in here -- keep it out of
+			// RAM entirely instead of copying it in. See
+			// installLazyPakFile() for why.
+			setStatus('Indexing ' + rel, i / toCopy.length);
+			try {
+				installLazyPakFile(dest, file);
+			} catch (e) {
+				return Promise.reject(e);
+			}
+			i++;
+			return next();
+		}
+
 		setStatus('Copying ' + rel, i / toCopy.length);
 
 		return copyFileStreaming(file, dest, function (fileFraction) {
-			// Large files (pak0.pak alone is commonly 70+MB) can take
-			// a while on their own -- show progress within the file,
-			// not just "still on this same file" with no feedback.
+			// Large files can take a while on their own -- show progress
+			// within the file, not just "still on this same file" with
+			// no feedback.
 			setStatus('Copying ' + rel, (i + fileFraction) / toCopy.length);
 		}).then(function () {
 			i++;
@@ -392,17 +487,23 @@ function bootEngine() {
 // Entry point
 // ---------------------------------------------------------------------
 
-// NOTE: baseq2 is copied fresh into plain (non-persistent) MEMFS on
-// every launch, not cached across launches. An earlier attempt used
-// IDBFS (IndexedDB-backed FS) to persist it so the slow SD-card copy
-// would only happen once, but FS.syncfs()'s per-file write is
-// Emscripten library code, not ours, and evidently has the same
-// "hold a whole 70+MB file in memory as one write" problem the SD-card
-// copy itself had before it was switched to chunked streaming -- and
-// unlike that one, this one isn't ours to chunk. Pulled back out
-// entirely for now to prioritize a build that reliably boots at all;
-// worth revisiting later (e.g. chunking the persisted write manually
-// instead of relying on IDBFS's own per-file sync).
+// NOTE: baseq2's loose files are copied fresh into plain (non-persistent)
+// MEMFS on every launch, not cached across launches -- but those are
+// small (a few KB of configs), so redoing that copy each launch is
+// cheap. pak0.pak/pak1.pak/... are the part that used to make this
+// expensive, and installLazyPakFile() takes them out of this picture
+// entirely: they're never copied anywhere, in or out of MEMFS, so
+// there's nothing about them left to persist.
+//
+// An earlier attempt used IDBFS (IndexedDB-backed FS) to persist the
+// *old* whole-baseq2 copy so the slow SD-card read would only happen
+// once, but FS.syncfs()'s per-file write is Emscripten library code,
+// not ours, and evidently had the same "hold a whole 70+MB file in
+// memory as one write" problem the SD-card copy itself had before it
+// was switched to chunked streaming -- and unlike that one, this one
+// wasn't ours to chunk. Pulled back out at the time to prioritize a
+// build that reliably boots at all; moot now that the file it choked
+// on is never copied in the first place.
 function start() {
 	// Temporary diagnostic, see the note by bootEngine().
 	console.log('[kaios] start() called, document.readyState=' + document.readyState);
