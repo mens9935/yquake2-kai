@@ -2093,6 +2093,16 @@ RE_InitContext(void *win)
 	 * forever on a real KaiOS device when requesting
 	 * SDL_RENDERER_ACCELERATED, and SDL_RENDERER_SOFTWARE alone isn't
 	 * offered as a fallback by Emscripten's SDL2 port at all. */
+#ifdef __EMSCRIPTEN__
+	/* Temporary diagnostic, round 2: switching SDL_CreateRenderer (which
+	 * hung, per round 1's fprintfs) to SDL_GetWindowSurface did NOT fix
+	 * the hang -- same symptom, same last visible line beforehand
+	 * ("Real display mode: ..."). Round 1's fprintfs were removed once
+	 * they'd done their job; bracket every step of *this* code path
+	 * now to find out which one it actually is this time. */
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: about to SDL_GetWindowSurface\n");
+#endif
+
 	win_surface = SDL_GetWindowSurface(window);
 	if (!win_surface)
 	{
@@ -2100,9 +2110,22 @@ RE_InitContext(void *win)
 		return false;
 	}
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: got window surface, about to SDL_FillRect\n");
+#endif
+
 	SDL_FillRect(win_surface, NULL,
 		SDL_MapRGB(win_surface->format, 0, 0, 0));
+
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: filled, about to SDL_UpdateWindowSurface\n");
+#endif
+
 	SDL_UpdateWindowSurface(window);
+
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: window surface path done\n");
+#endif
 #else
 	/* NOTE: on Emscripten, requesting SDL_RENDERER_SOFTWARE alone
 	 * fails outright ("Couldn't find matching render driver") --
@@ -2201,8 +2224,22 @@ RE_InitContext(void *win)
 	}
 #endif /* !__EMSCRIPTEN__ */
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: about to R_InitGraphics (%dx%d)\n",
+		vid_buffer_width, vid_buffer_height);
+#endif
+
 	R_InitGraphics(vid_buffer_width, vid_buffer_height);
+
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: R_InitGraphics done, about to SWimp_CreateRender\n");
+#endif
+
 	SWimp_CreateRender(vid_buffer_width, vid_buffer_height);
+
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: done\n");
+#endif
 
 	return true;
 }
