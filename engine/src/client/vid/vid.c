@@ -396,17 +396,6 @@ VID_LoadRenderer(void)
 	char reflib_name[64] = {0};
 	char reflib_path[MAX_OSPATH] = {0};
 
-#ifdef __EMSCRIPTEN__
-	/* Temporary diagnostic: raw stdio bypasses Com_Printf entirely
-	 * (including its rd_target redirect-to-buffer mode, which would
-	 * otherwise silently swallow this), so this is guaranteed to show
-	 * up in the browser console every single time VID_LoadRenderer()
-	 * runs, however it got triggered. */
-	static int kaios_debug_reload_count = 0;
-	fprintf(stderr, "KAIOS_DEBUG: VID_LoadRenderer() call #%d, ref_active=%d\n",
-		++kaios_debug_reload_count, (int)ref_active);
-#endif
-
 	// If the refresher is already active we need
 	// to shut it down before loading a new one
 	VID_ShutdownRenderer();

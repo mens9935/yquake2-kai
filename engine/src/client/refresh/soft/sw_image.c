@@ -696,19 +696,10 @@ R_InitImages (void)
 	image_max = 0;
 
 	d_16to8table = NULL;
-
-#ifdef __EMSCRIPTEN__
-	static int kaios_debug_call_count = 0;
-	fprintf(stderr, "KAIOS_DEBUG: R_InitImages() call #%d\n", ++kaios_debug_call_count);
-#endif
-
 	ri.FS_LoadFile("pics/16to8.dat", (void **)&table16to8);
 
 	if ( !table16to8 )
 	{
-#ifdef __EMSCRIPTEN__
-		fprintf(stderr, "KAIOS_DEBUG: FS_LoadFile(pics/16to8.dat) returned NULL\n");
-#endif
 		Com_Error(ERR_FATAL, "%s: Couldn't load pics/16to8.dat", __func__);
 		// code never returns after ERR_FATAL
 		return;
