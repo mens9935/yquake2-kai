@@ -354,6 +354,20 @@ R_RemoveEdges (edge_t *pedge)
 			return;
 		}
 #endif
+#ifdef __EMSCRIPTEN__
+		/* removeedges[iv] can be a CHAIN via ->nextremove, not just one
+		 * edge -- manually tracing the previous device log's insertion
+		 * and R_StepActiveU swaps showed the specific edge SAFE_HEAP
+		 * flagged (per that log) ending up validly linked and never
+		 * touched again before the crash, which doesn't add up unless
+		 * the actual bad dereference is on a LATER node in this same
+		 * removal chain that we've had zero visibility into. Print
+		 * every node's own address/prev/next right before touching
+		 * them, so a segfault here finally shows exactly which one. */
+		fprintf(stderr, "KAIOS_DEBUG: R_RemoveEdges: unlinking pedge=%p "
+			"prev=%p next=%p nextremove=%p\n", (void *)pedge,
+			(void *)pedge->prev, (void *)pedge->next, (void *)pedge->nextremove);
+#endif
 		pedge->next->prev = pedge->prev;
 		pedge->prev->next = pedge->next;
 	} while ((pedge = pedge->nextremove) != NULL);
