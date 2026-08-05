@@ -283,6 +283,15 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 		next_edge = edgestoadd->next;
 
 #ifdef __EMSCRIPTEN__
+		/* Confirmed via real device log: R_RemoveEdges later segfaults
+		 * unlinking an edge that was supposedly inserted right here,
+		 * during a call whose own watchdogs never tripped -- so this
+		 * specific node either never gets a valid ->prev/->next written
+		 * to it in this loop, or gets processed/inserted more than
+		 * once. Trace every single node this loop actually touches. */
+		fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: processing node=%p "
+			"u=%d next_edge=%p owner=%p\n", (void *)edgestoadd,
+			edgestoadd->u, (void *)next_edge, (void *)edgestoadd->owner);
 		guard = 0;
 #endif
 		while (edgelist->u < edgestoadd->u)
@@ -308,6 +317,13 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 		edgestoadd->prev = edgelist->prev;
 		edgelist->prev->next = edgestoadd;
 		edgelist->prev = edgestoadd;
+
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: inserted node=%p "
+			"before edgelist=%p, node->prev=%p node->next=%p\n",
+			(void *)edgestoadd, (void *)edgelist,
+			(void *)edgestoadd->prev, (void *)edgestoadd->next);
+#endif
 	} while ((edgestoadd = next_edge) != NULL);
 }
 
