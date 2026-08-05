@@ -18,9 +18,14 @@
 	}
 	#picker, #status {
 		box-sizing: border-box;
+		position: absolute;
+		top: 0;
+		left: 0;
+		z-index: 10;
 		width: 240px;
 		height: 320px;
 		padding: 8px;
+		background: #000;
 	}
 	#picker h1 {
 		font-size: 15px;
@@ -64,7 +69,19 @@
 		background: #35c;
 	}
 	#canvas {
-		display: none;
+		/* Always laid out (display:block from first paint), covered by
+		 * #picker/#status sitting on top via z-index -- not toggled with
+		 * display:none/block like those are. Matches this project's own
+		 * ClassiCube KaiOS build (confirmed working WebGL on this exact
+		 * device): its canvas is display:block from the start too, under
+		 * a separate #loading-overlay div. A canvas that's never actually
+		 * been laid out before WebGL context creation is plausible as a
+		 * factor on this device's old Gecko engine, given how many other
+		 * WebGL-specific quirks it's already shown this session. */
+		display: block;
+		position: absolute;
+		top: 0;
+		left: 0;
 		width: 240px;
 		height: 320px;
 		background: #000;

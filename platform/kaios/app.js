@@ -580,8 +580,9 @@ function bootEngine() {
 	setStatus('Starting...', 1);
 	writeAutoexec();
 
+	// #canvas is display:block from first paint now (see index.html) --
+	// only the #status overlay covering it needs to go away here.
 	statusEl.style.display = 'none';
-	canvasEl.style.display = 'block';
 
 	engineStarted = true;
 	// Only past this point is Module.callMain() allowed to actually do
