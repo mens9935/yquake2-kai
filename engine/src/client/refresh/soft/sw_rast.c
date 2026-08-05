@@ -343,6 +343,10 @@ R_EmitEdge (mvertex_t *pv0, mvertex_t *pv1, medge_t *r_pedge, qboolean r_nearzio
 
 	edge->owner = r_pedge;
 
+#ifdef __EMSCRIPTEN__
+	edge->frame = r_framecount;
+#endif
+
 	edge->nearzi = lzi0;
 
 	if (side == 0)
@@ -706,7 +710,12 @@ R_RenderFace (entity_t *currententity, const model_t *currentmodel, msurface_t *
 					if ((((uintptr_t)edge_p - (uintptr_t)r_edges) >
 						 r_pedge->cachededgeoffset) &&
 						(((edge_t *)((uintptr_t)r_edges +
-						 r_pedge->cachededgeoffset))->owner == r_pedge))
+						 r_pedge->cachededgeoffset))->owner == r_pedge)
+#ifdef __EMSCRIPTEN__
+						&& (((edge_t *)((uintptr_t)r_edges +
+						 r_pedge->cachededgeoffset))->frame == r_framecount)
+#endif
+						)
 					{
 						R_EmitCachedEdge (r_pedge);
 						r_lastvertvalid = false;
@@ -756,7 +765,12 @@ R_RenderFace (entity_t *currententity, const model_t *currentmodel, msurface_t *
 					if ((((uintptr_t)edge_p - (uintptr_t)r_edges) >
 						 r_pedge->cachededgeoffset) &&
 						(((edge_t *)((uintptr_t)r_edges +
-						 r_pedge->cachededgeoffset))->owner == r_pedge))
+						 r_pedge->cachededgeoffset))->owner == r_pedge)
+#ifdef __EMSCRIPTEN__
+						&& (((edge_t *)((uintptr_t)r_edges +
+						 r_pedge->cachededgeoffset))->frame == r_framecount)
+#endif
+						)
 					{
 						R_EmitCachedEdge (r_pedge);
 						r_lastvertvalid = false;

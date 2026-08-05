@@ -325,6 +325,24 @@ typedef struct edge_s
 	struct edge_s	*nextremove;
 	float		nearzi;
 	medge_t		*owner;
+#ifdef __EMSCRIPTEN__
+	/* Stamped with r_framecount by R_EmitEdge() whenever this slot is
+	 * (re)written. See its use in sw_rast.c's R_RenderFace() -- closes a
+	 * real gap in the medge_t->cachededgeoffset "already emitted this
+	 * edge" cache check: unlike the FULLY_CLIPPED_CACHED case just above
+	 * it in that same function, the "real cached edge" branch never
+	 * verified the cached offset was written *this* frame, only that
+	 * some frame, ever, wrote an edge there for this exact medge_t. On a
+	 * static view (same geometry, same edge_p allocation pattern every
+	 * frame -- exactly what a real device showed: identical corrupted
+	 * values recurring across separate app launches), that's enough for
+	 * a stale offset from a previous frame to satisfy both checks and
+	 * get treated as "already queued this frame" when it was never
+	 * re-emitted at all -- reusing a stale edge_t whose ->next/->prev
+	 * still hold whatever they were left at after being unlinked from a
+	 * previous frame's active edge table, instead of NULL/a fresh link. */
+	int		frame;
+#endif
 } edge_t;
 
 
