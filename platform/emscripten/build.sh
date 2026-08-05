@@ -34,15 +34,11 @@ COMMON_FLAGS=(
 	-DYQ2ARCH=\"asmjs\"
 	-I"$ENGINE"
 	-s USE_SDL=2
-	# gl1 renderer (see REFGL1_SRCS): backs its GLES1.1 fixed-function
-	# calls with WebGL1 via Emscripten's legacy GL emulation shim, since
-	# this device's Gecko-48-class engine only has WebGL1 (no WebGL2,
-	# which gl3's shader-based renderer would have needed). Orthogonal to
-	# how the context itself gets created (see gl1_sdl.c's em_ctx_handle
-	# path) -- this only affects the GL1.x-style function implementations
-	# Emscripten's own GL library provides on top of that context.
-	-s LEGACY_GL_EMULATION=1
 )
+
+# gl1 shelved for now (see autoexec.cfg's comment) -- needs
+# -s LEGACY_GL_EMULATION=1 added back to COMMON_FLAGS and the refgl1
+# compile_group call restored in place of refsoft below, if revisited.
 
 GL1_FLAGS=(
 	-DYQ2_GL1_GLES
@@ -87,11 +83,6 @@ EMCC_LINK_FLAGS=(
 	-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS','callMain']
 	-s EXIT_RUNTIME=0
 	-s ENVIRONMENT=web
-	# Temporary: surfaces Emscripten's own internal WebGL error detail
-	# (e.g. exactly why canvas.getContext() returned null) in the console
-	# instead of a silent 0 return -- see gl1_sdl.c's em_ctx_handle path.
-	# Safe to drop once gl1 context creation is confirmed working.
-	-s GL_DEBUG=1
 )
 
 compile_group() {
@@ -119,8 +110,8 @@ OBJS=()
 echo "==> Compiling client+server (${#CLIENT_SRCS[@]} files)"
 compile_group client NO_EXTRA CLIENT_SRCS
 
-echo "==> Compiling gl1 (GLES1/WebGL1) renderer (${#REFGL1_SRCS[@]} files)"
-compile_group refgl1 GL1_FLAGS REFGL1_SRCS
+echo "==> Compiling software renderer (${#REFSOFT_SRCS[@]} files)"
+compile_group refsoft NO_EXTRA REFSOFT_SRCS
 
 echo "==> Compiling baseq2 game (${#GAME_SRCS[@]} files)"
 compile_group game GAME_ONLY_FLAGS GAME_SRCS

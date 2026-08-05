@@ -153,6 +153,9 @@ cvar_t	*r_scale8bittextures;
 cvar_t	*sw_gunzposition;
 cvar_t	*r_validation;
 static cvar_t	*sw_partialrefresh;
+#ifdef __EMSCRIPTEN__
+static cvar_t	*r_demopattern;
+#endif
 
 cvar_t	*r_drawworld;
 static cvar_t	*r_drawentities;
@@ -394,6 +397,19 @@ R_RegisterVariables (void)
 	sw_partialrefresh = ri.Cvar_Get("sw_partialrefresh", "0", CVAR_ARCHIVE);
 #else
 	sw_partialrefresh = ri.Cvar_Get("sw_partialrefresh", "1", CVAR_ARCHIVE);
+#endif
+
+#ifdef __EMSCRIPTEN__
+	/* Isolation test: when set, RE_RenderFrame() below skips
+	 * R_EdgeDrawing()/R_ScanEdges() entirely (the edge/span rasterizer
+	 * that's the site of this whole session's real-device data
+	 * corruption) and draws a trivial animated pattern straight into
+	 * vid_buffer instead, through the exact same
+	 * RE_EndFrame/RE_FlushFrame/KaiOS_*Pixels blit chain already
+	 * confirmed working hundreds of times over during boot/menu/console
+	 * rendering. Proves or disproves whether the display pipeline itself
+	 * is trustworthy, independent of R_ScanEdges's own bug. */
+	r_demopattern = ri.Cvar_Get("r_demopattern", "0", 0);
 #endif
 
 	r_mode = ri.Cvar_Get( "r_mode", "0", CVAR_ARCHIVE );
@@ -1339,6 +1355,29 @@ VectorCompareRound(const vec3_t v1, const vec3_t v2)
 
 cplane_t frustum[4];
 
+#ifdef __EMSCRIPTEN__
+/* Diagonal stripes that scroll over time -- deliberately not using any
+ * of R_ScanEdges's edge/span machinery, just raw writes into vid_buffer
+ * (the same paletted framebuffer RE_CopyFrame() reads from normally).
+ * Any palette index 0-255 renders as *some* color, so this doesn't
+ * depend on a real map's palette being loaded correctly either. */
+static void
+R_DrawDemoPattern(void)
+{
+	int x, y;
+	int offset = (int)(r_newrefdef.time * 60.0f) % vid_buffer_width;
+
+	for (y = 0; y < vid_buffer_height; y++)
+	{
+		byte *row = vid_buffer + y * vid_buffer_width;
+
+		for (x = 0; x < vid_buffer_width; x++)
+		{
+			row[x] = (byte)((x + offset + y) & 0xFF);
+		}
+	}
+}
+#endif
 
 /*
 ================
@@ -1354,6 +1393,14 @@ RE_RenderFrame(refdef_t *fd)
 
 #ifdef __EMSCRIPTEN__
 	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: entered\n");
+
+	if (r_demopattern->value)
+	{
+		VID_WholeDamageBuffer();
+		R_DrawDemoPattern();
+		fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: demo pattern drawn, returning\n");
+		return;
+	}
 #endif
 
 	if (!r_worldmodel && !( r_newrefdef.rdflags & RDF_NOWORLDMODEL ) )
