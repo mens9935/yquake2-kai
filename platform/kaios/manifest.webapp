@@ -20,6 +20,9 @@
     "device-storage:sdcard": {
       "access": "readonly",
       "description": "Read baseq2 game data from the SD card"
+    },
+    "power": {
+      "description": "Keep the screen and CPU awake during gameplay"
     }
   }
 }

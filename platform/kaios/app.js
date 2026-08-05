@@ -40,6 +40,18 @@ canvasEl.addEventListener('contextmenu', function (ev) {
 	ev.preventDefault();
 });
 
+// A long-press of the OK/center key (DOM "Enter") is KaiOS's system-wide
+// gesture for launching the Smart/Assistant search, and it can fire
+// mid-game if the keydown isn't clearly consumed. Whether that gesture
+// is recognized from a bare keydown or surfaces as a synthesized
+// contextmenu event depends on the exact Gecko build, so cover both:
+// listen on the capture phase (runs before any other handler gets a
+// chance to leave the event unconsumed) and prevent window-level
+// contextmenu too, not just the canvas's own.
+window.addEventListener('contextmenu', function (ev) {
+	ev.preventDefault();
+}, true);
+
 // ---------------------------------------------------------------------
 // KaiOS keypad -> Quake II key names
 // (names match keynames[] in src/client/cl_keyboard.c / bind syntax)
@@ -75,6 +87,16 @@ function installKeyHandlers() {
 		return function (ev) {
 			if (PREVENT_DEFAULT[ev.key]) {
 				ev.preventDefault();
+				// stopImmediatePropagation (not just preventDefault) for
+				// the OK/center key specifically: it's the one KaiOS also
+				// treats as a system-wide long-press gesture (Smart/
+				// Assistant search), and the capture-phase listener below
+				// needs to be the one place that gesture can be stopped
+				// before anything else -- including this same handler's
+				// own bubble-phase twin -- gets a chance to let it through.
+				if (ev.key === 'Enter') {
+					ev.stopImmediatePropagation();
+				}
 			}
 
 			if (!engineStarted) {
@@ -91,8 +113,71 @@ function installKeyHandlers() {
 		};
 	}
 
-	window.addEventListener('keydown', handle(true));
-	window.addEventListener('keyup', handle(false));
+	// Capture phase: runs before the OS's own long-press/Assistant
+	// gesture recognizer gets a look at the event, on builds where that
+	// recognizer is itself just another content-side listener rather
+	// than something below the DOM entirely (unverified which KaiOS 2.5
+	// is -- capturing costs nothing either way, so do it regardless).
+	window.addEventListener('keydown', handle(true), true);
+	window.addEventListener('keyup', handle(false), true);
+}
+
+// ---------------------------------------------------------------------
+// Keep the screen (and CPU) awake -- KaiOS's own idle-timeout power
+// saving otherwise dims/locks the screen mid-game, and this app has no
+// use for it (there's no "idle" state in an FPS someone is actively
+// playing). navigator.requestWakeLock is the B2G/KaiOS power API (not
+// the newer W3C Screen Wake Lock API, which this Gecko-48-class engine
+// predates); it returns a lock object with .unlock(), not a promise.
+// ---------------------------------------------------------------------
+
+var wakeLocks = [];
+
+function releaseWakeLocks() {
+	for (var i = 0; i < wakeLocks.length; i++) {
+		try { wakeLocks[i].unlock(); } catch (e) { /* already gone */ }
+	}
+	wakeLocks = [];
+}
+
+function acquireWakeLocks() {
+	if (!navigator.requestWakeLock) {
+		console.log('[kaios] navigator.requestWakeLock not available -- ' +
+			'cannot prevent the screen from sleeping.');
+		return;
+	}
+
+	releaseWakeLocks();
+
+	// 'screen' keeps the display on; 'cpu' keeps the whole device out of
+	// deep sleep (needed too -- an asleep CPU stops running this page's
+	// JS entirely, screen lock or not). Request both independently so a
+	// topic this particular build/device doesn't support failing
+	// doesn't take the other down with it.
+	['screen', 'cpu'].forEach(function (topic) {
+		try {
+			wakeLocks.push(navigator.requestWakeLock(topic));
+		} catch (e) {
+			console.log('[kaios] requestWakeLock(' + topic + ') failed: ' +
+				describeError(e));
+		}
+	});
+}
+
+function installWakeLock() {
+	acquireWakeLocks();
+
+	// B2G has been seen to silently drop a page's wake locks when it's
+	// hidden (task-switched away, screen manually locked, ...) even
+	// though the lock object itself gives no event for that -- so just
+	// unconditionally re-acquire whenever this page becomes visible
+	// again, whether or not the old locks were actually still held.
+	// Cheap (a couple of API calls) and self-correcting either way.
+	document.addEventListener('visibilitychange', function () {
+		if (!document.hidden) {
+			acquireWakeLocks();
+		}
+	});
 }
 
 // ---------------------------------------------------------------------
@@ -627,6 +712,7 @@ function start() {
 	console.log('[kaios] start() called, document.readyState=' + document.readyState);
 
 	installKeyHandlers();
+	installWakeLock();
 
 	if (!navigator.getDeviceStorage) {
 		setStatus('No Device Storage API on this browser.\n' +
