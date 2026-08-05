@@ -1216,7 +1216,13 @@ R_EdgeDrawing (entity_t *currententity)
 
 	// Use the Global Edge Table to maintin the Active Edge Table: Draw the world as scanlines
 	// Write the Z-Buffer (but no read)
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: about to R_ScanEdges\n");
+#endif
 	R_ScanEdges (currententity, surface_p);
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: R_ScanEdges done\n");
+#endif
 }
 
 //=======================================================================
@@ -1346,6 +1352,10 @@ RE_RenderFrame(refdef_t *fd)
 	r_newrefdef = *fd;
 	entity_t	ent;
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: entered\n");
+#endif
+
 	if (!r_worldmodel && !( r_newrefdef.rdflags & RDF_NOWORLDMODEL ) )
 	{
 		Com_Error(ERR_FATAL, "%s: NULL worldmodel", __func__);
@@ -1467,6 +1477,10 @@ RE_RenderFrame(refdef_t *fd)
 	}
 
 	R_ReallocateMapBuffers();
+
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: returning\n");
+#endif
 }
 
 /*
