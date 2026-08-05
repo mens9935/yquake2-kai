@@ -202,7 +202,35 @@ int RI_PrepareForWindow(void)
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
 	}
 
+#if defined(YQ2_GL1_GLES) && defined(__EMSCRIPTEN__)
+	/* NOT SDL_WINDOW_OPENGL here -- confirmed by reading
+	 * SDL_emscriptenvideo.c's Emscripten_CreateWindow() directly: that
+	 * flag makes SDL_CreateWindow() itself (called right after this
+	 * function returns, well before RI_InitContext runs) call
+	 * SDL_EGL_CreateSurface() -> SDL_EGL_ChooseConfig() as a side effect
+	 * of window creation alone -- the exact EGL emulation layer/config-
+	 * matching code that produced EGL_BAD_CONFIG and EGL_BAD_MATCH in
+	 * the first two attempts, and it runs regardless of whether
+	 * SDL_GL_CreateContext() itself ever gets called afterwards. That
+	 * EGL surface creation was consuming the canvas's one WebGL context
+	 * slot before RI_InitContext's own emscripten_webgl_create_context()
+	 * call ever got a chance to claim it -- confirmed by a real-device
+	 * GL_DEBUG build showing canvas.getContext('webgl', <attribs
+	 * matching ClassiCube's exactly>) itself returning null, with no
+	 * EGL-layer error at all this time.
+	 *
+	 * Omitting SDL_WINDOW_OPENGL avoids that whole branch, so the canvas
+	 * stays untouched until RI_InitContext's own direct call claims it --
+	 * but that branch is also the only thing that calls
+	 * SDL_GL_LoadLibrary() to set up eglGetProcAddress, which
+	 * SDL_GL_GetProcAddress() (GLAD's loader) needs. RI_InitContext()
+	 * below calls SDL_GL_LoadLibrary() itself to cover that -- loading
+	 * function pointers is a separate step from creating a surface/
+	 * context and doesn't touch the canvas. */
+	return 0;
+#else
 	return SDL_WINDOW_OPENGL;
+#endif
 }
 
 /*
@@ -298,6 +326,21 @@ int RI_InitContext(void* win)
 	// bypasses SDL_GL_CreateContext entirely on this platform.
 	{
 		EmscriptenWebGLContextAttributes attribs;
+
+		// RI_PrepareForWindow() deliberately didn't request
+		// SDL_WINDOW_OPENGL (see its comment), so SDL_CreateWindow()
+		// never called SDL_GL_LoadLibrary() on our behalf -- do it here.
+		// This only loads eglGetProcAddress and friends for
+		// SDL_GL_GetProcAddress() below; it doesn't create a surface or
+		// touch the canvas, unlike SDL_EGL_CreateSurface().
+		if (SDL_GL_LoadLibrary(NULL) < 0)
+		{
+			Com_Printf("%s: SDL_GL_LoadLibrary() failed: %s\n", __func__, SDL_GetError());
+
+			window = NULL;
+
+			return false;
+		}
 
 		emscripten_webgl_init_context_attributes(&attribs);
 		attribs.alpha = false;
