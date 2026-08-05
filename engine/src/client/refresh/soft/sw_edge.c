@@ -198,8 +198,16 @@ R_StepActiveU (edge_t *pedge)
 			if (pedge == &edge_aftertail)
 				return;
 
-			if (pedge->prev == &edge_head)
+			if (pedge->prev == &edge_head && developer->value)
 			{
+				/* At this project's unusually narrow 240px viewport this
+				 * fires on most remaining scanlines of a frame once one
+				 * edge lands here (see the clamp below) -- Com_Printf
+				 * isn't free (console history + on-screen notify
+				 * redraw), and up to ~300 calls of it inside a single
+				 * frame was itself a major cost on real hardware, wholly
+				 * apart from any actual rendering work. Silent by
+				 * default; the clamp still runs either way. */
 				Com_Printf("Already in head.\n");
 			}
 
