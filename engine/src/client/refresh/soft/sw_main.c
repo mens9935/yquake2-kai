@@ -2855,8 +2855,20 @@ SWimp_CreateRender(int width, int height)
 	intsintable = malloc((width+CYCLE) * sizeof(int));
 	blanktable = malloc((width+CYCLE) * sizeof(int));
 
-	newedges = malloc(width * sizeof(edge_t *));
-	removeedges = malloc(width * sizeof(edge_t *));
+	/* Indexed by scanline row (v, 0..height-1), not by column -- sizing
+	 * this by width instead of height is silently safe on every
+	 * landscape display (width >= height) this renderer has ever run
+	 * on, which is every display mode Quake II shipped with. This
+	 * port's 240x320 portrait mode inverts that assumption: height
+	 * (320) exceeds width (240), so any scanline v >= 240 read/wrote
+	 * past the end of these allocations into whatever the heap
+	 * allocator placed next -- a real, deterministic, per-frame
+	 * out-of-bounds heap corruption that a whole session's worth of
+	 * chasing "corrupted" edge_t linked lists (cyclic lists, exact-u
+	 * duplicates, a NULL ->prev SAFE_HEAP finally segfaulted on) turned
+	 * out to be a downstream symptom of. */
+	newedges = malloc(height * sizeof(edge_t *));
+	removeedges = malloc(height * sizeof(edge_t *));
 
 	warp_rowptr = malloc((width+AMP2*2) * sizeof(byte*));
 	warp_column = malloc((width+AMP2*2) * sizeof(int));
