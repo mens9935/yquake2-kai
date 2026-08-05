@@ -140,20 +140,34 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 #endif
 
 #ifdef __EMSCRIPTEN__
-	/* Neither watchdog added so far (this function's own search loop,
-	 * and R_EmitEdge's newedges[v] sorted-insert search) has ever
-	 * fired, yet the outer edgestoadd chain below still finds a cycle
-	 * -- meaning by the time this function is entered, edgestoadd is
-	 * already cyclic. Cheaply check for that with Floyd's algorithm
-	 * (O(list length), no per-call spam for the ~300 healthy scanlines
-	 * this runs on every frame) and only when a cycle is actually
-	 * confirmed, walk it again and print each node's address/u/next so
-	 * the next device log shows exactly which node's ->next was
-	 * corrupted and what it now points at, instead of just "stuck at
-	 * address X". */
-	if (!shape_reported)
+	/* Three rounds of real-device tracing found and fixed two genuine,
+	 * independent bugs (a missing frame check and a missing insubmodel
+	 * check on R_RenderFace's edge cache) -- neither changed this
+	 * outcome at all, down to the exact same addresses recurring. The
+	 * remaining mechanism (confirmed by that tracing): R_ClipEdge
+	 * deliberately marks partially-frustum-clipped edges as
+	 * "uncacheable" (cacheoffset = 0x7FFFFFFF, see its comment), so two
+	 * adjacent faces sharing one map edge can legitimately each end up
+	 * with their OWN edge_t for it when that edge is partially clipped
+	 * -- and if both then resolve to the same screen column (plausible,
+	 * they're clipped versions of the same physical boundary), whatever
+	 * sequence of ties in the insert-at-head logic below produces a
+	 * 2-node cycle instead of two safely-ordered entries. Diagnosed
+	 * enough for now, per Floyd's algorithm's own guarantee: it's ALWAYS
+	 * fixable by cutting exactly one link, with zero data loss, and
+	 * that's a much better outcome than the old behavior of just
+	 * reporting and letting the caller's own outer_guard watchdog
+	 * eventually trip -- which stranded the rest of this scanline's
+	 * edges AND left every downstream loop that touches this list
+	 * (R_StepActiveU, R_GenerateSpans, ...) to independently trip its
+	 * own watchdog on the same corruption. Detect with Floyd's (O(list
+	 * length), no per-call cost on the ~300 healthy scanlines this runs
+	 * on every frame), and when found, cut the one link that closes the
+	 * loop and keep going -- every node stays reachable, just as a
+	 * straight list instead of a loop. */
 	{
 		edge_t *slow = edgestoadd, *fast = edgestoadd;
+		qboolean cyclic = false;
 
 		while (fast && fast->next)
 		{
@@ -161,23 +175,39 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 			fast = fast->next->next;
 			if (slow == fast)
 			{
-				edge_t *walk = edgestoadd;
-				int i;
-
-				shape_reported = 1;
-				fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: edgestoadd is "
-					"cyclic, dumping shape:\n");
-				for (i = 0; i < 40; i++)
-				{
-					fprintf(stderr, "KAIOS_DEBUG:   [%d] node=%p u=%d next=%p "
-						"prev=%p owner=%p surfs=%u,%u frame=%d\n",
-						i, (void *)walk, walk->u, (void *)walk->next,
-						(void *)walk->prev, (void *)walk->owner,
-						(unsigned)walk->surfs[0], (unsigned)walk->surfs[1],
-						walk->frame);
-					walk = walk->next;
-				}
+				cyclic = true;
 				break;
+			}
+		}
+
+		if (cyclic)
+		{
+			edge_t *p1 = edgestoadd;
+			edge_t *p2 = slow;
+			edge_t *tail;
+
+			// find the start of the cycle
+			while (p1 != p2)
+			{
+				p1 = p1->next;
+				p2 = p2->next;
+			}
+
+			// walk all the way around the cycle once to find the node
+			// whose ->next closes the loop, then cut it there
+			tail = p1;
+			while (tail->next != p1)
+				tail = tail->next;
+			tail->next = NULL;
+
+			if (!shape_reported)
+			{
+				shape_reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: edgestoadd "
+					"was cyclic (cut at %p -> %p, owner=%p/%p) -- repaired, "
+					"continuing instead of aborting this scanline\n",
+					(void *)tail, (void *)p1,
+					(void *)tail->owner, (void *)p1->owner);
 			}
 		}
 	}
