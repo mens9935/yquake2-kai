@@ -34,6 +34,30 @@ COMMON_FLAGS=(
 	-DYQ2ARCH=\"asmjs\"
 	-I"$ENGINE"
 	-s USE_SDL=2
+	# gl1 renderer (see REFGL1_SRCS): backs its GLES1.1 fixed-function
+	# calls with WebGL1 via Emscripten's legacy GL emulation shim, since
+	# this device's Gecko-48-class engine only has WebGL1 (no WebGL2,
+	# which gl3's shader-based renderer would have needed).
+	-s LEGACY_GL_EMULATION=1
+)
+
+GL1_FLAGS=(
+	-DYQ2_GL1_GLES
+	-I"$ENGINE/src/client/refresh/gl1/glad-gles1/include"
+	# Same story as GAME_ONLY_FLAGS above: in the normal dlopen() build
+	# each of these is a per-shared-object cvar_t* handle (or, for
+	# `modes`, a same-named-by-coincidence local array) that's harmless
+	# duplicated across separate .so images, but collides once
+	# everything is statically linked into one binary. Rename only the
+	# C-level symbol on the gl1 side -- the cvar registration strings
+	# passed to Cvar_Get() inside these files are untouched, so the
+	# actual cvars stay named vid_fullscreen/vid_gamma/etc.
+	-Dmodes=gl1_local_modes
+	-Dvid_fullscreen=gl1_vid_fullscreen
+	-Dvid_gamma=gl1_vid_gamma
+	-Dgl1_stereo=gl1_local_stereo
+	-Dgl1_stereo_separation=gl1_local_stereo_separation
+	-Dgl1_stereo_convergence=gl1_local_stereo_convergence
 )
 
 # The "baseq2" game code is normally built as its own game.so, with its
@@ -87,8 +111,8 @@ OBJS=()
 echo "==> Compiling client+server (${#CLIENT_SRCS[@]} files)"
 compile_group client NO_EXTRA CLIENT_SRCS
 
-echo "==> Compiling software renderer (${#REFSOFT_SRCS[@]} files)"
-compile_group refsoft NO_EXTRA REFSOFT_SRCS
+echo "==> Compiling gl1 (GLES1/WebGL1) renderer (${#REFGL1_SRCS[@]} files)"
+compile_group refgl1 GL1_FLAGS REFGL1_SRCS
 
 echo "==> Compiling baseq2 game (${#GAME_SRCS[@]} files)"
 compile_group game GAME_ONLY_FLAGS GAME_SRCS

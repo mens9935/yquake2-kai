@@ -103,6 +103,39 @@ REFSOFT_SRCS=(
 	"src/client/refresh/files/pvs.c"
 )
 
+# gl1 renderer built against glad-gles1 (OpenGL ES 1.1 fixed-function
+# bindings), matching upstream's own ref_gles1 target (see
+# engine/Makefile's REFGL1_OBJS_/REFGL1_OBJS_GLADEES_). ES1.1 keeps the
+# old immediate-mode/matrix-stack API gl1's renderer code actually
+# calls, unlike gl3 (GLES3/GLSL-ES-300, needs WebGL2 -- confirmed
+# unavailable on this device's Gecko-48-class engine, WebGL1 only).
+# Built with -s LEGACY_GL_EMULATION=1 so Emscripten backs those calls
+# with WebGL1.
+REFGL1_SRCS=(
+	"src/client/refresh/gl1/qgl.c"
+	"src/client/refresh/gl1/gl1_draw.c"
+	"src/client/refresh/gl1/gl1_image.c"
+	"src/client/refresh/gl1/gl1_light.c"
+	"src/client/refresh/gl1/gl1_lightmap.c"
+	"src/client/refresh/gl1/gl1_main.c"
+	"src/client/refresh/gl1/gl1_mesh.c"
+	"src/client/refresh/gl1/gl1_misc.c"
+	"src/client/refresh/gl1/gl1_model.c"
+	"src/client/refresh/gl1/gl1_scrap.c"
+	"src/client/refresh/gl1/gl1_surf.c"
+	"src/client/refresh/gl1/gl1_warp.c"
+	"src/client/refresh/gl1/gl1_sdl.c"
+	"src/client/refresh/gl1/gl1_buffer.c"
+	"src/client/refresh/gl1/glad-gles1/src/glad.c"
+	"src/client/refresh/files/surf.c"
+	"src/client/refresh/files/common.c"
+	"src/client/refresh/files/models.c"
+	"src/client/refresh/files/pcx.c"
+	"src/client/refresh/files/stb.c"
+	"src/client/refresh/files/wal.c"
+	"src/client/refresh/files/pvs.c"
+)
+
 GAME_SRCS=(
 	"src/game/g_ai.c"
 	"src/game/g_chase.c"
