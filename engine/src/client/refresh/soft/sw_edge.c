@@ -260,6 +260,10 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 			}
 		}
 	}
+
+	fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: Floyd's check done, "
+		"entering insert loop, edgestoadd=%p edgelist=%p\n",
+		(void *)edgestoadd, (void *)edgelist);
 #endif
 
 	do
@@ -1059,14 +1063,40 @@ R_ScanEdges (entity_t *currententity, const surf_t *surface)
 		// mark that the head (background start) span is pre-included
 		surfaces[1].spanstate = 1;
 
+#ifdef __EMSCRIPTEN__
+		/* SAFE_HEAP caught a real out-of-bounds access somewhere in
+		 * this scanline loop with NONE of the existing conditional
+		 * prints below (all gated on watchdog trips or Floyd's finding
+		 * a cycle) having fired even once -- meaning whatever's wrong
+		 * happens fast, on an early scanline, before any of those
+		 * conditions get hit. Unconditional, per-step, per-scanline
+		 * checkpoints so the last one printed before the abort
+		 * pinpoints both the exact scanline and which of
+		 * R_InsertNewEdges/pdrawfunc/R_RemoveEdges/R_StepActiveU it
+		 * died in. Bounded by the screen height (loop only runs
+		 * vrect.height times), so cheap enough to leave unconditional. */
+		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d newedges=%p "
+			"removeedges=%p\n", iv, (void *)newedges[iv],
+			(void *)removeedges[iv]);
+#endif
+
 		if (newedges[iv])
 		{
 			// Update AET with GET event
 			R_InsertNewEdges (newedges[iv], edge_head.next);
 		}
 
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d "
+			"R_InsertNewEdges done\n", iv);
+#endif
+
 		// Generate spans
 		(*pdrawfunc) ();
+
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d pdrawfunc done\n", iv);
+#endif
 
 		// flush the span list if we can't be sure we have enough spans left for
 		// the next scan
@@ -1088,8 +1118,16 @@ R_ScanEdges (entity_t *currententity, const surf_t *surface)
 		if (removeedges[iv])
 			R_RemoveEdges (removeedges[iv]);
 
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d R_RemoveEdges done\n", iv);
+#endif
+
 		if (edge_head.next != &edge_tail)
 			R_StepActiveU (edge_head.next);
+
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d R_StepActiveU done\n", iv);
+#endif
 	}
 
 	// do the last scan (no need to step or sort or remove on the last scan)
