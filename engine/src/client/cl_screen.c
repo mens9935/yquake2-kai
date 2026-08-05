@@ -1068,6 +1068,47 @@ SCR_TouchPics(void)
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+/* The layout-string "xv"/"yv" commands (and the equivalent inline math
+ * in the "client"/"ctf" blocks below) place elements in a virtual
+ * 320x240 coordinate frame that's meant to sit CENTERED on the real
+ * screen -- value 0 is that frame's left/top edge, 319/239 its right/
+ * bottom edge. That's fine (and long-standing, correct behavior) on
+ * any screen at least 320x240, where the frame just sits in the middle
+ * with margin to spare. This KaiOS port's 240x320 screen is narrower
+ * than that reference frame, so centering it means the frame's own
+ * left and right edges -- xv 0 (health number in the stock statusbar)
+ * and xv 296-319 (selected-item icon, timer) among them -- fall
+ * outside the real, narrower screen entirely and never get drawn at
+ * all: exactly the "missing HUD content" a real device showed.
+ *
+ * Compress the virtual frame to fit instead of centering-and-clipping
+ * it, but ONLY on a screen actually narrower/shorter than the
+ * reference -- anything at or above 320x240 keeps the original,
+ * correct-for-decades centering behavior unchanged. */
+static int
+SCR_LayoutXV(int value, float scale)
+{
+	if (viddef.width < 320)
+	{
+		return (int)((value * (float)viddef.width) / 320.0f);
+	}
+
+	return (int)(viddef.width / 2 - scale * 160 + scale * value);
+}
+
+static int
+SCR_LayoutYV(int value, float scale)
+{
+	if (viddef.height < 240)
+	{
+		return (int)((value * (float)viddef.height) / 240.0f);
+	}
+
+	return (int)(viddef.height / 2 - scale * 120 + scale * value);
+}
+#endif
+
 static void
 SCR_ExecuteLayoutString(char *s)
 {
@@ -1112,7 +1153,11 @@ SCR_ExecuteLayoutString(char *s)
 		if (!strcmp(token, "xv"))
 		{
 			token = COM_Parse(&s);
+#ifdef __EMSCRIPTEN__
+			x = SCR_LayoutXV((int)strtol(token, (char **)NULL, 10), scale);
+#else
 			x = viddef.width / 2 - scale * 160 + scale * (int)strtol(token, (char **)NULL, 10);
+#endif
 			continue;
 		}
 
@@ -1133,7 +1178,11 @@ SCR_ExecuteLayoutString(char *s)
 		if (!strcmp(token, "yv"))
 		{
 			token = COM_Parse(&s);
+#ifdef __EMSCRIPTEN__
+			y = SCR_LayoutYV((int)strtol(token, (char **)NULL, 10), scale);
+#else
 			y = viddef.height / 2 - scale * 120 + scale * (int)strtol(token, (char **)NULL, 10);
+#endif
 			continue;
 		}
 
@@ -1183,9 +1232,17 @@ SCR_ExecuteLayoutString(char *s)
 			clientinfo_t *ci;
 
 			token = COM_Parse(&s);
+#ifdef __EMSCRIPTEN__
+			x = SCR_LayoutXV((int)strtol(token, (char **)NULL, 10), scale);
+#else
 			x = viddef.width / 2 - scale * 160 + scale * (int)strtol(token, (char **)NULL, 10);
+#endif
 			token = COM_Parse(&s);
+#ifdef __EMSCRIPTEN__
+			y = SCR_LayoutYV((int)strtol(token, (char **)NULL, 10), scale);
+#else
 			y = viddef.height / 2 - scale * 120 + scale * (int)strtol(token, (char **)NULL, 10);
+#endif
 			SCR_AddDirtyPoint(x, y);
 			SCR_AddDirtyPoint(x + scale * 159, y + scale * 31);
 
@@ -1232,9 +1289,17 @@ SCR_ExecuteLayoutString(char *s)
 			char block[80];
 
 			token = COM_Parse(&s);
+#ifdef __EMSCRIPTEN__
+			x = SCR_LayoutXV((int)strtol(token, (char **)NULL, 10), scale);
+#else
 			x = viddef.width / 2 - scale * 160 + scale*(int)strtol(token, (char **)NULL, 10);
+#endif
 			token = COM_Parse(&s);
-			y = viddef.height / 2 - scale * 120 + scale*(int)strtol(token, (char **)NULL, 10);
+#ifdef __EMSCRIPTEN__
+			y = SCR_LayoutYV((int)strtol(token, (char **)NULL, 10), scale);
+#else
+			y = viddef.height / 2 - scale*120 + scale*(int)strtol(token, (char **)NULL, 10);
+#endif
 			SCR_AddDirtyPoint(x, y);
 			SCR_AddDirtyPoint(x + scale * 159, y + scale * 31);
 
