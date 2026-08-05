@@ -119,22 +119,12 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 {
 	edge_t	*next_edge;
 #ifdef __EMSCRIPTEN__
-	/* R_StepActiveU had two confirmed real-device infinite loops in its
-	 * own list walks; this function has the same shape (walk a linked
-	 * list trusting it's finite and correctly sorted) and zero
-	 * protection, so it's an equally plausible hang site. Same watchdog
-	 * pattern as there.
-	 *
-	 * Cap raised from 2000 to 20000: the acyclic-length diagnostic below
-	 * (length_reports) proved that with the reporting cap at 4 it was
-	 * only showing the first few over-2000 scanlines each frame, masking
-	 * how many actually exceed that -- multiple do, which means 2000 was
-	 * genuinely too low for this map's real edge density rather than a
-	 * sign every one of those scanlines is corrupt. Cap is still finite
-	 * and the print still gated to fire only once ever: if 20000 trips
-	 * too, that IS a real hang/corruption signal worth trusting, since a
-	 * per-trip scan and unthrottled console output at that volume would
-	 * themselves look exactly like a permanent hang from outside. */
+	/* Watchdog against a corrupted/cyclic edgestoadd or edgelist chain --
+	 * left in as a cheap defensive safety net (only costs anything if it
+	 * actually trips) after root-causing this whole session's edge-list
+	 * corruption to newedges[]/removeedges[] being undersized for this
+	 * port's 240x320 portrait resolution (see SWimp_CreateRender in
+	 * sw_main.c). Should never trip now that that's fixed. */
 	int guard;
 	static int reported;
 	int outer_guard = 0;
@@ -143,31 +133,11 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 #endif
 
 #ifdef __EMSCRIPTEN__
-	/* Three rounds of real-device tracing found and fixed two genuine,
-	 * independent bugs (a missing frame check and a missing insubmodel
-	 * check on R_RenderFace's edge cache) -- neither changed this
-	 * outcome at all, down to the exact same addresses recurring. The
-	 * remaining mechanism (confirmed by that tracing): R_ClipEdge
-	 * deliberately marks partially-frustum-clipped edges as
-	 * "uncacheable" (cacheoffset = 0x7FFFFFFF, see its comment), so two
-	 * adjacent faces sharing one map edge can legitimately each end up
-	 * with their OWN edge_t for it when that edge is partially clipped
-	 * -- and if both then resolve to the same screen column (plausible,
-	 * they're clipped versions of the same physical boundary), whatever
-	 * sequence of ties in the insert-at-head logic below produces a
-	 * 2-node cycle instead of two safely-ordered entries. Diagnosed
-	 * enough for now, per Floyd's algorithm's own guarantee: it's ALWAYS
-	 * fixable by cutting exactly one link, with zero data loss, and
-	 * that's a much better outcome than the old behavior of just
-	 * reporting and letting the caller's own outer_guard watchdog
-	 * eventually trip -- which stranded the rest of this scanline's
-	 * edges AND left every downstream loop that touches this list
-	 * (R_StepActiveU, R_GenerateSpans, ...) to independently trip its
-	 * own watchdog on the same corruption. Detect with Floyd's (O(list
-	 * length), no per-call cost on the ~300 healthy scanlines this runs
-	 * on every frame), and when found, cut the one link that closes the
-	 * loop and keep going -- every node stays reachable, just as a
-	 * straight list instead of a loop. */
+	/* Self-heal a cyclic edgestoadd chain via Floyd's algorithm: O(list
+	 * length), no cost on a healthy list, and always repairable by
+	 * cutting exactly one link with zero data loss if it ever does
+	 * trip. Belt-and-suspenders alongside the newedges/removeedges
+	 * height fix above. */
 	{
 		edge_t *slow = edgestoadd, *fast = edgestoadd;
 		qboolean cyclic = false;
@@ -213,57 +183,7 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 					(void *)tail->owner, (void *)p1->owner);
 			}
 		}
-		else
-		{
-			/* Not cyclic (Floyd's just proved that above) -- but the
-			 * do-while below still has its own outer_guard tripping on
-			 * some scanlines even with this repair in place, meaning
-			 * whatever's left is either a genuinely very long acyclic
-			 * list (contradicts an earlier ~760-edges-per-frame estimate
-			 * that might just not apply to this specific view/map) or a
-			 * different bug entirely. Count the real length once so the
-			 * next device log distinguishes those instead of guessing
-			 * again -- bounded at 100000 purely so a genuine infinite
-			 * loop here (would mean Floyd's itself is broken, or edgestoadd
-			 * isn't null-terminated at all) can't hang the count itself.
-			 *
-			 * Report cap raised 4 -> 20: at 4, this counter is shared
-			 * across the WHOLE FRAME, so if several different scanlines
-			 * each legitimately exceed the threshold, only the first few
-			 * ever get logged and the rest are silently skipped -- that
-			 * turned out to be exactly what was masking how many
-			 * scanlines actually exceed 2000, which is why the watchdog
-			 * caps above just got raised to 20000 instead of assuming a
-			 * new mystery bug. Threshold matched to the new 20000 caps
-			 * so this only fires for scanlines that would actually trip
-			 * one of those watchdogs. */
-			static int length_reports;
-
-			if (length_reports < 20)
-			{
-				edge_t *walk = edgestoadd;
-				int len = 0;
-
-				while (walk && len < 100000)
-				{
-					len++;
-					walk = walk->next;
-				}
-
-				if (len > 20000)
-				{
-					length_reports++;
-					fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: edgestoadd "
-						"acyclic but length=%d (terminator=%p)\n",
-						len, (void *)walk);
-				}
-			}
-		}
 	}
-
-	fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: Floyd's check done, "
-		"entering insert loop, edgestoadd=%p edgelist=%p\n",
-		(void *)edgestoadd, (void *)edgelist);
 #endif
 
 	do
@@ -283,15 +203,6 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 		next_edge = edgestoadd->next;
 
 #ifdef __EMSCRIPTEN__
-		/* Confirmed via real device log: R_RemoveEdges later segfaults
-		 * unlinking an edge that was supposedly inserted right here,
-		 * during a call whose own watchdogs never tripped -- so this
-		 * specific node either never gets a valid ->prev/->next written
-		 * to it in this loop, or gets processed/inserted more than
-		 * once. Trace every single node this loop actually touches. */
-		fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: processing node=%p "
-			"u=%d next_edge=%p owner=%p\n", (void *)edgestoadd,
-			edgestoadd->u, (void *)next_edge, (void *)edgestoadd->owner);
 		guard = 0;
 #endif
 		while (edgelist->u < edgestoadd->u)
@@ -317,13 +228,6 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 		edgestoadd->prev = edgelist->prev;
 		edgelist->prev->next = edgestoadd;
 		edgelist->prev = edgestoadd;
-
-#ifdef __EMSCRIPTEN__
-		fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: inserted node=%p "
-			"before edgelist=%p, node->prev=%p node->next=%p\n",
-			(void *)edgestoadd, (void *)edgelist,
-			(void *)edgestoadd->prev, (void *)edgestoadd->next);
-#endif
 	} while ((edgestoadd = next_edge) != NULL);
 }
 
@@ -353,20 +257,6 @@ R_RemoveEdges (edge_t *pedge)
 			}
 			return;
 		}
-#endif
-#ifdef __EMSCRIPTEN__
-		/* removeedges[iv] can be a CHAIN via ->nextremove, not just one
-		 * edge -- manually tracing the previous device log's insertion
-		 * and R_StepActiveU swaps showed the specific edge SAFE_HEAP
-		 * flagged (per that log) ending up validly linked and never
-		 * touched again before the crash, which doesn't add up unless
-		 * the actual bad dereference is on a LATER node in this same
-		 * removal chain that we've had zero visibility into. Print
-		 * every node's own address/prev/next right before touching
-		 * them, so a segfault here finally shows exactly which one. */
-		fprintf(stderr, "KAIOS_DEBUG: R_RemoveEdges: unlinking pedge=%p "
-			"prev=%p next=%p nextremove=%p\n", (void *)pedge,
-			(void *)pedge->prev, (void *)pedge->next, (void *)pedge->nextremove);
 #endif
 		pedge->next->prev = pedge->prev;
 		pedge->prev->next = pedge->next;
@@ -440,19 +330,6 @@ R_StepActiveU (edge_t *pedge)
 			// push it back to keep it sorted
 			pnext_edge = pedge->next;
 
-#ifdef __EMSCRIPTEN__
-			/* R_InsertNewEdges traced clean insertion of every edge at
-			 * iv=0 (correct ->prev/->next, no duplicates), yet
-			 * R_RemoveEdges segfaults unlinking one of those same
-			 * edges a few scanlines later -- this pull-out/reinsert
-			 * branch is the only other code touching AET ->prev/->next
-			 * in between. Trace every swap: which edge moved, and its
-			 * old/new neighbors, both before and after relinking. */
-			fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: swap pedge=%p u=%d "
-				"old_prev=%p old_next=%p\n", (void *)pedge, pedge->u,
-				(void *)pedge->prev, (void *)pedge->next);
-#endif
-
 			// pull the edge out of the edge list
 			pedge->next->prev = pedge->prev;
 			pedge->prev->next = pedge->next;
@@ -520,13 +397,6 @@ R_StepActiveU (edge_t *pedge)
 			pedge->prev = pwedge;
 			pedge->next->prev = pedge;
 			pwedge->next = pedge;
-
-#ifdef __EMSCRIPTEN__
-			fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: swap pedge=%p "
-				"reinserted after pwedge=%p, new_prev=%p new_next=%p "
-				"pnext_edge=%p\n", (void *)pedge, (void *)pwedge,
-				(void *)pedge->prev, (void *)pedge->next, (void *)pnext_edge);
-#endif
 
 			pedge = pnext_edge;
 			if (pedge == &edge_tail)
@@ -1113,40 +983,14 @@ R_ScanEdges (entity_t *currententity, const surf_t *surface)
 		// mark that the head (background start) span is pre-included
 		surfaces[1].spanstate = 1;
 
-#ifdef __EMSCRIPTEN__
-		/* SAFE_HEAP caught a real out-of-bounds access somewhere in
-		 * this scanline loop with NONE of the existing conditional
-		 * prints below (all gated on watchdog trips or Floyd's finding
-		 * a cycle) having fired even once -- meaning whatever's wrong
-		 * happens fast, on an early scanline, before any of those
-		 * conditions get hit. Unconditional, per-step, per-scanline
-		 * checkpoints so the last one printed before the abort
-		 * pinpoints both the exact scanline and which of
-		 * R_InsertNewEdges/pdrawfunc/R_RemoveEdges/R_StepActiveU it
-		 * died in. Bounded by the screen height (loop only runs
-		 * vrect.height times), so cheap enough to leave unconditional. */
-		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d newedges=%p "
-			"removeedges=%p\n", iv, (void *)newedges[iv],
-			(void *)removeedges[iv]);
-#endif
-
 		if (newedges[iv])
 		{
 			// Update AET with GET event
 			R_InsertNewEdges (newedges[iv], edge_head.next);
 		}
 
-#ifdef __EMSCRIPTEN__
-		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d "
-			"R_InsertNewEdges done\n", iv);
-#endif
-
 		// Generate spans
 		(*pdrawfunc) ();
-
-#ifdef __EMSCRIPTEN__
-		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d pdrawfunc done\n", iv);
-#endif
 
 		// flush the span list if we can't be sure we have enough spans left for
 		// the next scan
@@ -1168,16 +1012,8 @@ R_ScanEdges (entity_t *currententity, const surf_t *surface)
 		if (removeedges[iv])
 			R_RemoveEdges (removeedges[iv]);
 
-#ifdef __EMSCRIPTEN__
-		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d R_RemoveEdges done\n", iv);
-#endif
-
 		if (edge_head.next != &edge_tail)
 			R_StepActiveU (edge_head.next);
-
-#ifdef __EMSCRIPTEN__
-		fprintf(stderr, "KAIOS_DEBUG: R_ScanEdges: iv=%d R_StepActiveU done\n", iv);
-#endif
 	}
 
 	// do the last scan (no need to step or sort or remove on the last scan)

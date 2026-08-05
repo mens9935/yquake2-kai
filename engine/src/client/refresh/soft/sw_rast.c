@@ -31,10 +31,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 static unsigned int	cacheoffset;
 
-#ifdef __EMSCRIPTEN__
-static int edge_tie_reports;
-#endif
-
 int	c_faceclip;	// number of faces clipped
 
 clipplane_t	view_clipplanes[4];
@@ -318,19 +314,12 @@ R_EmitEdge (mvertex_t *pv0, mvertex_t *pv1, medge_t *r_pedge, qboolean r_nearzio
 	edge = edge_p++;
 
 #ifdef __EMSCRIPTEN__
-	/* R_ScanEdges's per-scanline edge lists (newedges[]/removeedges[])
-	 * showed real-device corruption (a cyclic ->next chain) with no
-	 * local logic bug found in how those lists are built or walked --
-	 * next suspect is the edge_t pool itself. R_EmitEdge()'s caller
-	 * checks "(edge_p + fa->numedges + 4) >= edge_max" before starting
-	 * a face's edges, but that margin assumes at most a small, fixed
-	 * number of extra edges beyond one per surfedge; if clipping against
-	 * multiple frustum planes at once ever emits more than that, edge_p
-	 * would walk past edge_max here with nothing catching it -- writing
-	 * this "fresh" edge_t into memory outside the pool and corrupting
-	 * whatever's there (plausibly the very newedges[]/removeedges[]
-	 * arrays, or another already-linked edge_t, either of which would
-	 * look exactly like what R_InsertNewEdges/R_StepActiveU reported). */
+	/* Defensive check: R_RenderFace's per-face margin check assumes a
+	 * small, fixed number of extra edges beyond one per surfedge, which
+	 * could in theory be wrong for some face shape and let edge_p walk
+	 * past edge_max with nothing catching it. Cheap (one-shot) safety
+	 * net, left in after finding this session's actual corruption cause
+	 * was newedges[]/removeedges[] being undersized (see sw_main.c). */
 	if (edge_p > edge_max)
 	{
 		static int reported;
@@ -448,30 +437,6 @@ R_EmitEdge (mvertex_t *pv0, mvertex_t *pv1, medge_t *r_pedge, qboolean r_nearzio
 
 	if (!newedges[v] || newedges[v]->u >= u_check)
 	{
-#ifdef __EMSCRIPTEN__
-		{
-			static int reported;
-
-			if (!reported && newedges[v] == edge)
-			{
-				reported = 1;
-				fprintf(stderr, "KAIOS_DEBUG: R_EmitEdge: re-inserting the "
-					"SAME edge %p (owner=%p) as current newedges[%d] head!\n",
-					(void *)edge, (void *)edge->owner, v);
-			}
-		}
-		if (edge_tie_reports < 8 && newedges[v] && newedges[v]->u == u_check)
-		{
-			edge_tie_reports++;
-			fprintf(stderr, "KAIOS_DEBUG: R_EmitEdge: exact tie at head, "
-				"v=%d u_check=%d new=%p (owner=%p surfs=%u,%u) "
-				"head=%p (owner=%p surfs=%u,%u)\n",
-				v, u_check, (void *)edge, (void *)edge->owner,
-				(unsigned)edge->surfs[0], (unsigned)edge->surfs[1],
-				(void *)newedges[v], (void *)newedges[v]->owner,
-				(unsigned)newedges[v]->surfs[0], (unsigned)newedges[v]->surfs[1]);
-		}
-#endif
 		edge->next = newedges[v];
 		newedges[v] = edge;
 	}

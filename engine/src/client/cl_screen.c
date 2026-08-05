@@ -1798,46 +1798,24 @@ SCR_UpdateScreen(void)
 
 			V_RenderView(separation[i]);
 
-#ifdef __EMSCRIPTEN__
-#define KAIOS_CHECKPOINT(label) \
-	do { \
-		static int reported; \
-		if (!reported) { \
-			reported = 1; \
-			fprintf(stderr, "KAIOS_DEBUG: SCR_UpdateScreen: checkpoint " \
-				label "\n"); \
-		} \
-	} while (0)
-			KAIOS_CHECKPOINT("after V_RenderView");
-#else
-#define KAIOS_CHECKPOINT(label)
-#endif
-
 			SCR_DrawStats();
-			KAIOS_CHECKPOINT("after SCR_DrawStats");
 			SCR_DrawSpeed();
-			KAIOS_CHECKPOINT("after SCR_DrawSpeed");
 #ifdef __EMSCRIPTEN__
 			SCR_DrawKaiosStats();
-			KAIOS_CHECKPOINT("after SCR_DrawKaiosStats");
 #endif
 
 			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 1)
 			{
 				SCR_DrawLayout();
-				KAIOS_CHECKPOINT("after SCR_DrawLayout");
 			}
 
 			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 2)
 			{
 				CL_DrawInventory();
-				KAIOS_CHECKPOINT("after CL_DrawInventory");
 			}
 
 			SCR_DrawNet();
-			KAIOS_CHECKPOINT("after SCR_DrawNet");
 			SCR_CheckDrawCenterString();
-			KAIOS_CHECKPOINT("after SCR_CheckDrawCenterString");
 
 			if (scr_timegraph->value)
 			{
@@ -1851,55 +1829,17 @@ SCR_UpdateScreen(void)
 			}
 
 			SCR_DrawPause();
-			KAIOS_CHECKPOINT("after SCR_DrawPause");
 
 			SCR_DrawConsole();
-			KAIOS_CHECKPOINT("after SCR_DrawConsole");
 
 			M_Draw();
-			KAIOS_CHECKPOINT("after M_Draw");
 
 			SCR_DrawLoading();
-			KAIOS_CHECKPOINT("after SCR_DrawLoading");
-#undef KAIOS_CHECKPOINT
 		}
 	}
 
 	SCR_Framecounter();
-#ifdef __EMSCRIPTEN__
-	{
-		static int reported;
-
-		if (!reported)
-		{
-			reported = 1;
-			fprintf(stderr, "KAIOS_DEBUG: SCR_UpdateScreen: checkpoint "
-				"before R_EndFrame\n");
-		}
-	}
-#endif
 	R_EndFrame();
-
-#ifdef __EMSCRIPTEN__
-	/* Bisecting a silent post-render hang: RE_RenderFrame's own prints
-	 * show it completing and returning cleanly, but nothing downstream
-	 * of it (SCR_DrawStats/SCR_DrawConsole/M_Draw/... through here to
-	 * R_EndFrame) has any visibility at all. If this print is missing
-	 * from a device log that DID show "RE_RenderFrame: returning", the
-	 * hang is somewhere in that stretch; if it's present, the entire
-	 * screen update completed and the next suspect is sound/network or
-	 * simply the browser not scheduling another tick. */
-	{
-		static int reported;
-
-		if (!reported)
-		{
-			reported = 1;
-			fprintf(stderr, "KAIOS_DEBUG: SCR_UpdateScreen: reached end "
-				"(after R_EndFrame)\n");
-		}
-	}
-#endif
 }
 
 static float
