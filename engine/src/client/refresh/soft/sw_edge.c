@@ -426,6 +426,19 @@ R_StepActiveU (edge_t *pedge)
 			// push it back to keep it sorted
 			pnext_edge = pedge->next;
 
+#ifdef __EMSCRIPTEN__
+			/* R_InsertNewEdges traced clean insertion of every edge at
+			 * iv=0 (correct ->prev/->next, no duplicates), yet
+			 * R_RemoveEdges segfaults unlinking one of those same
+			 * edges a few scanlines later -- this pull-out/reinsert
+			 * branch is the only other code touching AET ->prev/->next
+			 * in between. Trace every swap: which edge moved, and its
+			 * old/new neighbors, both before and after relinking. */
+			fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: swap pedge=%p u=%d "
+				"old_prev=%p old_next=%p\n", (void *)pedge, pedge->u,
+				(void *)pedge->prev, (void *)pedge->next);
+#endif
+
 			// pull the edge out of the edge list
 			pedge->next->prev = pedge->prev;
 			pedge->prev->next = pedge->next;
@@ -493,6 +506,13 @@ R_StepActiveU (edge_t *pedge)
 			pedge->prev = pwedge;
 			pedge->next->prev = pedge;
 			pwedge->next = pedge;
+
+#ifdef __EMSCRIPTEN__
+			fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: swap pedge=%p "
+				"reinserted after pwedge=%p, new_prev=%p new_next=%p "
+				"pnext_edge=%p\n", (void *)pedge, (void *)pwedge,
+				(void *)pedge->prev, (void *)pedge->next, (void *)pnext_edge);
+#endif
 
 			pedge = pnext_edge;
 			if (pedge == &edge_tail)
