@@ -1840,6 +1840,27 @@ SCR_UpdateScreen(void)
 
 	SCR_Framecounter();
 	R_EndFrame();
+
+#ifdef __EMSCRIPTEN__
+	/* Bisecting a silent post-render hang: RE_RenderFrame's own prints
+	 * show it completing and returning cleanly, but nothing downstream
+	 * of it (SCR_DrawStats/SCR_DrawConsole/M_Draw/... through here to
+	 * R_EndFrame) has any visibility at all. If this print is missing
+	 * from a device log that DID show "RE_RenderFrame: returning", the
+	 * hang is somewhere in that stretch; if it's present, the entire
+	 * screen update completed and the next suspect is sound/network or
+	 * simply the browser not scheduling another tick. */
+	{
+		static int reported;
+
+		if (!reported)
+		{
+			reported = 1;
+			fprintf(stderr, "KAIOS_DEBUG: SCR_UpdateScreen: reached end "
+				"(after R_EndFrame)\n");
+		}
+	}
+#endif
 }
 
 static float

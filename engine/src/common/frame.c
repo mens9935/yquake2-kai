@@ -177,6 +177,49 @@ static void
 Qcommon_EmscriptenTick(void *arg)
 {
 	static long long oldtime;
+#ifdef __EMSCRIPTEN__
+	/* User's own real-device history: even fully-original code (before
+	 * any of the R_ScanEdges watchdog/self-heal work in this branch)
+	 * sometimes got 5-6 frames in before hanging -- and the latest log
+	 * shows RE_RenderFrame completing and returning cleanly, with no
+	 * further KAIOS_DEBUG output at all afterward. That means whatever
+	 * hangs is NOT inside R_RenderFrame itself (already covered by its
+	 * own entered/returning prints) -- it's either later in this same
+	 * tick (SCR_UpdateScreen's post-3D-view drawing, R_EndFrame, sound,
+	 * or network) or the browser silently never calling this tick again
+	 * (rAF starvation from an unresponsive-script kill, or a single
+	 * tick's compute time -- e.g. many scanlines each burning up to the
+	 * new 20000-iteration watchdog cap -- just being so long on this
+	 * weak device that it looks identical to a hang from outside).
+	 * Print at the very top of every tick, capped, with elapsed time for
+	 * the *previous* tick, so the device log can distinguish "browser
+	 * stopped calling us" (no more of these prints at all) from "stuck
+	 * somewhere after RE_RenderFrame within one giant tick" (this print
+	 * for tick N+1 never appears, but if it does, its logged prev-tick
+	 * duration shows whether tick N was merely very slow). */
+	static int tick_num;
+	static long long tick_start;
+
+	if (tick_num < 20)
+	{
+		long long now = Sys_Microseconds();
+
+		if (tick_num > 0)
+		{
+			fprintf(stderr, "KAIOS_DEBUG: Qcommon_EmscriptenTick: tick %d "
+				"starting (previous tick took %lld ms)\n",
+				tick_num, (now - tick_start) / 1000ll);
+		}
+		else
+		{
+			fprintf(stderr, "KAIOS_DEBUG: Qcommon_EmscriptenTick: tick %d "
+				"starting (first tick)\n", tick_num);
+		}
+
+		tick_start = now;
+		tick_num++;
+	}
+#endif
 
 	if (!oldtime)
 	{
