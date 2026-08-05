@@ -99,6 +99,17 @@ EMCC_LINK_FLAGS=(
 	# root-caused -- both add real overhead on this already-slow device.
 	-s ASSERTIONS=2
 	-s STACK_OVERFLOW_CHECK=2
+	# ASSERTIONS+STACK_OVERFLOW_CHECK alone caught nothing (identical,
+	# error-free log to before) -- that rules out actual stack-pointer
+	# overflow, but neither of those checks intercepts individual
+	# memory accesses, so a plain out-of-bounds heap/stack WRITE (e.g.
+	# a stray write landing on a return address) would sail straight
+	# through them. SAFE_HEAP bounds-checks every single load/store
+	# against its allocation and throws immediately on the first bad
+	# one, which is the direct tool for that. Much slower than the
+	# above two alone -- expect this diagnostic build to take
+	# substantially longer than the already-slow ~20-25s baseline.
+	-s SAFE_HEAP=1
 )
 
 compile_group() {
