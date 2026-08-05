@@ -313,6 +313,34 @@ R_EmitEdge (mvertex_t *pv0, mvertex_t *pv1, medge_t *r_pedge, qboolean r_nearzio
 
 	edge = edge_p++;
 
+#ifdef __EMSCRIPTEN__
+	/* R_ScanEdges's per-scanline edge lists (newedges[]/removeedges[])
+	 * showed real-device corruption (a cyclic ->next chain) with no
+	 * local logic bug found in how those lists are built or walked --
+	 * next suspect is the edge_t pool itself. R_EmitEdge()'s caller
+	 * checks "(edge_p + fa->numedges + 4) >= edge_max" before starting
+	 * a face's edges, but that margin assumes at most a small, fixed
+	 * number of extra edges beyond one per surfedge; if clipping against
+	 * multiple frustum planes at once ever emits more than that, edge_p
+	 * would walk past edge_max here with nothing catching it -- writing
+	 * this "fresh" edge_t into memory outside the pool and corrupting
+	 * whatever's there (plausibly the very newedges[]/removeedges[]
+	 * arrays, or another already-linked edge_t, either of which would
+	 * look exactly like what R_InsertNewEdges/R_StepActiveU reported). */
+	if (edge_p > edge_max)
+	{
+		static int reported;
+
+		if (!reported)
+		{
+			reported = 1;
+			fprintf(stderr, "KAIOS_DEBUG: R_EmitEdge: edge pool overflow! "
+				"edge_p=%p edge_max=%p r_edges=%p\n",
+				(void *)edge_p, (void *)edge_max, (void *)r_edges);
+		}
+	}
+#endif
+
 	edge->owner = r_pedge;
 
 	edge->nearzi = lzi0;
@@ -373,9 +401,29 @@ R_EmitEdge (mvertex_t *pv0, mvertex_t *pv1, medge_t *r_pedge, qboolean r_nearzio
 	}
 	else
 	{
+#ifdef __EMSCRIPTEN__
+		int guard = 0;
+		static int reported;
+#endif
 		pcheck = newedges[v];
 		while (pcheck->next && pcheck->next->u < u_check)
+		{
 			pcheck = pcheck->next;
+#ifdef __EMSCRIPTEN__
+			if (++guard > 2000)
+			{
+				if (!reported)
+				{
+					reported = 1;
+					fprintf(stderr, "KAIOS_DEBUG: R_EmitEdge: newedges[v] "
+						"sorted-insert search stuck! v=%d pcheck=%p "
+						"pcheck->u=%d u_check=%d\n",
+						v, (void *)pcheck, pcheck->u, u_check);
+				}
+				break;
+			}
+#endif
+		}
 		edge->next = pcheck->next;
 		pcheck->next = edge;
 	}
