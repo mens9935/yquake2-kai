@@ -117,11 +117,20 @@ int RI_PrepareForWindow(void)
 		gl_state.stencil = false;
 	}
 
-#ifdef YQ2_GL1_GLES
+#if defined(YQ2_GL1_GLES) && !defined(__EMSCRIPTEN__)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 #endif
+	/* Real-device log: requesting an explicit "OpenGL ES 1.0" context
+	 * (above) made SDL_GL_CreateContext fail outright with
+	 * EGL_BAD_CONFIG under Emscripten -- its WebGL/EGL shim only
+	 * understands ES2/ES3 context version requests (~WebGL1/WebGL2),
+	 * not ES1. LEGACY_GL_EMULATION (see build.sh) is what lets this
+	 * renderer's actual GL1.x/ES1.1-style calls work on top of a
+	 * WebGL1 context; it doesn't need the context itself to claim to
+	 * be ES1. Leaving the attribute unset lets Emscripten pick its own
+	 * (WebGL1-backed) default instead. */
 
 	// Let's see if the driver supports MSAA.
 	int msaa_samples = 0;
