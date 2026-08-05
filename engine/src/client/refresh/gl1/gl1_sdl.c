@@ -121,16 +121,25 @@ int RI_PrepareForWindow(void)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#elif defined(YQ2_GL1_GLES) && defined(__EMSCRIPTEN__)
+	/* Not "leave it unset" -- checked Emscripten's own eglCreateContext
+	 * (src/library_egl.js): it reads EGL_CONTEXT_CLIENT_VERSION out of
+	 * the attribute list and REJECTS with EGL_BAD_CONFIG unless it's
+	 * exactly 2 (WebGL1/GLES2) -- if the attribute isn't present at all
+	 * it defaults to 1, which fails that same check. So dropping the
+	 * version request entirely (previous fix, confirmed by a second
+	 * real-device test to NOT resolve EGL_BAD_CONFIG) was wrong in the
+	 * other direction: requesting version 1 (ES1, previous code) and
+	 * requesting no version at all both resolve to the same rejected
+	 * value. What SDL2's Emscripten backend actually needs here is
+	 * MAJOR_VERSION=2 -- LEGACY_GL_EMULATION (build.sh) still layers
+	 * this renderer's GL1.x/ES1.1-style calls (glBegin, glMatrixMode,
+	 * ...) on top of that real GLES2/WebGL1 context; the context itself
+	 * was never going to be able to claim to be ES1. */
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 #endif
-	/* Real-device log: requesting an explicit "OpenGL ES 1.0" context
-	 * (above) made SDL_GL_CreateContext fail outright with
-	 * EGL_BAD_CONFIG under Emscripten -- its WebGL/EGL shim only
-	 * understands ES2/ES3 context version requests (~WebGL1/WebGL2),
-	 * not ES1. LEGACY_GL_EMULATION (see build.sh) is what lets this
-	 * renderer's actual GL1.x/ES1.1-style calls work on top of a
-	 * WebGL1 context; it doesn't need the context itself to claim to
-	 * be ES1. Leaving the attribute unset lets Emscripten pick its own
-	 * (WebGL1-backed) default instead. */
 
 	// Let's see if the driver supports MSAA.
 	int msaa_samples = 0;
