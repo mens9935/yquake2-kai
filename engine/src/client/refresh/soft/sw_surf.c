@@ -334,6 +334,22 @@ static surfcache_t *
 D_SCAlloc (int width, int size)
 {
 	surfcache_t	*new;
+#ifdef __EMSCRIPTEN__
+	/* A completely different subsystem from every other watchdog in
+	 * this branch (edge list / surface stack / span lists, all in
+	 * sw_edge.c and sw_scan.c) -- this is the texture/lightmap surface
+	 * cache, called on every cache-miss solid surface. The merge loop
+	 * below normally terminates by hitting sc_rover == NULL (defended
+	 * with Com_Error, not silently unsafe like the earlier bugs), but
+	 * that guard only works if the sc_base linked list is genuinely
+	 * NULL-terminated; a cycle here (from cache corruption) would
+	 * never hit NULL and would merge blocks forever instead. Same
+	 * throttled-print, low-cap pattern as everywhere else in this
+	 * branch -- learned the hard way that an unconditional print here
+	 * would itself be as bad as an unbounded loop if it trips often. */
+	int guard = 0;
+	static int reported;
+#endif
 
 	if ((width < 0) || (width > 256))
 	{
@@ -377,6 +393,20 @@ D_SCAlloc (int width, int size)
 
 		new->size += sc_rover->size;
 		new->next = sc_rover->next;
+
+#ifdef __EMSCRIPTEN__
+		if (++guard > 2000)
+		{
+			if (!reported)
+			{
+				reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: D_SCAlloc: merge loop stuck! "
+					"new=%p new->size=%d size=%d sc_rover=%p sc_rover->size=%d\n",
+					(void *)new, new->size, size, (void *)sc_rover, sc_rover->size);
+			}
+			break;
+		}
+#endif
 	}
 
 	// create a fragment out of any leftovers
