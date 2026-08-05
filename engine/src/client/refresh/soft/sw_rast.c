@@ -31,6 +31,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 static unsigned int	cacheoffset;
 
+#ifdef __EMSCRIPTEN__
+static int edge_tie_reports;
+#endif
+
 int	c_faceclip;	// number of faces clipped
 
 clipplane_t	view_clipplanes[4];
@@ -444,6 +448,30 @@ R_EmitEdge (mvertex_t *pv0, mvertex_t *pv1, medge_t *r_pedge, qboolean r_nearzio
 
 	if (!newedges[v] || newedges[v]->u >= u_check)
 	{
+#ifdef __EMSCRIPTEN__
+		{
+			static int reported;
+
+			if (!reported && newedges[v] == edge)
+			{
+				reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_EmitEdge: re-inserting the "
+					"SAME edge %p (owner=%p) as current newedges[%d] head!\n",
+					(void *)edge, (void *)edge->owner, v);
+			}
+		}
+		if (edge_tie_reports < 8 && newedges[v] && newedges[v]->u == u_check)
+		{
+			edge_tie_reports++;
+			fprintf(stderr, "KAIOS_DEBUG: R_EmitEdge: exact tie at head, "
+				"v=%d u_check=%d new=%p (owner=%p surfs=%u,%u) "
+				"head=%p (owner=%p surfs=%u,%u)\n",
+				v, u_check, (void *)edge, (void *)edge->owner,
+				(unsigned)edge->surfs[0], (unsigned)edge->surfs[1],
+				(void *)newedges[v], (void *)newedges[v]->owner,
+				(unsigned)newedges[v]->surfs[0], (unsigned)newedges[v]->surfs[1]);
+		}
+#endif
 		edge->next = newedges[v];
 		newedges[v] = edge;
 	}

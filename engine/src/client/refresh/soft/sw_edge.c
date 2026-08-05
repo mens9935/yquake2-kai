@@ -169,8 +169,12 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 					"cyclic, dumping shape:\n");
 				for (i = 0; i < 40; i++)
 				{
-					fprintf(stderr, "KAIOS_DEBUG:   [%d] node=%p u=%d next=%p\n",
-						i, (void *)walk, walk->u, (void *)walk->next);
+					fprintf(stderr, "KAIOS_DEBUG:   [%d] node=%p u=%d next=%p "
+						"prev=%p owner=%p surfs=%u,%u frame=%d\n",
+						i, (void *)walk, walk->u, (void *)walk->next,
+						(void *)walk->prev, (void *)walk->owner,
+						(unsigned)walk->surfs[0], (unsigned)walk->surfs[1],
+						walk->frame);
 					walk = walk->next;
 				}
 				break;
