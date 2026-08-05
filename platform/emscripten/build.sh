@@ -83,6 +83,7 @@ EMCC_LINK_FLAGS=(
 	-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS','callMain']
 	-s EXIT_RUNTIME=0
 	-s ENVIRONMENT=web
+	-lidbfs.js
 )
 
 compile_group() {

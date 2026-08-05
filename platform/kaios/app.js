@@ -176,8 +176,87 @@ function installWakeLock() {
 	document.addEventListener('visibilitychange', function () {
 		if (!document.hidden) {
 			acquireWakeLocks();
+		} else {
+			flushConfigToPersistentStorage();
 		}
 	});
+
+	// visibilitychange isn't guaranteed to fire before a page actually
+	// goes away (e.g. the OS just kills it) -- pagehide is the more
+	// reliable "this page may not get another turn" signal browsers
+	// offer, so it's a second attempt at the same flush, not a
+	// duplicate: worst case FS.syncfs() runs twice with nothing new
+	// the second time, which is harmless.
+	window.addEventListener('pagehide', flushConfigToPersistentStorage);
+}
+
+// ---------------------------------------------------------------------
+// Persist config.cfg (options menu changes, key binds) across launches.
+//
+// The engine's own config.cfg write (CL_WriteConfiguration(), on quit
+// or disconnect) lands on plain MEMFS, which is wiped on every reload --
+// there's nothing KaiOS-specific about *that* path, it's the same file
+// I/O yquake2 does everywhere. What's missing on this platform is
+// somewhere durable for MEMFS to be backed by: mount IDBFS over the
+// engine's writable homedir (~/.yq2, via Emscripten's synthesized HOME)
+// and pull in whatever was saved last session before the engine boots.
+//
+// Pushing local writes back *out* to IndexedDB is JS-side (FS.syncfs())
+// and doesn't happen automatically -- CL_WriteConfiguration() (cl_main.c)
+// triggers one itself right after writing config.cfg, which covers the
+// quit/disconnect paths. That still leaves the common real-world exit on
+// a feature phone: the user just switches away or locks the screen
+// without ever hitting a menu "quit". flushConfigToPersistentStorage()
+// below is the backstop for that -- wired to 'visibilitychange' going
+// hidden (above) and 'pagehide' (see installWakeLock()'s caller), so
+// whatever's on MEMFS at that point gets pushed out regardless of
+// whether the engine itself ever ran CL_WriteConfiguration.
+// ---------------------------------------------------------------------
+
+function getPersistentConfigDir() {
+	var home = (typeof ENV !== 'undefined' && ENV.HOME) || '/home/web_user';
+	return home + '/.yq2';
+}
+
+function mountPersistentConfig() {
+	return new Promise(function (resolve) {
+		var dir = getPersistentConfigDir();
+		try {
+			mkdirTreeFor(dir + '/x');
+			FS.mount(IDBFS, {}, dir);
+		} catch (e) {
+			console.log('[kaios] IDBFS mount failed, settings will not persist: ' +
+				describeError(e));
+			resolve();
+			return;
+		}
+
+		FS.syncfs(true, function (err) {
+			if (err) {
+				console.log('[kaios] IDBFS initial sync failed, settings will not persist: ' +
+					describeError(err));
+			}
+			// Either way, don't block boot on this -- worst case is a
+			// session that starts from defaults instead of saved settings,
+			// not one that fails to start.
+			resolve();
+		});
+	});
+}
+
+// engineStarted (not bootedOnce/callMainArmed) is the right guard here:
+// CL_WriteConfiguration() itself no-ops before the client is actually
+// initialized (cls.state == ca_uninitialized), same condition
+// engineStarted already tracks.
+function flushConfigToPersistentStorage() {
+	if (!engineStarted || typeof Module === 'undefined' || !Module.ccall) {
+		return;
+	}
+	try {
+		Module.ccall('CL_WriteConfiguration', null, [], []);
+	} catch (e) {
+		console.log('[kaios] flushConfigToPersistentStorage failed: ' + describeError(e));
+	}
 }
 
 // ---------------------------------------------------------------------
@@ -735,6 +814,12 @@ function start() {
 		function proceed(choice) {
 			setStatus('Loading engine...', 0);
 			loadEngineScripts().then(function () {
+				// Pull in last session's config.cfg (if any) before
+				// baseq2 is populated or the engine boots -- see
+				// mountPersistentConfig()'s comment for why this needs
+				// to happen here rather than after autoexec.cfg is written.
+				return mountPersistentConfig();
+			}).then(function () {
 				setStatus('Copying baseq2...', 0);
 				return copyBaseq2(files, choice.root);
 			}).then(bootEngine, function (err) {

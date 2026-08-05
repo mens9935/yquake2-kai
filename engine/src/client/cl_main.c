@@ -29,6 +29,10 @@
 #include "header/client.h"
 #include "input/header/input.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 void CL_ForwardToServer_f(void);
 void CL_Changing_f(void);
 void CL_Reconnect_f(void);
@@ -700,6 +704,9 @@ CL_InitLocal(void)
 /*
  * Writes key bindings and archived cvars to config.cfg
  */
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void
 CL_WriteConfiguration(void)
 {
@@ -729,6 +736,27 @@ CL_WriteConfiguration(void)
 	fclose(f);
 
 	Cvar_WriteVariables(path);
+
+#ifdef __EMSCRIPTEN__
+	/* config.cfg above just landed on the in-memory MEMFS, which is
+	 * wiped on every page reload -- platform/kaios/app.js mounts
+	 * IDBFS over the writable homedir and pulls it in at startup, but
+	 * pushing local writes back out to IndexedDB is JS-side (FS.syncfs())
+	 * and has to happen explicitly here, right after there's actually
+	 * something new to persist. Async (first arg false / "populate the
+	 * persistent store from memory"): CL_WriteConfiguration() runs on
+	 * the main thread on both the quit and disconnect paths, and this
+	 * must not block either one waiting on IndexedDB. */
+	EM_ASM({
+		if (typeof FS !== 'undefined' && typeof FS.syncfs === 'function') {
+			FS.syncfs(false, function (err) {
+				if (err) {
+					console.log('[kaios] config.cfg sync to IndexedDB failed: ' + err);
+				}
+			});
+		}
+	});
+#endif
 }
 
 typedef struct
