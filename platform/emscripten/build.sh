@@ -83,6 +83,22 @@ EMCC_LINK_FLAGS=(
 	-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS','callMain']
 	-s EXIT_RUNTIME=0
 	-s ENVIRONMENT=web
+	# Diagnostic-only, temporary: a real device log showed V_RenderView's
+	# own last statement (its "returning" print) fire, but the very next
+	# statement in its caller -- one macro invocation later, nothing else
+	# in between -- never printed. That's not explainable by a normal
+	# control-flow/logic bug; it's the signature of memory corruption
+	# hitting the call stack itself (e.g. a stray out-of-bounds write
+	# clobbering a return address) around the point where R_ScanEdges's
+	# already-confirmed corrupted edge lists get processed. ASSERTIONS
+	# and STACK_OVERFLOW_CHECK make Emscripten's generated code verify
+	# the stack/heap as it runs and throw a real, localized JS error
+	# instead of silently going off into undefined behavior, so the next
+	# device log should point at the actual corrupting write instead of
+	# yet another "nothing printed after X" bisection round. Remove once
+	# root-caused -- both add real overhead on this already-slow device.
+	-s ASSERTIONS=2
+	-s STACK_OVERFLOW_CHECK=2
 )
 
 compile_group() {
