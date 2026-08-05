@@ -395,7 +395,7 @@ D_SCAlloc (int width, int size)
 		new->next = sc_rover->next;
 
 #ifdef __EMSCRIPTEN__
-		if (++guard > 2000)
+		if (++guard > 20000)
 		{
 			if (!reported)
 			{

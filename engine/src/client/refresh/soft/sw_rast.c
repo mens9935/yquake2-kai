@@ -486,7 +486,7 @@ R_EmitEdge (mvertex_t *pv0, mvertex_t *pv1, medge_t *r_pedge, qboolean r_nearzio
 		{
 			pcheck = pcheck->next;
 #ifdef __EMSCRIPTEN__
-			if (++guard > 2000)
+			if (++guard > 20000)
 			{
 				if (!reported)
 				{

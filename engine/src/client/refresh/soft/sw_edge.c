@@ -125,13 +125,16 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 	 * protection, so it's an equally plausible hang site. Same watchdog
 	 * pattern as there.
 	 *
-	 * Cap kept low (not the original 200000) and the print gated to
-	 * fire only once ever: if this trips, it's likely to trip on most
-	 * scanlines of the frame (same shape as the already-fixed "Already
-	 * in head." case), and both an expensive per-trip scan AND
-	 * unthrottled console output repeated hundreds of times a frame
-	 * would themselves look exactly like a permanent hang from outside,
-	 * independent of whether the underlying loop is now bounded. */
+	 * Cap raised from 2000 to 20000: the acyclic-length diagnostic below
+	 * (length_reports) proved that with the reporting cap at 4 it was
+	 * only showing the first few over-2000 scanlines each frame, masking
+	 * how many actually exceed that -- multiple do, which means 2000 was
+	 * genuinely too low for this map's real edge density rather than a
+	 * sign every one of those scanlines is corrupt. Cap is still finite
+	 * and the print still gated to fire only once ever: if 20000 trips
+	 * too, that IS a real hang/corruption signal worth trusting, since a
+	 * per-trip scan and unthrottled console output at that volume would
+	 * themselves look exactly like a permanent hang from outside. */
 	int guard;
 	static int reported;
 	int outer_guard = 0;
@@ -222,10 +225,21 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 			 * next device log distinguishes those instead of guessing
 			 * again -- bounded at 100000 purely so a genuine infinite
 			 * loop here (would mean Floyd's itself is broken, or edgestoadd
-			 * isn't null-terminated at all) can't hang the count itself. */
+			 * isn't null-terminated at all) can't hang the count itself.
+			 *
+			 * Report cap raised 4 -> 20: at 4, this counter is shared
+			 * across the WHOLE FRAME, so if several different scanlines
+			 * each legitimately exceed the threshold, only the first few
+			 * ever get logged and the rest are silently skipped -- that
+			 * turned out to be exactly what was masking how many
+			 * scanlines actually exceed 2000, which is why the watchdog
+			 * caps above just got raised to 20000 instead of assuming a
+			 * new mystery bug. Threshold matched to the new 20000 caps
+			 * so this only fires for scanlines that would actually trip
+			 * one of those watchdogs. */
 			static int length_reports;
 
-			if (length_reports < 4)
+			if (length_reports < 20)
 			{
 				edge_t *walk = edgestoadd;
 				int len = 0;
@@ -236,7 +250,7 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 					walk = walk->next;
 				}
 
-				if (len > 2000)
+				if (len > 20000)
 				{
 					length_reports++;
 					fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: edgestoadd "
@@ -251,7 +265,7 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 	do
 	{
 #ifdef __EMSCRIPTEN__
-		if (++outer_guard > 2000)
+		if (++outer_guard > 20000)
 		{
 			if (!outer_reported)
 			{
@@ -271,7 +285,7 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 		{
 			edgelist = edgelist->next;
 #ifdef __EMSCRIPTEN__
-			if (++guard > 2000)
+			if (++guard > 20000)
 			{
 				if (!reported)
 				{
@@ -309,7 +323,7 @@ R_RemoveEdges (edge_t *pedge)
 	do
 	{
 #ifdef __EMSCRIPTEN__
-		if (++guard > 2000)
+		if (++guard > 20000)
 		{
 			if (!reported)
 			{
@@ -355,7 +369,7 @@ R_StepActiveU (edge_t *pedge)
 	while (1)
 	{
 #ifdef __EMSCRIPTEN__
-		if (++outer_iters > 2000)
+		if (++outer_iters > 20000)
 		{
 			if (!outer_reported)
 			{
@@ -421,7 +435,7 @@ R_StepActiveU (edge_t *pedge)
 			while (pwedge != &edge_head && pwedge->u > pedge->u)
 			{
 #ifdef __EMSCRIPTEN__
-				if (++inner_iters > 2000)
+				if (++inner_iters > 20000)
 				{
 					if (!inner_reported)
 					{
@@ -513,7 +527,7 @@ R_CleanupSpan (void)
 		surf->spanstate = 0;
 		surf = surf->next;
 #ifdef __EMSCRIPTEN__
-		if (++guard > 2000)
+		if (++guard > 20000)
 		{
 			if (!reported)
 			{
@@ -550,7 +564,7 @@ D_SurfSearchBackwards(const surf_t *surf, surf_t *surf2)
 		{
 			surf2 = surf2->next;
 #ifdef __EMSCRIPTEN__
-			if (++guard > 2000)
+			if (++guard > 20000)
 			{
 				if (!reported)
 				{
@@ -671,7 +685,7 @@ D_SurfSearchForward(const surf_t *surf, surf_t *surf2)
 		{
 			surf2 = surf2->next;
 #ifdef __EMSCRIPTEN__
-			if (++guard > 2000)
+			if (++guard > 20000)
 			{
 				if (!reported)
 				{
@@ -731,7 +745,7 @@ R_LeadingEdgeSearch (const edge_t *edge, const surf_t *surf, surf_t *surf2)
 		newzitop = newzi * 1.01;
 
 #ifdef __EMSCRIPTEN__
-		if (++guard > 2000)
+		if (++guard > 20000)
 		{
 			if (!reported)
 			{
@@ -888,7 +902,7 @@ R_GenerateSpans (void)
 	for (edge=edge_head.next ; edge != &edge_tail; edge=edge->next)
 	{
 #ifdef __EMSCRIPTEN__
-		if (++guard > 2000)
+		if (++guard > 20000)
 		{
 			if (!reported)
 			{
@@ -943,7 +957,7 @@ R_GenerateSpansBackward (void)
 	for (edge=edge_head.next ; edge != &edge_tail; edge=edge->next)
 	{
 #ifdef __EMSCRIPTEN__
-		if (++guard > 2000)
+		if (++guard > 20000)
 		{
 			if (!reported)
 			{
