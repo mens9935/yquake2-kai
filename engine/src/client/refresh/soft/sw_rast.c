@@ -370,6 +370,50 @@ R_EmitEdge (mvertex_t *pv0, mvertex_t *pv1, medge_t *r_pedge, qboolean r_nearzio
 		u = r_u1 + ((float)v - r_v1) * u_step;
 	}
 
+#ifdef __EMSCRIPTEN__
+	/* edge->u below gets clamped right after this for exactly the reason
+	 * described in the comment there (near-horizontal edges, numeric
+	 * error) -- but edge->u_step never got the same treatment, and it's
+	 * the same division (u_step = du/dv) with the same near-zero-
+	 * denominator risk. u_step is a plain `int` (shift20_t); if the
+	 * float here is large enough that u_step*(1<<shift_size) overflows
+	 * INT_MAX, the float->int conversion is undefined behavior, and in
+	 * practice yields an arbitrary-looking (but fully reproducible for
+	 * the same input) wrapped value -- then R_StepActiveU walks pedge->u
+	 * by that garbage step every scanline, which matches the corrupted,
+	 * deterministic-per-map-geometry edge->u values a real device
+	 * actually logged (e.g. u_step==-1482910 recurring exactly across
+	 * separate runs). Clamp well inside int32 range: no legitimate edge
+	 * on a screen this size needs to step more than a few screen-widths
+	 * of u per scanline of v. */
+	if (u_step > 2000.0f)
+	{
+		static int reported;
+
+		if (!reported)
+		{
+			reported = 1;
+			fprintf(stderr, "KAIOS_DEBUG: R_EmitEdge: u_step clamped! "
+				"u_step=%f u0=%f r_u1=%f v0=%f r_v1=%f\n",
+				u_step, u0, r_u1, v0, r_v1);
+		}
+		u_step = 2000.0f;
+	}
+	else if (u_step < -2000.0f)
+	{
+		static int reported;
+
+		if (!reported)
+		{
+			reported = 1;
+			fprintf(stderr, "KAIOS_DEBUG: R_EmitEdge: u_step clamped! "
+				"u_step=%f u0=%f r_u1=%f v0=%f r_v1=%f\n",
+				u_step, u0, r_u1, v0, r_v1);
+		}
+		u_step = -2000.0f;
+	}
+#endif
+
 	edge->u_step = u_step*(1<<shift_size);
 	edge->u = u*(1<<shift_size) + (1<<shift_size) - 1;
 
