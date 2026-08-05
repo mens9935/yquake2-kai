@@ -341,11 +341,27 @@ R_CleanupSpan (void)
 	R_InsertSpan (surf, edge_tail_u_shift20);
 
 	// reset spanstate for all surfaces in the surface stack
+#ifdef __EMSCRIPTEN__
+	{
+	int guard = 0;
+#endif
 	do
 	{
 		surf->spanstate = 0;
 		surf = surf->next;
+#ifdef __EMSCRIPTEN__
+		if (++guard > 200000)
+		{
+			fprintf(stderr, "KAIOS_DEBUG: R_CleanupSpan: surface stack walk stuck! "
+				"surf=%p surfaces[1]=%p\n",
+				(void *)surf, (void *)&surfaces[1]);
+			break;
+		}
+#endif
 	} while (surf != &surfaces[1]);
+#ifdef __EMSCRIPTEN__
+	}
+#endif
 }
 
 
@@ -674,8 +690,29 @@ R_GenerateSpans (void)
 	surfaces[1].last_u = edge_head_u_shift20;
 
 	// generate spans
+#ifdef __EMSCRIPTEN__
+	/* Same shape as the other confirmed-and-fixed real-device hangs in
+	 * this file: walks the active edge list from edge_head to edge_tail
+	 * trusting it's finite, with zero protection -- but unlike those,
+	 * this one runs on EVERY scanline (via pdrawfunc), not just on the
+	 * rare edges that sort below edge_head. If the list ever stops
+	 * reaching edge_tail (e.g. a cycle from corruption elsewhere), this
+	 * is where a whole frame would hang forever with no chance of any
+	 * of the other watchdogs ever tripping. */
+	{
+	int guard = 0;
+#endif
 	for (edge=edge_head.next ; edge != &edge_tail; edge=edge->next)
 	{
+#ifdef __EMSCRIPTEN__
+		if (++guard > 200000)
+		{
+			fprintf(stderr, "KAIOS_DEBUG: R_GenerateSpans: edge list walk stuck! "
+				"edge=%p edge->next=%p edge_tail=%p\n",
+				(void *)edge, (void *)edge->next, (void *)&edge_tail);
+			break;
+		}
+#endif
 		if (edge->surfs[0])
 		{
 			// it has a left surface, so a surface is going away for this span
@@ -689,6 +726,9 @@ R_GenerateSpans (void)
 
 		R_LeadingEdge (edge);
 	}
+#ifdef __EMSCRIPTEN__
+	}
+#endif
 
 	R_CleanupSpan ();
 }
@@ -708,14 +748,30 @@ R_GenerateSpansBackward (void)
 	surfaces[1].last_u = edge_head_u_shift20;
 
 	// generate spans
+#ifdef __EMSCRIPTEN__
+	{
+	int guard = 0;
+#endif
 	for (edge=edge_head.next ; edge != &edge_tail; edge=edge->next)
 	{
+#ifdef __EMSCRIPTEN__
+		if (++guard > 200000)
+		{
+			fprintf(stderr, "KAIOS_DEBUG: R_GenerateSpansBackward: edge list walk stuck! "
+				"edge=%p edge->next=%p edge_tail=%p\n",
+				(void *)edge, (void *)edge->next, (void *)&edge_tail);
+			break;
+		}
+#endif
 		if (edge->surfs[0])
 			R_TrailingEdge (&surfaces[edge->surfs[0]], edge);
 
 		if (edge->surfs[1])
 			R_LeadingEdgeBackwards (edge);
 	}
+#ifdef __EMSCRIPTEN__
+	}
+#endif
 
 	R_CleanupSpan ();
 }
