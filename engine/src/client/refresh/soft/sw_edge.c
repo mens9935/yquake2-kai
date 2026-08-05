@@ -248,6 +248,22 @@ R_StepActiveU (edge_t *pedge)
 				pwedge = pwedge->prev;
 			}
 
+			/* pedge->u sorted below every real edge in the list, all the
+			 * way down to edge_head itself -- that's not just a list-
+			 * position problem, pedge->u is genuinely out of the valid
+			 * screen range at this point (edge_head.u is the leftmost
+			 * legal column). R_LeadingEdgeBackwards/R_TrailingEdge feed
+			 * edge->u >> shift_size straight into R_InsertSpan as a pixel
+			 * column, so leaving it unclamped corrupts every span drawn
+			 * from this edge -- and since nothing here resets pedge->u,
+			 * the next scanline's pedge->u += pedge->u_step keeps
+			 * compounding from that same bad value, so once an edge hits
+			 * this it re-triggers "Already in head." on every remaining
+			 * scanline instead of just this one. Clamp it back onto the
+			 * valid range so both problems stop here. */
+			if (pwedge == &edge_head && pedge->u < edge_head.u)
+				pedge->u = edge_head.u;
+
 			// put the edge back into the edge list
 			pedge->next = pwedge->next;
 			pedge->prev = pwedge;
