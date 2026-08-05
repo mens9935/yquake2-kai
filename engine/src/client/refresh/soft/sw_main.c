@@ -2512,6 +2512,10 @@ RE_FlushFrame(int vmin, int vmax)
 	Uint32 *pixels;
 	SDL_Rect rect;
 
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_FlushFrame: entered, vmin=%d vmax=%d\n", vmin, vmax);
+#endif
+
 	if (vmin >= vmax)
 	{
 		/* Looks like we already updated everything */
@@ -2544,11 +2548,13 @@ RE_FlushFrame(int vmin, int vmax)
 		rect.h = vmax - vmin;
 
 #ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: RE_FlushFrame: about to KaiOS_LockPixels\n");
 		if (KaiOS_LockPixels((void**)&pixels, &pitch) < 0)
 		{
 			Com_Printf("Can't lock window surface: %s\n", SDL_GetError());
 			return;
 		}
+		fprintf(stderr, "KAIOS_DEBUG: RE_FlushFrame: KaiOS_LockPixels done\n");
 
 		/* Unlike SDL_LockTexture(texture, &rect, ...), locking a
 		 * whole SDL_Surface always returns a pointer to its very
@@ -2573,17 +2579,26 @@ RE_FlushFrame(int vmin, int vmax)
 		}
 #endif
 
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: RE_FlushFrame: about to RE_CopyFrame\n");
+#endif
 		RE_CopyFrame(pixels, pitch / sizeof(Uint32), &rect);
+#ifdef __EMSCRIPTEN__
+		fprintf(stderr, "KAIOS_DEBUG: RE_FlushFrame: RE_CopyFrame done\n");
+#endif
 
 #ifdef __EMSCRIPTEN__
 		KaiOS_UnlockPixels();
+		fprintf(stderr, "KAIOS_DEBUG: RE_FlushFrame: KaiOS_UnlockPixels done\n");
 #else
 		SDL_UnlockTexture(texture);
 #endif
 	}
 
 #ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_FlushFrame: about to KaiOS_PresentPixels\n");
 	KaiOS_PresentPixels();
+	fprintf(stderr, "KAIOS_DEBUG: RE_FlushFrame: KaiOS_PresentPixels done\n");
 #elif defined(USE_SDL3)
 	SDL_RenderTexture(renderer, texture, NULL, NULL);
 	SDL_RenderPresent(renderer);
@@ -2610,6 +2625,10 @@ static void
 RE_EndFrame(void)
 {
 	int vmin, vmax;
+
+#ifdef __EMSCRIPTEN__
+	fprintf(stderr, "KAIOS_DEBUG: RE_EndFrame: entered\n");
+#endif
 
 	// fix possible issue with min/max
 	if (vid_minu < 0)
@@ -2650,6 +2669,9 @@ RE_EndFrame(void)
 		// no differences found
 		if (vmin >= vmax)
 		{
+#ifdef __EMSCRIPTEN__
+			fprintf(stderr, "KAIOS_DEBUG: RE_EndFrame: no differences, returning early\n");
+#endif
 			return;
 		}
 
