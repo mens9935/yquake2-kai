@@ -760,6 +760,24 @@ R_RenderFace (entity_t *currententity, const model_t *currentmodel, msurface_t *
 						pclip, r_pedge,
 						&r_leftclipped, &r_rightclipped,
 						r_nearzionly);
+#ifdef __EMSCRIPTEN__
+			/* Real-device shape dump caught it directly: two edge_t's,
+			 * same owner medge_t, one edge queued twice. Root cause --
+			 * confirmed by comparing this write against the read-side
+			 * gate a few lines up -- the cache read is skipped entirely
+			 * when insubmodel (submodels have their own transform, can't
+			 * trust a cached *screen position* from the world or another
+			 * submodel), but this write was unconditional: a submodel's
+			 * fresh computation for a medge_t shared with the world (the
+			 * whole edge/vertex array is one global set across the BSP
+			 * file, shared by every submodel) clobbers the world's valid
+			 * cache entry, so a *later* world-side reference to that same
+			 * medge_t either wrongly reuses the submodel's edge or (as
+			 * observed) both sides end up creating their own edge_t,
+			 * both queued into the same newedges[v] list. Only cache
+			 * what we'd actually trust reading back. */
+			if (!insubmodel)
+#endif
 			r_pedge->cachededgeoffset = cacheoffset;
 
 			if (r_leftclipped)
@@ -815,6 +833,12 @@ R_RenderFace (entity_t *currententity, const model_t *currentmodel, msurface_t *
 						pclip, r_pedge,
 						&r_leftclipped, &r_rightclipped,
 						r_nearzionly);
+#ifdef __EMSCRIPTEN__
+			/* See the comment at the other cachededgeoffset write above --
+			 * same fix, same reasoning, this is the lindex<0 (negated,
+			 * "walk the edge backward") twin of that code block. */
+			if (!insubmodel)
+#endif
 			r_pedge->cachededgeoffset = cacheoffset;
 
 			if (r_leftclipped)
