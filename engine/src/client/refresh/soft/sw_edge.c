@@ -123,8 +123,17 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 	 * own list walks; this function has the same shape (walk a linked
 	 * list trusting it's finite and correctly sorted) and zero
 	 * protection, so it's an equally plausible hang site. Same watchdog
-	 * pattern as there. */
+	 * pattern as there.
+	 *
+	 * Cap kept low (not the original 200000) and the print gated to
+	 * fire only once ever: if this trips, it's likely to trip on most
+	 * scanlines of the frame (same shape as the already-fixed "Already
+	 * in head." case), and both an expensive per-trip scan AND
+	 * unthrottled console output repeated hundreds of times a frame
+	 * would themselves look exactly like a permanent hang from outside,
+	 * independent of whether the underlying loop is now bounded. */
 	int guard;
+	static int reported;
 #endif
 
 	do
@@ -138,11 +147,15 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 		{
 			edgelist = edgelist->next;
 #ifdef __EMSCRIPTEN__
-			if (++guard > 200000)
+			if (++guard > 2000)
 			{
-				fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: search stuck! "
-					"edgestoadd=%p u=%d edgelist=%p u=%d\n",
-					(void *)edgestoadd, edgestoadd->u, (void *)edgelist, edgelist->u);
+				if (!reported)
+				{
+					reported = 1;
+					fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: search stuck! "
+						"edgestoadd=%p u=%d edgelist=%p u=%d\n",
+						(void *)edgestoadd, edgestoadd->u, (void *)edgelist, edgelist->u);
+				}
 				return;
 			}
 #endif
@@ -196,19 +209,24 @@ R_StepActiveU (edge_t *pedge)
 	 * R_EdgeDrawing's own diagnostic) should ever come close to. */
 	int outer_iters = 0;
 	int inner_iters = 0;
+	static int outer_reported, inner_reported;
 #endif
 
 	while (1)
 	{
 #ifdef __EMSCRIPTEN__
-		if (++outer_iters > 100000)
+		if (++outer_iters > 2000)
 		{
-			fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: outer loop stuck! "
-				"pedge=%p u=%d u_step=%d prev=%p prev->u=%d next=%p "
-				"edge_head=%p edge_tail=%p edge_aftertail=%p\n",
-				(void *)pedge, pedge->u, pedge->u_step,
-				(void *)pedge->prev, pedge->prev->u, (void *)pedge->next,
-				(void *)&edge_head, (void *)&edge_tail, (void *)&edge_aftertail);
+			if (!outer_reported)
+			{
+				outer_reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: outer loop stuck! "
+					"pedge=%p u=%d u_step=%d prev=%p prev->u=%d next=%p "
+					"edge_head=%p edge_tail=%p edge_aftertail=%p\n",
+					(void *)pedge, pedge->u, pedge->u_step,
+					(void *)pedge->prev, pedge->prev->u, (void *)pedge->next,
+					(void *)&edge_head, (void *)&edge_tail, (void *)&edge_aftertail);
+			}
 			return;
 		}
 #endif
@@ -263,13 +281,17 @@ R_StepActiveU (edge_t *pedge)
 			while (pwedge != &edge_head && pwedge->u > pedge->u)
 			{
 #ifdef __EMSCRIPTEN__
-				if (++inner_iters > 100000)
+				if (++inner_iters > 2000)
 				{
-					fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: inner loop stuck! "
-						"pwedge=%p pwedge->u=%d pedge=%p pedge->u=%d "
-						"edge_head=%p edge_head.u=%d\n",
-						(void *)pwedge, pwedge->u, (void *)pedge, pedge->u,
-						(void *)&edge_head, edge_head.u);
+					if (!inner_reported)
+					{
+						inner_reported = 1;
+						fprintf(stderr, "KAIOS_DEBUG: R_StepActiveU: inner loop stuck! "
+							"pwedge=%p pwedge->u=%d pedge=%p pedge->u=%d "
+							"edge_head=%p edge_head.u=%d\n",
+							(void *)pwedge, pwedge->u, (void *)pedge, pedge->u,
+							(void *)&edge_head, edge_head.u);
+					}
 					return;
 				}
 #endif
@@ -344,17 +366,22 @@ R_CleanupSpan (void)
 #ifdef __EMSCRIPTEN__
 	{
 	int guard = 0;
+	static int reported;
 #endif
 	do
 	{
 		surf->spanstate = 0;
 		surf = surf->next;
 #ifdef __EMSCRIPTEN__
-		if (++guard > 200000)
+		if (++guard > 2000)
 		{
-			fprintf(stderr, "KAIOS_DEBUG: R_CleanupSpan: surface stack walk stuck! "
-				"surf=%p surfaces[1]=%p\n",
-				(void *)surf, (void *)&surfaces[1]);
+			if (!reported)
+			{
+				reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_CleanupSpan: surface stack walk stuck! "
+					"surf=%p surfaces[1]=%p\n",
+					(void *)surf, (void *)&surfaces[1]);
+			}
 			break;
 		}
 #endif
@@ -375,6 +402,7 @@ D_SurfSearchBackwards(const surf_t *surf, surf_t *surf2)
 {
 #ifdef __EMSCRIPTEN__
 	int guard = 0;
+	static int reported;
 #endif
 	do
 	{
@@ -382,11 +410,15 @@ D_SurfSearchBackwards(const surf_t *surf, surf_t *surf2)
 		{
 			surf2 = surf2->next;
 #ifdef __EMSCRIPTEN__
-			if (++guard > 200000)
+			if (++guard > 2000)
 			{
-				fprintf(stderr, "KAIOS_DEBUG: D_SurfSearchBackwards: stuck! "
-					"surf=%p key=%d surf2=%p key=%d\n",
-					(void *)surf, surf->key, (void *)surf2, surf2->key);
+				if (!reported)
+				{
+					reported = 1;
+					fprintf(stderr, "KAIOS_DEBUG: D_SurfSearchBackwards: stuck! "
+						"surf=%p key=%d surf2=%p key=%d\n",
+						(void *)surf, surf->key, (void *)surf2, surf2->key);
+				}
 				return surf2;
 			}
 #endif
@@ -491,6 +523,7 @@ D_SurfSearchForward(const surf_t *surf, surf_t *surf2)
 {
 #ifdef __EMSCRIPTEN__
 	int guard = 0;
+	static int reported;
 #endif
 	do
 	{
@@ -498,11 +531,15 @@ D_SurfSearchForward(const surf_t *surf, surf_t *surf2)
 		{
 			surf2 = surf2->next;
 #ifdef __EMSCRIPTEN__
-			if (++guard > 200000)
+			if (++guard > 2000)
 			{
-				fprintf(stderr, "KAIOS_DEBUG: D_SurfSearchForward: stuck! "
-					"surf=%p key=%d surf2=%p key=%d\n",
-					(void *)surf, surf->key, (void *)surf2, surf2->key);
+				if (!reported)
+				{
+					reported = 1;
+					fprintf(stderr, "KAIOS_DEBUG: D_SurfSearchForward: stuck! "
+						"surf=%p key=%d surf2=%p key=%d\n",
+						(void *)surf, surf->key, (void *)surf2, surf2->key);
+				}
 				return surf2;
 			}
 #endif
@@ -525,6 +562,7 @@ R_LeadingEdgeSearch (const edge_t *edge, const surf_t *surf, surf_t *surf2)
 	float	testzi, newzitop;
 #ifdef __EMSCRIPTEN__
 	int guard = 0;
+	static int reported;
 #endif
 
 	do
@@ -553,11 +591,15 @@ R_LeadingEdgeSearch (const edge_t *edge, const surf_t *surf, surf_t *surf2)
 		newzitop = newzi * 1.01;
 
 #ifdef __EMSCRIPTEN__
-		if (++guard > 200000)
+		if (++guard > 2000)
 		{
-			fprintf(stderr, "KAIOS_DEBUG: R_LeadingEdgeSearch: stuck! "
-				"newzitop=%f testzi=%f surf->d_zistepu=%f surf2->d_zistepu=%f\n",
-				newzitop, testzi, surf->d_zistepu, surf2->d_zistepu);
+			if (!reported)
+			{
+				reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_LeadingEdgeSearch: stuck! "
+					"newzitop=%f testzi=%f surf->d_zistepu=%f surf2->d_zistepu=%f\n",
+					newzitop, testzi, surf->d_zistepu, surf2->d_zistepu);
+			}
 			return surf2;
 		}
 #endif
@@ -701,15 +743,20 @@ R_GenerateSpans (void)
 	 * of the other watchdogs ever tripping. */
 	{
 	int guard = 0;
+	static int reported;
 #endif
 	for (edge=edge_head.next ; edge != &edge_tail; edge=edge->next)
 	{
 #ifdef __EMSCRIPTEN__
-		if (++guard > 200000)
+		if (++guard > 2000)
 		{
-			fprintf(stderr, "KAIOS_DEBUG: R_GenerateSpans: edge list walk stuck! "
-				"edge=%p edge->next=%p edge_tail=%p\n",
-				(void *)edge, (void *)edge->next, (void *)&edge_tail);
+			if (!reported)
+			{
+				reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_GenerateSpans: edge list walk stuck! "
+					"edge=%p edge->next=%p edge_tail=%p\n",
+					(void *)edge, (void *)edge->next, (void *)&edge_tail);
+			}
 			break;
 		}
 #endif
@@ -751,15 +798,20 @@ R_GenerateSpansBackward (void)
 #ifdef __EMSCRIPTEN__
 	{
 	int guard = 0;
+	static int reported;
 #endif
 	for (edge=edge_head.next ; edge != &edge_tail; edge=edge->next)
 	{
 #ifdef __EMSCRIPTEN__
-		if (++guard > 200000)
+		if (++guard > 2000)
 		{
-			fprintf(stderr, "KAIOS_DEBUG: R_GenerateSpansBackward: edge list walk stuck! "
-				"edge=%p edge->next=%p edge_tail=%p\n",
-				(void *)edge, (void *)edge->next, (void *)&edge_tail);
+			if (!reported)
+			{
+				reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_GenerateSpansBackward: edge list walk stuck! "
+					"edge=%p edge->next=%p edge_tail=%p\n",
+					(void *)edge, (void *)edge->next, (void *)&edge_tail);
+			}
 			break;
 		}
 #endif

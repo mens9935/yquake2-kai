@@ -198,8 +198,13 @@ TurbulentPow2 (espan_t *pspan, float d_ziorigin, float d_zistepu, float d_zistep
 	 * have real-device hangs and guarded elsewhere in this branch, and
 	 * had zero protection here -- if it's ever non-NULL-terminated
 	 * (e.g. a cycle from a span-allocation bug), this is an unguarded
-	 * infinite loop reached on every surface drawn. */
+	 * infinite loop reached on every surface drawn. Cap kept low and
+	 * the print gated to fire only once ever, since if this trips it
+	 * likely trips on most surfaces drawn -- unthrottled console output
+	 * at that frequency is itself a proven real-device performance
+	 * cliff (see the "Already in head." fix in sw_edge.c). */
 	int guard = 0;
+	static int reported;
 #endif
 
 	spanstep_shift = D_DrawSpanGetStep(d_zistepu, d_zistepv);
@@ -338,10 +343,11 @@ TurbulentPow2 (espan_t *pspan, float d_ziorigin, float d_zistepu, float d_zistep
 		} while (count > 0);
 
 #ifdef __EMSCRIPTEN__
-	} while ((pspan = pspan->pnext) != NULL && ++guard < 200000);
-	if (guard >= 200000)
+	} while ((pspan = pspan->pnext) != NULL && ++guard < 2000);
+	if (guard >= 2000 && !reported)
 	{
-		fprintf(stderr, "KAIOS_DEBUG: NonTurbulentPow2: span list walk stuck! pspan=%p\n",
+		reported = 1;
+		fprintf(stderr, "KAIOS_DEBUG: TurbulentPow2: span list walk stuck! pspan=%p\n",
 			(void *)pspan);
 	}
 #else
@@ -366,6 +372,7 @@ NonTurbulentPow2 (espan_t *pspan, float d_ziorigin, float d_zistepu, float d_zis
 	int	spanstep_shift, spanstep_value;
 #ifdef __EMSCRIPTEN__
 	int guard = 0;
+	static int reported;
 #endif
 
 	spanstep_shift = D_DrawSpanGetStep(d_zistepu, d_zistepv);
@@ -504,10 +511,11 @@ NonTurbulentPow2 (espan_t *pspan, float d_ziorigin, float d_zistepu, float d_zis
 		} while (count > 0);
 
 #ifdef __EMSCRIPTEN__
-	} while ((pspan = pspan->pnext) != NULL && ++guard < 200000);
-	if (guard >= 200000)
+	} while ((pspan = pspan->pnext) != NULL && ++guard < 2000);
+	if (guard >= 2000 && !reported)
 	{
-		fprintf(stderr, "KAIOS_DEBUG: TurbulentPow2: span list walk stuck! pspan=%p\n",
+		reported = 1;
+		fprintf(stderr, "KAIOS_DEBUG: NonTurbulentPow2: span list walk stuck! pspan=%p\n",
 			(void *)pspan);
 	}
 #else
@@ -632,6 +640,7 @@ D_DrawSpansPow2 (espan_t *pspan, float d_ziorigin, float d_zistepu, float d_zist
 	int	spanstep_shift, spanstep_value;
 #ifdef __EMSCRIPTEN__
 	int guard = 0;
+	static int reported;
 #endif
 
 	spanstep_shift = D_DrawSpanGetStep(d_zistepu, d_zistepv);
@@ -768,9 +777,10 @@ D_DrawSpansPow2 (espan_t *pspan, float d_ziorigin, float d_zistepu, float d_zist
 		} while (count > 0);
 
 #ifdef __EMSCRIPTEN__
-	} while ((pspan = pspan->pnext) != NULL && ++guard < 200000);
-	if (guard >= 200000)
+	} while ((pspan = pspan->pnext) != NULL && ++guard < 2000);
+	if (guard >= 2000 && !reported)
 	{
+		reported = 1;
 		fprintf(stderr, "KAIOS_DEBUG: D_DrawSpansPow2: span list walk stuck! pspan=%p\n",
 			(void *)pspan);
 	}
@@ -791,6 +801,7 @@ D_DrawZSpans (espan_t *pspan, float d_ziorigin, float d_zistepu, float d_zistepv
 	int		safe_step;
 #ifdef __EMSCRIPTEN__
 	int guard = 0;
+	static int reported;
 #endif
 
 	// FIXME: check for clamping/range problems
@@ -852,9 +863,10 @@ D_DrawZSpans (espan_t *pspan, float d_ziorigin, float d_zistepu, float d_zistepv
 			}
 		}
 #ifdef __EMSCRIPTEN__
-	} while ((pspan = pspan->pnext) != NULL && ++guard < 200000);
-	if (guard >= 200000)
+	} while ((pspan = pspan->pnext) != NULL && ++guard < 2000);
+	if (guard >= 2000 && !reported)
 	{
+		reported = 1;
 		fprintf(stderr, "KAIOS_DEBUG: D_DrawZSpans: span list walk stuck! pspan=%p\n",
 			(void *)pspan);
 	}
