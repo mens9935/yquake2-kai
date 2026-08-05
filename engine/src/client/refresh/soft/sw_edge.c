@@ -210,6 +210,41 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 					(void *)tail->owner, (void *)p1->owner);
 			}
 		}
+		else
+		{
+			/* Not cyclic (Floyd's just proved that above) -- but the
+			 * do-while below still has its own outer_guard tripping on
+			 * some scanlines even with this repair in place, meaning
+			 * whatever's left is either a genuinely very long acyclic
+			 * list (contradicts an earlier ~760-edges-per-frame estimate
+			 * that might just not apply to this specific view/map) or a
+			 * different bug entirely. Count the real length once so the
+			 * next device log distinguishes those instead of guessing
+			 * again -- bounded at 100000 purely so a genuine infinite
+			 * loop here (would mean Floyd's itself is broken, or edgestoadd
+			 * isn't null-terminated at all) can't hang the count itself. */
+			static int length_reports;
+
+			if (length_reports < 4)
+			{
+				edge_t *walk = edgestoadd;
+				int len = 0;
+
+				while (walk && len < 100000)
+				{
+					len++;
+					walk = walk->next;
+				}
+
+				if (len > 2000)
+				{
+					length_reports++;
+					fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: edgestoadd "
+						"acyclic but length=%d (terminator=%p)\n",
+						len, (void *)walk);
+				}
+			}
+		}
 	}
 #endif
 
