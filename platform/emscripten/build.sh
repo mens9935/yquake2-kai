@@ -87,6 +87,11 @@ EMCC_LINK_FLAGS=(
 	-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS','callMain']
 	-s EXIT_RUNTIME=0
 	-s ENVIRONMENT=web
+	# Temporary: surfaces Emscripten's own internal WebGL error detail
+	# (e.g. exactly why canvas.getContext() returned null) in the console
+	# instead of a silent 0 return -- see gl1_sdl.c's em_ctx_handle path.
+	# Safe to drop once gl1 context creation is confirmed working.
+	-s GL_DEBUG=1
 )
 
 compile_group() {

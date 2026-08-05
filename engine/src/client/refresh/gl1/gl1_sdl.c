@@ -302,7 +302,18 @@ int RI_InitContext(void* win)
 		emscripten_webgl_init_context_attributes(&attribs);
 		attribs.alpha = false;
 		attribs.depth = true;
-		attribs.stencil = true;
+		/* Requesting stencil=true here previously (real-device test:
+		 * emscripten_webgl_create_context() itself returned failure, no
+		 * WebGL-level error visible since this isn't a GL_DEBUG build).
+		 * gl_state.stencil is already treated as best-effort everywhere
+		 * else in this renderer (see the SDL_GL_GetAttribute check in
+		 * RI_InitContext below), and ClassiCube's own known-working
+		 * config on this exact device requests stencil=false -- match it
+		 * exactly rather than requesting a buffer this GPU/driver
+		 * combination may not actually be able to provide, which can
+		 * make canvas.getContext('webgl', ...) return null outright
+		 * instead of silently downgrading. */
+		attribs.stencil = false;
 		attribs.antialias = false;
 
 		em_ctx_handle = emscripten_webgl_create_context("#canvas", &attribs);
