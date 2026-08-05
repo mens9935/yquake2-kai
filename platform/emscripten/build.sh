@@ -34,15 +34,16 @@ COMMON_FLAGS=(
 	-DYQ2ARCH=\"asmjs\"
 	-I"$ENGINE"
 	-s USE_SDL=2
+	# gl1 renderer (see REFGL1_SRCS): backs its GLES1.1 fixed-function
+	# calls with WebGL1 via Emscripten's legacy GL emulation shim, since
+	# this device's Gecko-48-class engine only has WebGL1 (no WebGL2,
+	# which gl3's shader-based renderer would have needed). Orthogonal to
+	# how the context itself gets created (see gl1_sdl.c's em_ctx_handle
+	# path) -- this only affects the GL1.x-style function implementations
+	# Emscripten's own GL library provides on top of that context.
+	-s LEGACY_GL_EMULATION=1
 )
 
-# Currently unused -- REFGL1_SRCS/gl1 renderer build reverted (see git
-# log around "Back to the software rasterizer"; the gl1/WebGL1 attempt
-# never got past real-device OpenGL context creation). Left in place,
-# needs -s LEGACY_GL_EMULATION=1 added back to COMMON_FLAGS and the
-# refgl1 compile_group call restored in place of refsoft below, if
-# revisited once there's a way to test GL context creation without a
-# full device round-trip per guess.
 GL1_FLAGS=(
 	-DYQ2_GL1_GLES
 	-I"$ENGINE/src/client/refresh/gl1/glad-gles1/include"
@@ -113,8 +114,8 @@ OBJS=()
 echo "==> Compiling client+server (${#CLIENT_SRCS[@]} files)"
 compile_group client NO_EXTRA CLIENT_SRCS
 
-echo "==> Compiling software renderer (${#REFSOFT_SRCS[@]} files)"
-compile_group refsoft NO_EXTRA REFSOFT_SRCS
+echo "==> Compiling gl1 (GLES1/WebGL1) renderer (${#REFGL1_SRCS[@]} files)"
+compile_group refgl1 GL1_FLAGS REFGL1_SRCS
 
 echo "==> Compiling baseq2 game (${#GAME_SRCS[@]} files)"
 compile_group game GAME_ONLY_FLAGS GAME_SRCS

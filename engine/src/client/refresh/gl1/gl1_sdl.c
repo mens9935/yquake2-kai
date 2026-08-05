@@ -27,10 +27,34 @@
 
 #include "header/local.h"
 
+#include <stdint.h>
+
 #ifdef USE_SDL3
 #include <SDL3/SDL.h>
 #else
 #include <SDL2/SDL.h>
+#endif
+
+#if defined(YQ2_GL1_GLES) && defined(__EMSCRIPTEN__)
+/* SDL_GL_CreateContext() under Emscripten's SDL2 port goes through a real
+ * EGL emulation layer (src/video/emscripten/SDL_emscriptenopengles.c ->
+ * eglCreateContext, src/video/SDL_egl.c) -- confirmed by reading that
+ * source directly. That's exactly where two real-device attempts both
+ * failed (EGL_BAD_CONFIG, then EGL_BAD_MATCH after fixing the first
+ * cause), regardless of which context-version attributes were requested.
+ *
+ * ClassiCube's own KaiOS build -- confirmed working on this exact device
+ * -- never goes through that layer at all: its web backend
+ * (src/webclient/Window_Web.c) has no SDL dependency whatsoever and calls
+ * Emscripten's native emscripten_webgl_create_context() (html5.h)
+ * directly against the canvas, which talks straight to the browser's
+ * canvas.getContext('webgl', ...) with no EGL emulation in between.
+ *
+ * Mirror that here: bypass SDL_GL_CreateContext/SDL_GL_SwapWindow/
+ * SDL_GL_DeleteContext specifically for this one path, while still using
+ * SDL for window creation, input, and everything else. */
+#include <emscripten/html5.h>
+static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE em_ctx_handle = 0;
 #endif
 
 static SDL_Window* window = NULL;
@@ -69,7 +93,15 @@ RI_EndFrame(void)
 	}
 #endif
 
+#if defined(YQ2_GL1_GLES) && defined(__EMSCRIPTEN__)
+	/* Nothing to do -- em_ctx_handle wasn't created through SDL, so
+	 * window->driverdata has no egl_surface for SDL_GL_SwapWindow to
+	 * swap (see SDL_egl.c). WebGL has no manual swap step anyway: the
+	 * browser presents the canvas automatically once this frame's JS
+	 * finishes, same as ClassiCube's GLContext_SwapBuffers(). */
+#else
 	SDL_GL_SwapWindow(window);
+#endif
 }
 
 /*
@@ -121,25 +153,14 @@ int RI_PrepareForWindow(void)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-#elif defined(YQ2_GL1_GLES) && defined(__EMSCRIPTEN__)
-	/* Not "leave it unset" -- checked Emscripten's own eglCreateContext
-	 * (src/library_egl.js): it reads EGL_CONTEXT_CLIENT_VERSION out of
-	 * the attribute list and REJECTS with EGL_BAD_CONFIG unless it's
-	 * exactly 2 (WebGL1/GLES2) -- if the attribute isn't present at all
-	 * it defaults to 1, which fails that same check. So dropping the
-	 * version request entirely (previous fix, confirmed by a second
-	 * real-device test to NOT resolve EGL_BAD_CONFIG) was wrong in the
-	 * other direction: requesting version 1 (ES1, previous code) and
-	 * requesting no version at all both resolve to the same rejected
-	 * value. What SDL2's Emscripten backend actually needs here is
-	 * MAJOR_VERSION=2 -- LEGACY_GL_EMULATION (build.sh) still layers
-	 * this renderer's GL1.x/ES1.1-style calls (glBegin, glMatrixMode,
-	 * ...) on top of that real GLES2/WebGL1 context; the context itself
-	 * was never going to be able to claim to be ES1. */
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 #endif
+	/* Under Emscripten, RI_InitContext() no longer calls
+	 * SDL_GL_CreateContext() at all for YQ2_GL1_GLES (see em_ctx_handle) --
+	 * it builds its own EmscriptenWebGLContextAttributes and calls
+	 * emscripten_webgl_create_context() directly, so none of these
+	 * SDL_GL_SetAttribute() calls are consulted for that path. Left
+	 * unset here on purpose; don't add EGL-era version-attribute calls
+	 * back in this function, they'd be dead code. */
 
 	// Let's see if the driver supports MSAA.
 	int msaa_samples = 0;
@@ -272,6 +293,36 @@ int RI_InitContext(void* win)
 
 	window = (SDL_Window*)win;
 
+#if defined(YQ2_GL1_GLES) && defined(__EMSCRIPTEN__)
+	// See the comment by em_ctx_handle's declaration above for why this
+	// bypasses SDL_GL_CreateContext entirely on this platform.
+	{
+		EmscriptenWebGLContextAttributes attribs;
+
+		emscripten_webgl_init_context_attributes(&attribs);
+		attribs.alpha = false;
+		attribs.depth = true;
+		attribs.stencil = true;
+		attribs.antialias = false;
+
+		em_ctx_handle = emscripten_webgl_create_context("#canvas", &attribs);
+
+		if (!em_ctx_handle)
+		{
+			Com_Printf("%s: emscripten_webgl_create_context() failed\n", __func__);
+
+			window = NULL;
+
+			return false;
+		}
+
+		emscripten_webgl_make_context_current(em_ctx_handle);
+
+		// Only used by RI_ShutdownContext()'s guard -- never dereferenced
+		// as a real SDL_GLContext.
+		context = (SDL_GLContext)(uintptr_t)em_ctx_handle;
+	}
+#else
 	// Initialize GL context.
 	context = SDL_GL_CreateContext(window);
 
@@ -283,6 +334,7 @@ int RI_InitContext(void* win)
 
 		return false;
 	}
+#endif
 
 #ifdef YQ2_GL1_GLES
 
@@ -393,7 +445,10 @@ RI_ShutdownContext(void)
 	{
 		if(context)
 		{
-#ifdef USE_SDL3
+#if defined(YQ2_GL1_GLES) && defined(__EMSCRIPTEN__)
+			emscripten_webgl_destroy_context(em_ctx_handle);
+			em_ctx_handle = 0;
+#elif defined(USE_SDL3)
 			SDL_GL_DestroyContext(context);
 #else
 			SDL_GL_DeleteContext(context);
