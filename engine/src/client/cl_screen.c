@@ -75,7 +75,7 @@ extern cvar_t *crosshair_color_r;
 extern cvar_t *crosshair_color_g;
 extern cvar_t *crosshair_color_b;
 extern cvar_t *cl_showspeed;
-extern float GetPlayerSpeed(float *, float *);
+extern void GetPlayerSpeed(float *, float *);
 
 static void SCR_TimeRefresh_f(void);
 static void SCR_Loading_f(void);
