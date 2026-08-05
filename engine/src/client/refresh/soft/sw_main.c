@@ -1196,16 +1196,9 @@ R_EdgeDrawing (entity_t *currententity)
 		rw_time1 = SDL_GetTicks();
 	}
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: about to R_RenderWorld\n");
-#endif
 	// Build the Global Edget Table
 	// Also populate the surface stack and count # surfaces to render (surf_max is the max)
 	R_RenderWorld (currententity);
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: R_RenderWorld done, edge_p-r_edges=%ld surface_p-surfaces=%ld\n",
-		(long)(edge_p - r_edges), (long)(surface_p - surfaces));
-#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1213,13 +1206,7 @@ R_EdgeDrawing (entity_t *currententity)
 		db_time1 = rw_time2;
 	}
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: about to R_DrawBEntitiesOnList\n");
-#endif
 	R_DrawBEntitiesOnList();
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: R_DrawBEntitiesOnList done\n");
-#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1227,15 +1214,9 @@ R_EdgeDrawing (entity_t *currententity)
 		se_time1 = db_time2;
 	}
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: about to R_ScanEdges\n");
-#endif
 	// Use the Global Edge Table to maintin the Active Edge Table: Draw the world as scanlines
 	// Write the Z-Buffer (but no read)
 	R_ScanEdges (currententity, surface_p);
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: R_EdgeDrawing: R_ScanEdges done\n");
-#endif
 }
 
 //=======================================================================
@@ -1395,24 +1376,15 @@ RE_RenderFrame(refdef_t *fd)
 	if (r_speeds->value || r_dspeeds->value)
 		r_time1 = SDL_GetTicks();
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_SetupFrame\n");
-#endif
 	R_SetupFrame ();
 
 	R_SetFrustum(vup, vpn, vright, r_origin, r_newrefdef.fov_x, r_newrefdef.fov_y,
 		frustum);
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_MarkLeaves\n");
-#endif
 	// Using the current view cluster (r_viewcluster), retrieve and decompress
 	// the PVS (Potentially Visible Set)
 	R_MarkLeaves();	// done here so we know if we're in water
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_PushDlights\n");
-#endif
 	// For each dlight_t* passed via r_newrefdef.dlights, mark polygons affected by a light.
 	R_PushDlights(r_worldmodel);
 
@@ -1421,15 +1393,9 @@ RE_RenderFrame(refdef_t *fd)
 	memset(&ent, 0, sizeof(ent));
 	ent.frame = (int)(r_newrefdef.time * 2);
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_EdgeDrawing\n");
-#endif
 	// Build the Global Edge Table and render it via the Active Edge Table
 	// Render the map
 	R_EdgeDrawing (&ent);
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: R_EdgeDrawing done\n");
-#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1449,14 +1415,7 @@ RE_RenderFrame(refdef_t *fd)
 	}
 	// Draw enemies, barrel etc...
 	// Use Z-Buffer mostly in read mode only.
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_DrawEntitiesOnList, numentities=%d\n",
-		r_newrefdef.num_entities);
-#endif
 	R_DrawEntitiesOnList();
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: R_DrawEntitiesOnList done\n");
-#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1465,13 +1424,7 @@ RE_RenderFrame(refdef_t *fd)
 	}
 
 	// Duh !
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: about to R_DrawParticles\n");
-#endif
 	R_DrawParticles();
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: R_DrawParticles done\n");
-#endif
 
 	if (r_dspeeds->value)
 	{
@@ -1497,9 +1450,6 @@ RE_RenderFrame(refdef_t *fd)
 
 	// Modify the palette (when taking hit or pickup item) so all colors are modified
 	R_CalcPalette ();
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_RenderFrame: reached end\n");
-#endif
 
 	if (sw_aliasstats->value)
 	{
@@ -2143,16 +2093,6 @@ RE_InitContext(void *win)
 	 * forever on a real KaiOS device when requesting
 	 * SDL_RENDERER_ACCELERATED, and SDL_RENDERER_SOFTWARE alone isn't
 	 * offered as a fallback by Emscripten's SDL2 port at all. */
-#ifdef __EMSCRIPTEN__
-	/* Temporary diagnostic, round 2: switching SDL_CreateRenderer (which
-	 * hung, per round 1's fprintfs) to SDL_GetWindowSurface did NOT fix
-	 * the hang -- same symptom, same last visible line beforehand
-	 * ("Real display mode: ..."). Round 1's fprintfs were removed once
-	 * they'd done their job; bracket every step of *this* code path
-	 * now to find out which one it actually is this time. */
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: about to SDL_GetWindowSurface\n");
-#endif
-
 	win_surface = SDL_GetWindowSurface(window);
 	if (!win_surface)
 	{
@@ -2160,22 +2100,10 @@ RE_InitContext(void *win)
 		return false;
 	}
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: got window surface, about to SDL_FillRect\n");
-#endif
-
 	SDL_FillRect(win_surface, NULL,
 		SDL_MapRGB(win_surface->format, 0, 0, 0));
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: filled, about to SDL_UpdateWindowSurface\n");
-#endif
-
 	SDL_UpdateWindowSurface(window);
-
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: window surface path done\n");
-#endif
 #else
 	/* NOTE: on Emscripten, requesting SDL_RENDERER_SOFTWARE alone
 	 * fails outright ("Couldn't find matching render driver") --
@@ -2274,22 +2202,9 @@ RE_InitContext(void *win)
 	}
 #endif /* !__EMSCRIPTEN__ */
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: about to R_InitGraphics (%dx%d)\n",
-		vid_buffer_width, vid_buffer_height);
-#endif
-
 	R_InitGraphics(vid_buffer_width, vid_buffer_height);
 
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: R_InitGraphics done, about to SWimp_CreateRender\n");
-#endif
-
 	SWimp_CreateRender(vid_buffer_width, vid_buffer_height);
-
-#ifdef __EMSCRIPTEN__
-	fprintf(stderr, "KAIOS_DEBUG: RE_InitContext: done\n");
-#endif
 
 	return true;
 }

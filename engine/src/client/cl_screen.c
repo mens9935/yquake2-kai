@@ -27,6 +27,11 @@
 
 #include "header/client.h"
 
+#ifdef __EMSCRIPTEN__
+#include <malloc.h>
+#include <emscripten/heap.h>
+#endif
+
 static float scr_con_current; /* aproaches scr_conlines at scr_conspeed */
 static float scr_conlines; /* 0.0 to 1.0 lines of console to display */
 
@@ -1645,6 +1650,39 @@ SCR_Framecounter(void)
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+/*
+ * One-line CPU/RAM/FPS overlay for chasing performance issues on real
+ * KaiOS hardware, where there's no devtools profiler to attach. Reuses
+ * cls.rframetime (already computed every frame in cl_main.c) instead of
+ * timing anything itself, and draws through the same cheap DrawStringScaled
+ * path SCR_DrawSpeed/SCR_Framecounter already use every frame, so it adds
+ * no meaningful overhead of its own.
+ *
+ * There's no OS-level CPU utilization figure available to a sandboxed
+ * KaiOS webapp, so CPU% is a proxy: last frame's wall time against a
+ * fixed 50ms (20fps) budget. RAM% is actual Emscripten heap pressure --
+ * mallinfo()'s allocated bytes against the current heap size.
+ */
+static void
+SCR_DrawKaiosStats(void)
+{
+	char str[64];
+	float scale = SCR_GetConsoleScale();
+	struct mallinfo mi = mallinfo();
+	size_t heap_size = emscripten_get_heap_size();
+	float ram_pct = heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f;
+	float cpu_pct = (cls.rframetime / 0.05f) * 100.0f;
+	float fps = (cls.rframetime > 0.0f) ? (1.0f / cls.rframetime) : 0.0f;
+
+	snprintf(str, sizeof(str), "CPU:%3.0f%% RAM:%3.0f%% FPS:%5.1f",
+		cpu_pct, ram_pct, fps);
+	DrawStringScaled(0, 0, str, scale);
+	SCR_AddDirtyPoint(0, 0);
+	SCR_AddDirtyPoint(scale * (strlen(str) * CHAR_SIZE + 2), 0);
+}
+#endif
+
 // ----
 /*
  * This is called every frame, and can also be called
@@ -1758,16 +1796,13 @@ SCR_UpdateScreen(void)
 			/* clear any dirty part of the background */
 			SCR_TileClear();
 
-#ifdef __EMSCRIPTEN__
-			fprintf(stderr, "KAIOS_DEBUG: SCR_UpdateScreen: about to V_RenderView\n");
-#endif
 			V_RenderView(separation[i]);
-#ifdef __EMSCRIPTEN__
-			fprintf(stderr, "KAIOS_DEBUG: SCR_UpdateScreen: V_RenderView done\n");
-#endif
 
 			SCR_DrawStats();
 			SCR_DrawSpeed();
+#ifdef __EMSCRIPTEN__
+			SCR_DrawKaiosStats();
+#endif
 
 			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 1)
 			{

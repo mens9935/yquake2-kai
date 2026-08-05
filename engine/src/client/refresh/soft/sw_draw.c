@@ -177,8 +177,11 @@ RE_Draw_StretchPicImplementation (int x, int y, int w, int h, const image_t *pic
 		(x + w > vid_buffer_width) ||
 		(y + h > vid_buffer_height))
 	{
-		Com_Printf("%s: bad coordinates %dx%d[%dx%d]",
-			__func__, x, y, w, h);
+		if (developer->value)
+		{
+			Com_Printf("%s: bad coordinates %dx%d[%dx%d]",
+				__func__, x, y, w, h);
+		}
 		return;
 	}
 
@@ -431,8 +434,11 @@ RE_Draw_PicScaledCol(int x, int y, const char *name, float scale, const float co
 		(x + w > vid_buffer_width) ||
 		(y + h > vid_buffer_height))
 	{
-		Com_Printf("%s: bad coordinates %dx%d[%dx%d]",
-			__func__, x, y, w, h);
+		if (developer->value)
+		{
+			Com_Printf("%s: bad coordinates %dx%d[%dx%d]",
+				__func__, x, y, w, h);
+		}
 		return;
 	}
 
