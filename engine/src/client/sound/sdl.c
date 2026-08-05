@@ -1607,6 +1607,21 @@ SDL_BackendInit(void)
 		spec.samples = 2048;
 	}
 
+#ifdef __EMSCRIPTEN__
+	/* This asm.js build is single-threaded: rendering and the audio
+	 * callback share one JS thread, and a heavy software-rasterizer
+	 * frame on this weak device can easily run well past the ~23ms a
+	 * 1024-sample buffer at 44.1kHz provides before the callback gets
+	 * a turn -- an audio buffer underrun, heard as a crackle/dip on
+	 * almost every sound, independent of decode/caching (S_LoadSound
+	 * already caches every decoded sfx_t; this isn't a loading cost).
+	 * Trade latency for underrun resistance: a buffer several times
+	 * larger gives the render loop far more slack before starving the
+	 * callback. Latency added by this is imperceptible for gunshots/
+	 * ambience in a game already running at a handful of FPS. */
+	spec.samples = 4096;
+#endif
+
 	spec.channels = sndchans;
 	spec.callback = SDL_Callback;
 

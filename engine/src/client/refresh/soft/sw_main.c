@@ -393,7 +393,18 @@ R_RegisterVariables (void)
 	// On MacOS texture is cleaned up after render and code have to copy a whole
 	// screen to texture, other platforms save previous texture content and can be
 	// copied only changed parts
-#if defined(__APPLE__) || defined(USE_SDL3)
+	//
+	// Emscripten belongs in the "always copy whole screen" camp for a
+	// different reason: RE_RenderFrame() calls VID_WholeDamageBuffer()
+	// unconditionally at the top of every frame during normal 3D
+	// rendering (not just the first), so the "dirty region" handed to
+	// the partial-refresh path below is *already* the entire buffer on
+	// every single frame here -- RE_BufferDifferenceStart/End's
+	// per-pixel front/back comparison scan (up to ~76800 pixels on this
+	// 240x320 buffer) then never finds a smaller region to report, and
+	// the whole scan is pure wasted CPU on a device that's already
+	// struggling for framerate.
+#if defined(__APPLE__) || defined(USE_SDL3) || defined(__EMSCRIPTEN__)
 	sw_partialrefresh = ri.Cvar_Get("sw_partialrefresh", "0", CVAR_ARCHIVE);
 #else
 	sw_partialrefresh = ri.Cvar_Get("sw_partialrefresh", "1", CVAR_ARCHIVE);
