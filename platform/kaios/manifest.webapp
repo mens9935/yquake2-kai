@@ -21,6 +21,5 @@
       "access": "readonly",
       "description": "Read baseq2 game data from the SD card"
     }
-  },
-  "csp": "default-src 'self'; script-src 'self'; connect-src 'self' https:; img-src 'self' data: blob: https:; media-src 'self' https:; object-src 'none';"
+  }
 }
