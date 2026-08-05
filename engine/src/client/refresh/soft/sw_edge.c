@@ -136,6 +136,47 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 	static int reported;
 	int outer_guard = 0;
 	static int outer_reported;
+	static int shape_reported;
+#endif
+
+#ifdef __EMSCRIPTEN__
+	/* Neither watchdog added so far (this function's own search loop,
+	 * and R_EmitEdge's newedges[v] sorted-insert search) has ever
+	 * fired, yet the outer edgestoadd chain below still finds a cycle
+	 * -- meaning by the time this function is entered, edgestoadd is
+	 * already cyclic. Cheaply check for that with Floyd's algorithm
+	 * (O(list length), no per-call spam for the ~300 healthy scanlines
+	 * this runs on every frame) and only when a cycle is actually
+	 * confirmed, walk it again and print each node's address/u/next so
+	 * the next device log shows exactly which node's ->next was
+	 * corrupted and what it now points at, instead of just "stuck at
+	 * address X". */
+	if (!shape_reported)
+	{
+		edge_t *slow = edgestoadd, *fast = edgestoadd;
+
+		while (fast && fast->next)
+		{
+			slow = slow->next;
+			fast = fast->next->next;
+			if (slow == fast)
+			{
+				edge_t *walk = edgestoadd;
+				int i;
+
+				shape_reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: edgestoadd is "
+					"cyclic, dumping shape:\n");
+				for (i = 0; i < 40; i++)
+				{
+					fprintf(stderr, "KAIOS_DEBUG:   [%d] node=%p u=%d next=%p\n",
+						i, (void *)walk, walk->u, (void *)walk->next);
+					walk = walk->next;
+				}
+				break;
+			}
+		}
+	}
 #endif
 
 	do
