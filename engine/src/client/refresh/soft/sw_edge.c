@@ -118,14 +118,34 @@ static void
 R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 {
 	edge_t	*next_edge;
+#ifdef __EMSCRIPTEN__
+	/* R_StepActiveU had two confirmed real-device infinite loops in its
+	 * own list walks; this function has the same shape (walk a linked
+	 * list trusting it's finite and correctly sorted) and zero
+	 * protection, so it's an equally plausible hang site. Same watchdog
+	 * pattern as there. */
+	int guard;
+#endif
 
 	do
 	{
 		next_edge = edgestoadd->next;
 
+#ifdef __EMSCRIPTEN__
+		guard = 0;
+#endif
 		while (edgelist->u < edgestoadd->u)
 		{
 			edgelist = edgelist->next;
+#ifdef __EMSCRIPTEN__
+			if (++guard > 200000)
+			{
+				fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: search stuck! "
+					"edgestoadd=%p u=%d edgelist=%p u=%d\n",
+					(void *)edgestoadd, edgestoadd->u, (void *)edgelist, edgelist->u);
+				return;
+			}
+#endif
 		}
 
 		// insert edgestoadd before edgelist
@@ -337,11 +357,23 @@ D_SurfSearchBackwards
 static surf_t*
 D_SurfSearchBackwards(const surf_t *surf, surf_t *surf2)
 {
+#ifdef __EMSCRIPTEN__
+	int guard = 0;
+#endif
 	do
 	{
 		do
 		{
 			surf2 = surf2->next;
+#ifdef __EMSCRIPTEN__
+			if (++guard > 200000)
+			{
+				fprintf(stderr, "KAIOS_DEBUG: D_SurfSearchBackwards: stuck! "
+					"surf=%p key=%d surf2=%p key=%d\n",
+					(void *)surf, surf->key, (void *)surf2, surf2->key);
+				return surf2;
+			}
+#endif
 		} while (surf->key < surf2->key);
 
 		// if it's two surfaces on the same plane, the one that's already
@@ -441,11 +473,23 @@ D_SurfSearchForward
 static surf_t*
 D_SurfSearchForward(const surf_t *surf, surf_t *surf2)
 {
+#ifdef __EMSCRIPTEN__
+	int guard = 0;
+#endif
 	do
 	{
 		do
 		{
 			surf2 = surf2->next;
+#ifdef __EMSCRIPTEN__
+			if (++guard > 200000)
+			{
+				fprintf(stderr, "KAIOS_DEBUG: D_SurfSearchForward: stuck! "
+					"surf=%p key=%d surf2=%p key=%d\n",
+					(void *)surf, surf->key, (void *)surf2, surf2->key);
+				return surf2;
+			}
+#endif
 		} while (surf->key > surf2->key);
 		// if it's two surfaces on the same plane, the one that's already
 		// active is in front, so keep going unless it's a bmodel
@@ -463,6 +507,9 @@ static surf_t*
 R_LeadingEdgeSearch (const edge_t *edge, const surf_t *surf, surf_t *surf2)
 {
 	float	testzi, newzitop;
+#ifdef __EMSCRIPTEN__
+	int guard = 0;
+#endif
 
 	do
 	{
@@ -488,6 +535,16 @@ R_LeadingEdgeSearch (const edge_t *edge, const surf_t *surf, surf_t *surf2)
 		}
 
 		newzitop = newzi * 1.01;
+
+#ifdef __EMSCRIPTEN__
+		if (++guard > 200000)
+		{
+			fprintf(stderr, "KAIOS_DEBUG: R_LeadingEdgeSearch: stuck! "
+				"newzitop=%f testzi=%f surf->d_zistepu=%f surf2->d_zistepu=%f\n",
+				newzitop, testzi, surf->d_zistepu, surf2->d_zistepu);
+			return surf2;
+		}
+#endif
 	}
 	while(newzitop < testzi || surf->d_zistepu < surf2->d_zistepu);
 
