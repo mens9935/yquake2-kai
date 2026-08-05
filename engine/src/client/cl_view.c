@@ -605,6 +605,26 @@ V_RenderView(float stereo_separation)
 
 	R_RenderFrame(&cl.refdef);
 
+#ifdef __EMSCRIPTEN__
+	/* Narrowing a silent hang confirmed to be somewhere between
+	 * RE_RenderFrame's own "returning" print and the one-shot print at
+	 * the end of SCR_UpdateScreen -- neither ever showed up together in
+	 * a real device log, so something in this gap (still inside
+	 * V_RenderView, or later back in SCR_UpdateScreen) never returns.
+	 * One-shot checkpoint right after R_RenderFrame returns to this
+	 * caller, before any of V_RenderView's own tail work runs. */
+	{
+		static int reported;
+
+		if (!reported)
+		{
+			reported = 1;
+			fprintf(stderr, "KAIOS_DEBUG: V_RenderView: R_RenderFrame "
+				"returned to caller\n");
+		}
+	}
+#endif
+
 	if (cl_stats->value)
 	{
 		Com_Printf("ent:%i  lt:%i  part:%i\n", r_numentities,
@@ -622,6 +642,18 @@ V_RenderView(float stereo_separation)
 			scr_vrect.y + scr_vrect.height - 1);
 
 	SCR_DrawCrosshair();
+
+#ifdef __EMSCRIPTEN__
+	{
+		static int reported;
+
+		if (!reported)
+		{
+			reported = 1;
+			fprintf(stderr, "KAIOS_DEBUG: V_RenderView: returning\n");
+		}
+	}
+#endif
 }
 
 static void
