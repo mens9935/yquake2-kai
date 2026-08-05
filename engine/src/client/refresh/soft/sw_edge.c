@@ -134,10 +134,24 @@ R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 	 * independent of whether the underlying loop is now bounded. */
 	int guard;
 	static int reported;
+	int outer_guard = 0;
+	static int outer_reported;
 #endif
 
 	do
 	{
+#ifdef __EMSCRIPTEN__
+		if (++outer_guard > 2000)
+		{
+			if (!outer_reported)
+			{
+				outer_reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_InsertNewEdges: outer edgestoadd "
+					"chain stuck! edgestoadd=%p\n", (void *)edgestoadd);
+			}
+			return;
+		}
+#endif
 		next_edge = edgestoadd->next;
 
 #ifdef __EMSCRIPTEN__
@@ -177,9 +191,25 @@ R_RemoveEdges
 static void
 R_RemoveEdges (edge_t *pedge)
 {
+#ifdef __EMSCRIPTEN__
+	int guard = 0;
+	static int reported;
+#endif
 
 	do
 	{
+#ifdef __EMSCRIPTEN__
+		if (++guard > 2000)
+		{
+			if (!reported)
+			{
+				reported = 1;
+				fprintf(stderr, "KAIOS_DEBUG: R_RemoveEdges: nextremove chain "
+					"stuck! pedge=%p\n", (void *)pedge);
+			}
+			return;
+		}
+#endif
 		pedge->next->prev = pedge->prev;
 		pedge->prev->next = pedge->next;
 	} while ((pedge = pedge->nextremove) != NULL);
