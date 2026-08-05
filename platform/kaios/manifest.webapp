@@ -21,8 +21,5 @@
       "access": "readonly",
       "description": "Read baseq2 game data from the SD card"
     }
-  },
-  "b2g_features": {
-    "acceleration": "disabled"
   }
 }
