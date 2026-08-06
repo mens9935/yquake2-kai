@@ -449,6 +449,10 @@ struct model_s *CL_PowerScreenModel (void);
 void CL_PrepRefresh (void);
 void CL_RegisterSounds (void);
 
+#ifdef __EMSCRIPTEN__
+void CL_KaiosPrewarmSurfaceCache (const vec3_t origin, const vec3_t angles);
+#endif
+
 void CL_Quit_f (void);
 
 void CL_Init (void);

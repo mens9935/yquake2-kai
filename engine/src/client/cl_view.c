@@ -254,6 +254,85 @@ V_TestLights(void)
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+/*
+ * id's software renderer caches every texture+lightmap-blended BSP
+ * surface the first time it's actually drawn (D_CacheSurface in
+ * sw_surf.c), and D_FlushCaches() empties that cache on every level
+ * load. KAIOS_FRAMESPIKE_BREAKDOWN logging confirmed this "cold
+ * cache" cost -- not sv/gm game logic -- is what dominates the first
+ * several frames after a level starts (rf far outweighs sv/gm/cl).
+ * Because rendering and the audio ScriptProcessorNode callback share
+ * one JS thread on this asm.js build, those render spikes are
+ * directly what causes the audible stutter right as a level begins.
+ *
+ * Mitigation: spin the view through a few fixed directions from the
+ * spawn point before the loading plaque is dismissed (called from the
+ * same guarded block in cl_parse.c that removes it), so those first
+ * cache misses happen while the player is still staring at the
+ * loading screen rather than leaking into the first seconds of real,
+ * audible gameplay. Four yaws 90 degrees apart, matched to the 90
+ * degree fov used here, tile a full 360 degrees with no gaps and
+ * minimal overlap. This can only help geometry visible from the
+ * spawn point itself -- cache misses from walking deeper into unseen
+ * parts of the level are unavoidable and unrelated to this.
+ *
+ * R_RenderFrame() only rasterizes into the internal software pixel
+ * buffer; it does not blit to the browser canvas (that happens
+ * later, from SCR_UpdateScreen/VID_Update), so none of this is ever
+ * actually visible on screen -- the loading plaque graphic stays put
+ * throughout.
+ */
+static cvar_t *kaios_prewarm_cache;
+
+extern float CalcFov(float fov_x, float w, float h);
+
+void
+CL_KaiosPrewarmSurfaceCache(const vec3_t origin, const vec3_t angles)
+{
+	refdef_t warmdef;
+	int i;
+	static const float yaws[4] = { 0.0f, 90.0f, 180.0f, 270.0f };
+
+	if (!kaios_prewarm_cache)
+	{
+		kaios_prewarm_cache = Cvar_Get("kaios_prewarm_cache", "1", CVAR_ARCHIVE);
+	}
+
+	if (!kaios_prewarm_cache->value || !cl.refresh_prepped)
+	{
+		return;
+	}
+
+	/* keeps lightadj consistent with what the first real frame will
+	 * compute for constant (non-animating) light styles, the common
+	 * case -- animated styles will still miss on the first real frame
+	 * since their value depends on the exact time it's drawn at */
+	CL_AddLightStyles();
+
+	memset(&warmdef, 0, sizeof(warmdef));
+	warmdef.width = viddef.width;
+	warmdef.height = viddef.height;
+	warmdef.fov_x = 90;
+	warmdef.fov_y = CalcFov(warmdef.fov_x, (float)warmdef.width, (float)warmdef.height);
+	warmdef.time = cl.time * 0.001f;
+	warmdef.areabits = cl.frame.areabits;
+	warmdef.lightstyles = r_lightstyles;
+
+	VectorCopy(origin, warmdef.vieworg);
+	warmdef.vieworg[2] += 22; /* approx eye height, as CL_CalcViewValues adds */
+
+	for (i = 0; i < 4; i++)
+	{
+		warmdef.viewangles[0] = 0;
+		warmdef.viewangles[1] = angles[1] + yaws[i];
+		warmdef.viewangles[2] = 0;
+
+		R_RenderFrame(&warmdef);
+	}
+}
+#endif
+
 /*
  * Call before entering a new level, or after changing dlls
  */

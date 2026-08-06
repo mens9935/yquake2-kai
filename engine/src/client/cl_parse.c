@@ -853,6 +853,11 @@ CL_ParseFrame(void)
 
 			if ((cls.disable_servercount != cl.servercount) && cl.refresh_prepped)
 			{
+#ifdef __EMSCRIPTEN__
+				/* still behind the plaque here -- see the big comment
+				 * on CL_KaiosPrewarmSurfaceCache in cl_view.c */
+				CL_KaiosPrewarmSurfaceCache(cl.predicted_origin, cl.predicted_angles);
+#endif
 				SCR_EndLoadingPlaque();  /* get rid of loading plaque */
 			}
 
