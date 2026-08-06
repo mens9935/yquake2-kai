@@ -50,6 +50,107 @@ byte *membase;
 size_t maxhunksize;
 size_t curhunksize;
 
+#if defined(__EMSCRIPTEN__)
+/* Emscripten's mmap()/munmap() are a shim over a plain heap allocation
+ * (malloc-backed), not real page-level virtual memory -- there's no
+ * kernel to hand pages back to, it's all one contiguous typed array
+ * either way. The generic mmap/mremap/munmap implementation below
+ * relies on being able to shrink a *portion* of a previously-mapped
+ * block down to just what Hunk_End's caller actually used, then later
+ * munmap() exactly that shrunk size from Hunk_Free -- confirmed on a
+ * real device that neither half of that works here: an in-place
+ * mremap()-style shrink at Hunk_End reliably failed with errno 28
+ * (ENOSPC) the first time a map ever finished loading, so this used to
+ * just skip the shrink and keep membase pointed at the full
+ * maxhunksize reservation -- except Hunk_End's very last line below
+ * (shared by every platform) always overwrites the stored header with
+ * the *shrunk* curhunksize, not the true maxhunksize that got
+ * reserved. Hunk_Free then trusted that now-wrong, too-small header
+ * and munmap()'d only that many bytes -- leaving the remainder of
+ * every world model's oversized hunk reservation (hunkSize is a
+ * padded upper-bound estimate, see Mod_CalcLumpHunkSize in
+ * sw_model.c, so this was routinely a large fraction of a few MB)
+ * permanently unreachable and unfreed on every single map transition.
+ * Confirmed against a real device's console log: heap baseline
+ * ratcheted upward by roughly one hunkSize's worth on every fresh
+ * level load that evicted and replaced the previous world model, with
+ * no matching drop back down, eventually hitting the fixed 64MB
+ * ceiling after just three or four transitions and aborting with OOM.
+ *
+ * Fix: don't use mmap/munmap for this platform at all -- malloc the
+ * full reservation up front, realloc() it down to the real size at
+ * Hunk_End (a real heap allocator, unlike the mmap shim, actually
+ * gives the trimmed-off tail back to its free list here), and free()
+ * exactly what realloc last returned at Hunk_Free. No separate stored
+ * size needed for the free path -- malloc's own bookkeeping already
+ * knows how big its returned pointer is. */
+
+void *
+Hunk_Begin(int maxsize)
+{
+	/* plus 32 bytes for cacheline, matching the generic path below */
+	maxhunksize = maxsize + sizeof(size_t) + 32;
+	curhunksize = 0;
+
+	membase = (byte *)malloc(maxhunksize);
+
+	if (membase == NULL)
+	{
+		Sys_Error("unable to allocate %d bytes", maxsize);
+	}
+
+	*((size_t *)membase) = curhunksize;
+
+	return membase + sizeof(size_t);
+}
+
+void *
+Hunk_Alloc(int size)
+{
+	byte *buf;
+
+	/* round to cacheline */
+	size = (size + 31) & ~31;
+
+	if (curhunksize + size > maxhunksize)
+	{
+		Sys_Error("%s: overflow %d > %d",
+			__func__, curhunksize + size, maxhunksize);
+	}
+
+	buf = membase + sizeof(size_t) + curhunksize;
+	curhunksize += size;
+	return buf;
+}
+
+int
+Hunk_End(void)
+{
+	byte *n = (byte *)realloc(membase, curhunksize + sizeof(size_t));
+
+	if (n == NULL)
+	{
+		Sys_Error("Hunk_End: realloc failed shrinking to %d bytes",
+			curhunksize + sizeof(size_t));
+	}
+
+	membase = n;
+	*((size_t *)membase) = curhunksize + sizeof(size_t);
+
+	return curhunksize;
+}
+
+void
+Hunk_Free(void *base)
+{
+	if (base)
+	{
+		free(((byte *)base) - sizeof(size_t));
+	}
+}
+
+#else /* !__EMSCRIPTEN__ */
+
 void *
 Hunk_Begin(int maxsize)
 {
@@ -116,19 +217,7 @@ Hunk_End(void)
 {
 	byte *n = NULL;
 
-#if defined(__EMSCRIPTEN__)
-	/* Emscripten's mmap()/munmap() are a shim over a plain heap
-	 * allocation, not real page-level virtual memory -- there's no
-	 * kernel to hand pages back to, it's all one contiguous typed
-	 * array either way. Shrinking a *portion* of a previously-mapped
-	 * block (exactly what every other branch below does) isn't
-	 * something that emulation supports: confirmed on a real device,
-	 * where the munmap() below reliably failed with errno 28 (ENOSPC)
-	 * the first time a map ever finished loading. Skip the shrink
-	 * attempt entirely -- membase already covers curhunksize, there's
-	 * nothing to actually reclaim here on this platform. */
-	n = membase;
-#elif defined(__linux__)
+#if defined(__linux__)
 	n = (byte *)mremap(membase, maxhunksize, curhunksize + sizeof(size_t), 0);
 #elif defined(__NetBSD__)
 	n = (byte *)mremap(membase, maxhunksize, NULL, curhunksize + sizeof(size_t), 0);
@@ -183,4 +272,6 @@ Hunk_Free(void *base)
 		}
 	}
 }
+
+#endif /* !__EMSCRIPTEN__ */
 

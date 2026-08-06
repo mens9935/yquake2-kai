@@ -1773,14 +1773,24 @@ S_Init(void)
 	/* Space-separated sound/ subpath prefixes to never actually load
 	 * (S_LoadSound, below, returns NULL immediately for a match --
 	 * S_StartSound already no-ops on a NULL sfx). Default is baseq2's
-	 * ambient/level-mechanism sounds (looping ambiance, radio chatter,
-	 * doors, plats, switches) -- weapons/, player/, items/, misc/, and
-	 * every monster-name directory (soldier/, infantry/, ...) are left
-	 * alone, so weapon fire and enemy sounds keep playing. Editable at
-	 * runtime (set s_kaios_skip_prefixes "..."), no rebuild needed to
-	 * retune which categories get cut. */
+	 * ambient/level-mechanism sounds (looping ambiance, doors, plats,
+	 * switches) plus the "computer updated"/message notify beep
+	 * (misc/talk.wav, misc/talk1.wav -- played by every target_help,
+	 * trigger_counter and message trigger in g_target.c/g_trigger.c/
+	 * g_utils.c/g_func.c, not just the computer terminals, so this is a
+	 * prefix match on "misc/talk" rather than the two exact names) --
+	 * weapons/, player/, items/, the rest of misc/, and every
+	 * monster-name directory (soldier/, infantry/, ...) are left alone,
+	 * so weapon fire and enemy sounds keep playing. Per-map radio/
+	 * speaker voiceovers (target_speaker's "noise" key) come from the
+	 * .bsp's own entity data, not from engine source, so there's no
+	 * fixed name to default here -- watch for "S_LoadSound freshly
+	 * loaded <name>" in the console log during the annoying bit and add
+	 * that exact path/prefix below at runtime. Editable at runtime (set
+	 * s_kaios_skip_prefixes "..."), no rebuild needed to retune which
+	 * categories get cut. */
 	s_kaios_skip_prefixes = Cvar_Get("s_kaios_skip_prefixes",
-		"world/ doors/ plats/ switches/", CVAR_ARCHIVE);
+		"world/ doors/ plats/ switches/ misc/talk", CVAR_ARCHIVE);
 #endif
 
 	Cmd_AddCommand("play", S_Play);
