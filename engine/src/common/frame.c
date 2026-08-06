@@ -827,7 +827,21 @@ Qcommon_Frame(int usec)
 	Cbuf_Execute();
 
 
-	if (host_speeds->value)
+#ifdef __EMSCRIPTEN__
+	/* host_speeds already computes exactly the sv/gm/cl/rf breakdown
+	 * needed to find out whether a KAIOS_FRAMESPIKE (cl_main.c) is
+	 * server simulation, game DLL think()s, client-side work, or the
+	 * renderer -- reuse its timing capture (below) for any outlier
+	 * frame even when host_speeds itself is off, instead of asking for
+	 * a full-session host_speeds 1 (every frame, all session) just to
+	 * catch the rare multi-hundred-ms spikes actually worth looking
+	 * at. */
+	qboolean kaios_want_speeds = (renderdelta > 400000);
+#else
+	qboolean kaios_want_speeds = false;
+#endif
+
+	if (host_speeds->value || kaios_want_speeds)
 	{
 		time_before = Sys_Milliseconds();
 	}
@@ -840,7 +854,7 @@ Qcommon_Frame(int usec)
 	}
 
 
-	if (host_speeds->value)
+	if (host_speeds->value || kaios_want_speeds)
 	{
 		time_between = Sys_Milliseconds();
 	}
@@ -853,7 +867,7 @@ Qcommon_Frame(int usec)
 	}
 
 
-	if (host_speeds->value)
+	if (host_speeds->value || kaios_want_speeds)
 	{
 		int all, sv, gm, cl, rf;
 
@@ -865,7 +879,18 @@ Qcommon_Frame(int usec)
 		rf = time_after_ref - time_before_ref;
 		sv -= gm;
 		cl -= rf;
-		Com_Printf("all:%3i sv:%3i gm:%3i cl:%3i rf:%3i\n", all, sv, gm, cl, rf);
+
+		if (host_speeds->value)
+		{
+			Com_Printf("all:%3i sv:%3i gm:%3i cl:%3i rf:%3i\n", all, sv, gm, cl, rf);
+		}
+#ifdef __EMSCRIPTEN__
+		else
+		{
+			Com_Printf("KAIOS_FRAMESPIKE_BREAKDOWN: all=%dms sv=%dms gm=%dms cl=%dms rf=%dms\n",
+				all, sv, gm, cl, rf);
+		}
+#endif
 	}
 
 

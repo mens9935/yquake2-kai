@@ -962,17 +962,28 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 		}
 
 		/* update the screen */
+#ifdef __EMSCRIPTEN__
+		/* Always captured (not gated on host_speeds) so frame.c's
+		 * KAIOS_FRAMESPIKE_BREAKDOWN can report a real rf number for
+		 * an outlier frame even when host_speeds itself is off. */
+		time_before_ref = Sys_Milliseconds();
+#else
 		if (host_speeds->value)
 		{
 			time_before_ref = Sys_Milliseconds();
 		}
+#endif
 
 		SCR_UpdateScreen();
 
+#ifdef __EMSCRIPTEN__
+		time_after_ref = Sys_Milliseconds();
+#else
 		if (host_speeds->value)
 		{
 			time_after_ref = Sys_Milliseconds();
 		}
+#endif
 
 		/* update audio */
 		S_Update(cl.refdef.vieworg, cl.v_forward, cl.v_right, cl.v_up);

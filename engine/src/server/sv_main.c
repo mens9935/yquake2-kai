@@ -330,10 +330,19 @@ static void
 SV_RunGameFrame(void)
 {
 #ifndef DEDICATED_ONLY
+#ifdef __EMSCRIPTEN__
+	/* Always captured here (not gated on host_speeds) so frame.c's
+	 * KAIOS_FRAMESPIKE_BREAKDOWN can report real sv/gm/cl/rf numbers
+	 * for an outlier frame even when host_speeds itself is off --
+	 * Sys_Milliseconds() is cheap enough that capturing it every frame
+	 * regardless isn't worth gating. */
+	time_before_game = Sys_Milliseconds();
+#else
 	if (host_speeds->value)
 	{
 		time_before_game = Sys_Milliseconds();
 	}
+#endif
 #endif
 
 	/* we always need to bump framenum, even if we
@@ -361,10 +370,14 @@ SV_RunGameFrame(void)
 	}
 
 #ifndef DEDICATED_ONLY
+#ifdef __EMSCRIPTEN__
+	time_after_game = Sys_Milliseconds();
+#else
 	if (host_speeds->value)
 	{
 		time_after_game = Sys_Milliseconds();
 	}
+#endif
 #endif
 }
 
