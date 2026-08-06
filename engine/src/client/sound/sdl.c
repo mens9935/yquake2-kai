@@ -1609,17 +1609,30 @@ SDL_BackendInit(void)
 
 #ifdef __EMSCRIPTEN__
 	/* This asm.js build is single-threaded: rendering and the audio
-	 * callback share one JS thread, and a heavy software-rasterizer
-	 * frame on this weak device can easily run well past the ~23ms a
-	 * 1024-sample buffer at 44.1kHz provides before the callback gets
-	 * a turn -- an audio buffer underrun, heard as a crackle/dip on
-	 * almost every sound, independent of decode/caching (S_LoadSound
-	 * already caches every decoded sfx_t; this isn't a loading cost).
-	 * Trade latency for underrun resistance: a buffer several times
-	 * larger gives the render loop far more slack before starving the
-	 * callback. Latency added by this is imperceptible for gunshots/
-	 * ambience in a game already running at a handful of FPS. */
-	spec.samples = 4096;
+	 * callback share one JS thread. SDL's "emscripten" audio backend
+	 * (confirmed against a real device's boot log: SDL audio driver is
+	 * "emscripten") is SDL 2.0.10's original ScriptProcessorNode-based
+	 * implementation, not the newer AudioWorklet one those later
+	 * versions gained -- ScriptProcessorNode callbacks run on the same
+	 * main thread as everything else, at the mercy of however long the
+	 * last queued JS task takes. There is no real fix for that within
+	 * this SDL2 version short of backporting AudioWorklet support
+	 * wholesale, so this is purely a mitigation: a heavy
+	 * software-rasterizer frame (FPS can drop into the low single
+	 * digits on this device) can easily run for hundreds of
+	 * milliseconds, starving the callback for far longer than a
+	 * 1024-sample buffer's ~23ms of slack at 44.1kHz -- heard as
+	 * crackle/dropouts, and on some browsers as the last processed
+	 * chunk repeating instead of going silent while it waits (matches
+	 * a real device report: multiple simultaneous sounds stuttering,
+	 * with sounds cutting off or their tail repeating). Bumped once
+	 * already from 1024 to 4096 (~93ms); still not enough headroom for
+	 * the worst frame spikes reported live, so bumping again to 8192
+	 * (~186ms). ScriptProcessorNode buffer sizes must be a power of two
+	 * from 256 to 16384 -- 16384 (~371ms) is the ceiling this lever has
+	 * left if 8192 still isn't enough, at the cost of very noticeable
+	 * audio lag behind on-screen events in a shooter. */
+	spec.samples = 8192;
 #endif
 
 	spec.channels = sndchans;
