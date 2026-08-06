@@ -862,6 +862,22 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 	cls.realtime = curtime;
 	cl.time += timedelta / 1000;
 
+#ifdef __EMSCRIPTEN__
+	/* cls.rframetime gets clamped to 0.5s a few lines below, which
+	 * then feeds SCR_DrawKaiosStats' CPU% proxy (cl_screen.c) -- that
+	 * clamp means a genuinely multi-second stall frame and a
+	 * borderline 510ms one both just read "CPU:100%", no way to tell
+	 * how far over the audio buffer's ~371ms ceiling (sdl.c,
+	 * spec.samples) the worst frames actually run. Print the real,
+	 * unclamped number for anything that would show as pegged 100%
+	 * anyway, so the next report has the true magnitude instead of a
+	 * clamped guess. */
+	if (renderdelta > 400000)
+	{
+		Com_Printf("KAIOS_FRAMESPIKE: renderdelta=%dms\n", renderdelta / 1000);
+	}
+#endif
+
 	// Don't extrapolate too far ahead.
 	if (cls.nframetime > 0.5f)
 	{

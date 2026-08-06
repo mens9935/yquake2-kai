@@ -1626,13 +1626,21 @@ SDL_BackendInit(void)
 	 * chunk repeating instead of going silent while it waits (matches
 	 * a real device report: multiple simultaneous sounds stuttering,
 	 * with sounds cutting off or their tail repeating). Bumped once
-	 * already from 1024 to 4096 (~93ms); still not enough headroom for
-	 * the worst frame spikes reported live, so bumping again to 8192
-	 * (~186ms). ScriptProcessorNode buffer sizes must be a power of two
-	 * from 256 to 16384 -- 16384 (~371ms) is the ceiling this lever has
-	 * left if 8192 still isn't enough, at the cost of very noticeable
-	 * audio lag behind on-screen events in a shooter. */
-	spec.samples = 8192;
+	 * already from 1024 to 4096 (~93ms) then to 8192 (~186ms); still
+	 * not enough headroom for the worst frame spikes reported live
+	 * (repeated CPU:100% FPS:1 stats lines right after a level starts
+	 * rendering, likely a single frame running well past a second).
+	 * This is the ceiling: ScriptProcessorNode buffer sizes must be a
+	 * power of two from 256 to 16384, nothing bigger is possible with
+	 * this backend. Note this cannot help a stall inside the callback
+	 * itself either way -- while our C code is mid-frame the browser
+	 * cannot invoke the ScriptProcessorNode callback at all, there's
+	 * nothing running to mute. A bigger buffer only gives the browser
+	 * more already-mixed audio to keep playing from before it needs a
+	 * fresh callback; if a single frame stall outlasts even 16384
+	 * samples (~371ms), no buffer size fixes that -- the actual stall
+	 * needs to get shorter. */
+	spec.samples = 16384;
 #endif
 
 	spec.channels = sndchans;
