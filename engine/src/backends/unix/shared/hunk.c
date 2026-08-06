@@ -78,12 +78,35 @@ size_t curhunksize;
  * ceiling after just three or four transitions and aborting with OOM.
  *
  * Fix: don't use mmap/munmap for this platform at all -- malloc the
- * full reservation up front, realloc() it down to the real size at
- * Hunk_End (a real heap allocator, unlike the mmap shim, actually
- * gives the trimmed-off tail back to its free list here), and free()
- * exactly what realloc last returned at Hunk_Free. No separate stored
- * size needed for the free path -- malloc's own bookkeeping already
- * knows how big its returned pointer is. */
+ * full reservation up front and free() the whole thing (matching what
+ * malloc actually handed out) at Hunk_Free. No separate stored size
+ * needed for the free path -- malloc's own bookkeeping already knows
+ * how big its returned pointer is.
+ *
+ * Deliberately does NOT realloc() the block down to curhunksize at
+ * Hunk_End, even though that would reclaim the padding between the
+ * worst-case hunkSize estimate and what actually got used (see
+ * Mod_CalcLumpHunkSize/the "1MB extra just in case" pad in
+ * Mod_LoadBrushModel, sw_model.c) immediately instead of only once
+ * the model is evicted -- realloc() is free to move the block to a
+ * new address when shrinking a large allocation, and every one of
+ * mod_known[i].vertexes/edges/surfaces/planes/etc gets computed as a
+ * raw pointer *relative to this block's address* while it's being
+ * filled in (see Hunk_Alloc's callers throughout sw_model.c).
+ * Hunk_End's return value here has only ever been treated as a size
+ * (mod->extradatasize = Hunk_End(), sw_model.c) -- mod->extradata
+ * itself is set once at Hunk_Begin and never refreshed after -- so a
+ * relocating shrink would silently dangle every one of those pointers
+ * the moment it happened. That's not hypothetical: an earlier version
+ * of this fix did realloc()-shrink here, built and linked cleanly, and
+ * broke on the very first level transition on a real device (missing
+ * HUD pics, Com_sprintf overflow -- textbook wild-pointer corruption
+ * shortly after a load). Leaving the block's address fixed for the
+ * model's whole lifetime, and only ever freeing the one true
+ * allocation malloc gave out, is what the mmap/mremap path guaranteed
+ * too (mremap without MREMAP_MAYMOVE, with an explicit Sys_Error if it
+ * ever needed to move) -- match that invariant here instead of
+ * chasing the extra few hundred KB a shrink would save. */
 
 void *
 Hunk_Begin(int maxsize)
@@ -126,15 +149,10 @@ Hunk_Alloc(int size)
 int
 Hunk_End(void)
 {
-	byte *n = (byte *)realloc(membase, curhunksize + sizeof(size_t));
-
-	if (n == NULL)
-	{
-		Sys_Error("Hunk_End: realloc failed shrinking to %d bytes",
-			curhunksize + sizeof(size_t));
-	}
-
-	membase = n;
+	/* membase intentionally left untouched -- see the block comment
+	 * above. Only the header's recorded size is updated, purely for
+	 * parity with the generic path (nothing on this platform reads it
+	 * back; Hunk_Free below frees the whole malloc'd block regardless). */
 	*((size_t *)membase) = curhunksize + sizeof(size_t);
 
 	return curhunksize;
