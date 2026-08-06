@@ -25,6 +25,28 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <limits.h>
 #include "header/local.h"
 
+#ifdef __EMSCRIPTEN__
+#include <malloc.h>
+#include <emscripten/heap.h>
+
+/* Chasing a report of level 2 failing to load with an OOM after level 1
+ * ran fine, on a build whose Emscripten heap is a fixed 64MB with no
+ * growth allowed (TOTAL_MEMORY/ALLOW_MEMORY_GROWTH, build.sh) -- log
+ * actual heap usage at the points level data gets allocated/freed so a
+ * real run against real map data shows exactly how much headroom is
+ * left and where it runs out, instead of guessing from lump sizes alone. */
+static void
+Kaios_LogHeapUsage(const char *label)
+{
+	struct mallinfo mi = mallinfo();
+	size_t heap_size = emscripten_get_heap_size();
+
+	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%)\n",
+		label, (unsigned)mi.uordblks, (unsigned)heap_size,
+		heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f);
+}
+#endif
+
 static void Mod_LoadBrushModel(model_t *mod, void *buffer, int modfilelen);
 
 static YQ2_ALIGNAS_TYPE(int) byte	mod_novis[MAX_MAP_LEAFS/8];
@@ -658,6 +680,11 @@ Mod_LoadBrushModel(model_t *mod, void *buffer, int modfilelen)
 
 	hunkSize += 1048576; // 1MB extra just in case
 
+#ifdef __EMSCRIPTEN__
+	Com_Printf("KAIOS_MEM: %s BSP hunkSize=%d bytes\n", mod->name, hunkSize);
+	Kaios_LogHeapUsage(va("before Hunk_Begin(%s, %d)", mod->name, hunkSize));
+#endif
+
 	mod->extradata = Hunk_Begin(hunkSize);
 
 	mod->type = mod_brush;
@@ -706,13 +733,27 @@ RE_BeginRegistration(const char *model)
 	r_oldviewcluster = -1;		// force markleafs
 	Com_sprintf (fullname, sizeof(fullname), "maps/%s.bsp", model);
 
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage(va("BeginRegistration(%s) before world model freed", fullname));
+#endif
+
 	D_FlushCaches ();
 	// explicitly free the old map if different
 	// this guarantees that mod_known[0] is the world map
 	flushmap = ri.Cvar_Get ("flushmap", "0", 0);
 	if ( strcmp(mod_known[0].name, fullname) || flushmap->value)
 		Mod_Free (&mod_known[0]);
+
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage("BeginRegistration after old world model freed");
+#endif
+
 	r_worldmodel = RE_RegisterModel (fullname);
+
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage("BeginRegistration after new world model registered");
+#endif
+
 	R_NewMap ();
 }
 
@@ -763,6 +804,10 @@ RE_EndRegistration (void)
 	int	i;
 	model_t	*mod;
 
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage("EndRegistration start (all this level's assets now loaded)");
+#endif
+
 	if (Mod_HasFreeSpace() && R_ImageHasFreeSpace())
 	{
 		// should be enough space for load next maps
@@ -779,6 +824,10 @@ RE_EndRegistration (void)
 			Mod_Free (mod);
 		}
 	}
+
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage("EndRegistration after evicting unused models");
+#endif
 
 	R_FreeUnusedImages ();
 }

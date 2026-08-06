@@ -687,6 +687,14 @@ CL_ParseNuke(void)
 
 static byte splash_color[] = {0x00, 0xe0, 0xb0, 0x50, 0xd0, 0xe0, 0xe8};
 
+#ifdef __EMSCRIPTEN__
+/* Temp-entity effects (explosions, sparks, blood, gunshots, ...)
+ * dispatched since the last time cl_screen.c's per-frame KaiOS stats
+ * line read (and reset) this -- see kaios_sounds_started_this_frame
+ * in sound.c for the same idea applied to sounds. */
+int kaios_effects_started_this_frame = 0;
+#endif
+
 void
 CL_ParseTEnt(void)
 {
@@ -698,6 +706,10 @@ CL_ParseTEnt(void)
 	int r;
 	int ent;
 	int magnitude;
+
+#ifdef __EMSCRIPTEN__
+	kaios_effects_started_this_frame++;
+#endif
 
 	type = MSG_ReadByte(&net_message);
 

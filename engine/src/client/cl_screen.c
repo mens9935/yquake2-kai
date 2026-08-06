@@ -1716,35 +1716,50 @@ SCR_Framecounter(void)
 }
 
 #ifdef __EMSCRIPTEN__
+/* Both defined (and incremented) elsewhere -- sound.c/cl_tempentities.c
+ * -- see kaios_sounds_started_this_frame's comment there for why this
+ * reaches across client-side files directly instead of going through a
+ * cvar or export table: this whole feature is KaiOS-only instrumentation,
+ * not part of any cross-platform renderer/sound abstraction. */
+extern int kaios_sounds_started_this_frame;
+extern int kaios_effects_started_this_frame;
+/* r_polycount lives in the software renderer (sw_main.c/sw_rast.c), not
+ * behind the refexport_t table -- reached directly the same way, and
+ * only safe because this KaiOS build only ever links the soft renderer
+ * (see build.sh) into this one binary, no dlopen boundary to cross. */
+extern int r_polycount;
+
 /*
- * One-line CPU/RAM/FPS overlay for chasing performance issues on real
- * KaiOS hardware, where there's no devtools profiler to attach. Reuses
- * cls.rframetime (already computed every frame in cl_main.c) instead of
- * timing anything itself, and draws through the same cheap DrawStringScaled
- * path SCR_DrawSpeed/SCR_Framecounter already use every frame, so it adds
- * no meaningful overhead of its own.
+ * Per-frame CPU/RAM/FPS/polycount/sound+effect-activation line for
+ * chasing performance issues on real KaiOS hardware, where there's no
+ * devtools profiler to attach. Printed to the console/log (captured via
+ * the browser's own console, see Module.print in module-init.js)
+ * instead of drawn on screen -- letting a demo run to build up a log
+ * that lines frame cost up against what was happening that frame
+ * (gunfire, explosions, polygon spikes) is the actual point now,
+ * logging every single frame rather than sampling.
  *
  * There's no OS-level CPU utilization figure available to a sandboxed
  * KaiOS webapp, so CPU% is a proxy: last frame's wall time against a
- * fixed 50ms (20fps) budget. RAM% is actual Emscripten heap pressure --
- * mallinfo()'s allocated bytes against the current heap size.
+ * fixed 50ms (20fps) budget -- it can exceed 100% (up to ~1000% has
+ * been seen) when a frame runs well over that budget, that's expected
+ * and not a clamping bug.
  */
 static void
 SCR_DrawKaiosStats(void)
 {
-	char str[64];
-	float scale = SCR_GetConsoleScale();
 	struct mallinfo mi = mallinfo();
 	size_t heap_size = emscripten_get_heap_size();
 	float ram_pct = heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f;
 	float cpu_pct = (cls.rframetime / 0.05f) * 100.0f;
 	float fps = (cls.rframetime > 0.0f) ? (1.0f / cls.rframetime) : 0.0f;
 
-	snprintf(str, sizeof(str), "CPU:%3.0f%% RAM:%3.0f%% FPS:%5.1f",
-		cpu_pct, ram_pct, fps);
-	DrawStringScaled(0, 0, str, scale);
-	SCR_AddDirtyPoint(0, 0);
-	SCR_AddDirtyPoint(scale * (strlen(str) * CHAR_SIZE + 2), 0);
+	Com_Printf("KAIOS_STATS: CPU:%.0f%% RAM:%.0f%% FPS:%.1f polys:%d sounds:%d effects:%d\n",
+		cpu_pct, ram_pct, fps, r_polycount,
+		kaios_sounds_started_this_frame, kaios_effects_started_this_frame);
+
+	kaios_sounds_started_this_frame = 0;
+	kaios_effects_started_this_frame = 0;
 }
 #endif
 
@@ -1912,6 +1927,48 @@ SCR_ClampScale(float scale)
 {
 	float f;
 
+#ifdef __EMSCRIPTEN__
+	/* Every other yquake2 platform's screen is at least the 320x240
+	 * this scale system references, where flooring at 1x below is
+	 * correct and intentional (never render UI smaller than native
+	 * pixels). This KaiOS port's render buffer (176x220, see
+	 * autoexec.cfg) is narrower AND shorter than that reference, so
+	 * flooring at 1x the same way means menus/HUD/console text is
+	 * stamped at full 320-reference size onto a physically smaller
+	 * buffer and runs off the edges. Shrink below 1x here instead,
+	 * same "compress to fit, only when narrower/shorter than
+	 * reference" carve-out SCR_LayoutXV/YV already use for the HUD
+	 * status bar's element positions -- this is the matching fix for
+	 * element/text *size*. RE_Draw_CharScaled (sw_draw.c) is what
+	 * actually has to draw at a fractional scale for this to do
+	 * anything. */
+	if (viddef.width < 320 || viddef.height < 240)
+	{
+		f = viddef.width / 320.0f;
+		if (scale > f)
+		{
+			scale = f;
+		}
+
+		f = viddef.height / 240.0f;
+		if (scale > f)
+		{
+			scale = f;
+		}
+
+		/* Defensive floor, not expected to bite at any real KaiOS
+		 * resolution -- just keeps a pathological manual r_hudscale/
+		 * r_consolescale/r_menuscale value from producing a
+		 * degenerate (near-zero-width) glyph downstream. */
+		if (scale < 0.1f)
+		{
+			scale = 0.1f;
+		}
+
+		return scale;
+	}
+#endif
+
 	f = viddef.width / 320.0f;
 	if (scale > f)
 	{
@@ -1935,6 +1992,26 @@ SCR_ClampScale(float scale)
 static float
 SCR_GetDefaultScale(void)
 {
+#ifdef __EMSCRIPTEN__
+	/* Same narrower/shorter-than-reference carve-out as SCR_ClampScale()
+	 * above, using its 320x240 reference (not the 640-wide one just
+	 * below, which is a *different*, high-DPI-oriented reference for
+	 * auto-upscaling that has no bearing on this port). */
+	if (viddef.width < 320 || viddef.height < 240)
+	{
+		float f = viddef.width / 320.0f;
+		float g = viddef.height / 240.0f;
+		float scale = (f < g) ? f : g;
+
+		if (scale < 0.1f)
+		{
+			scale = 0.1f;
+		}
+
+		return scale;
+	}
+#endif
+
 	int i = viddef.width / 640;
 	int j = viddef.height / 240;
 

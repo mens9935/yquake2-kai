@@ -91,6 +91,14 @@ sound_t sound;
 static qboolean s_registering;
 qboolean s_active;
 
+#ifdef __EMSCRIPTEN__
+/* Sounds actually started since the last time cl_screen.c's per-frame
+ * KaiOS stats line read (and reset) this -- lets that log line show
+ * sound-trigger activity alongside FPS/polycount for correlating frame
+ * dips with gameplay events (weapon fire, explosions, ...). */
+int kaios_sounds_started_this_frame = 0;
+#endif
+
 qboolean snd_is_underwater;
 /* ----------------------------------------------------------------- */
 
@@ -1134,6 +1142,10 @@ S_StartSound(vec3_t origin, int entnum, int entchannel, sfx_t *sfx,
 			return;
 		}
 	}
+
+#ifdef __EMSCRIPTEN__
+	kaios_sounds_started_this_frame++;
+#endif
 
 	/* make sure the sound is loaded */
 	sc = S_LoadSound(sfx);

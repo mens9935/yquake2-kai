@@ -72,10 +72,24 @@ RE_Draw_CharScaled(int x, int y, int c, float scale)
 	int	drawline;
 	int	row, col, v, iscale, sscale, width, height;
 
-	iscale = (int) scale;
-
-	if (iscale < 1)
+	if (scale <= 0.0f)
 		return;
+
+	/* iscale only picks which pre-rendered mip of the font atlas to
+	 * sample from below (via Get_BestImageSize()) -- it must never
+	 * drop below 1: conchars has no smaller-than-native mip to find
+	 * (Get_BestImageSize() would just fall back to the native 1x atlas
+	 * anyway), and the actual up/downscaling to `scale` (which can be
+	 * fractional on this KaiOS port's narrow screen, see
+	 * SCR_ClampScale() in cl_screen.c) happens entirely in the
+	 * step-sampling loop below regardless of which mip iscale picked
+	 * -- same technique RE_Draw_StretchPicImplementation already uses
+	 * for pics, which never had this integer-only restriction. */
+	iscale = (int) scale;
+	if (iscale < 1)
+	{
+		iscale = 1;
+	}
 
 	c &= 255;
 
@@ -110,7 +124,7 @@ RE_Draw_CharScaled(int x, int y, int c, float scale)
 	dest = vid_buffer + y * vid_buffer_width + x;
 
 	// clipped last lines
-	if ((y + iscale * (drawline + 1)) > vid_buffer_height)
+	if ((y + (int)(scale * (drawline + 1))) > vid_buffer_height)
 	{
 		drawline = (vid_buffer_height - y) / scale;
 	}
@@ -120,14 +134,32 @@ RE_Draw_CharScaled(int x, int y, int c, float scale)
 
 	drawline = drawline * scale;
 
+	/* Destination cell width in pixels for this draw call's actual
+	 * (possibly fractional, possibly < 8) scale -- NOT 8*iscale, which
+	 * is whole-character-multiples-of-8 only and would either draw a
+	 * full native-size glyph regardless of a smaller requested scale,
+	 * or (worse, for scale < 1 before iscale was clamped to 1 above)
+	 * divide-by-zero denominators below. */
+	int destwidth = (int)(8 * scale);
+	if (destwidth < 1)
+	{
+		destwidth = 1;
+	}
+
+	int destheight = (int)(scale * draw_chars->asset_height);
+	if (destheight < 1)
+	{
+		destheight = 1;
+	}
+
 	for (v=0 ; v < drawline; v++, dest += vid_buffer_width)
 	{
 		int f, fstep, u;
-		int sv = v * height / (iscale * draw_chars->asset_height);
+		int sv = v * height / destheight;
 		source = pic_pixels + sv * width;
 		f = 0;
 		fstep = (width << SHIFT16XYZ) / (scale * draw_chars->asset_width);
-		for (u=0 ; u < (8 * iscale) ; u++)
+		for (u=0 ; u < destwidth ; u++)
 		{
 			if (source[f>>16] != TRANSPARENT_COLOR)
 			{
