@@ -907,6 +907,20 @@ R_DrawEntitiesOnList (void)
 			VectorCopy (currententity->origin, r_entorigin);
 			VectorSubtract (r_origin, r_entorigin, modelorg);
 
+			if (r_distcull_dist->value > 0)
+			{
+				float cutoff = r_distcull_dist->value;
+
+				/* modelorg is r_origin - r_entorigin already, so its
+				 * own length *is* the distance to this entity -- no
+				 * extra work beyond what this loop already computed
+				 * for every entity anyway. */
+				if (DotProduct(modelorg, modelorg) > cutoff * cutoff)
+				{
+					continue;
+				}
+			}
+
 			switch (currentmodel->type)
 			{
 			case mod_sprite:
@@ -960,6 +974,16 @@ R_DrawEntitiesOnList (void)
 			}
 			VectorCopy (currententity->origin, r_entorigin);
 			VectorSubtract (r_origin, r_entorigin, modelorg);
+
+			if (r_distcull_dist->value > 0)
+			{
+				float cutoff = r_distcull_dist->value;
+
+				if (DotProduct(modelorg, modelorg) > cutoff * cutoff)
+				{
+					continue;
+				}
+			}
 
 			switch (currentmodel->type)
 			{
