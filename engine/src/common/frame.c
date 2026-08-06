@@ -589,7 +589,23 @@ Qcommon_Frame(int usec)
 
 		if (kaios_mapcycle->string[0])
 		{
-			kaios_mapcycle_accum_usec += usec;
+			/* Clamp what a single frame can add: loading a map itself
+			 * happens synchronously inside one Qcommon_Frame call (the
+			 * command gets queued and executed within this same call,
+			 * see Cbuf_Execute below), and on this slow device that can
+			 * legitimately take several real seconds. Without a clamp,
+			 * usec for the very next frame reflects that whole load
+			 * duration and can single-handedly satisfy the interval --
+			 * confirmed on a real device: base1 loaded, then base2
+			 * fired immediately after with zero rendered frames of
+			 * base1 in between, because loading base1 alone already
+			 * used up the whole 12 second budget. Capping each frame's
+			 * contribution to 200ms means the interval can only be
+			 * satisfied by that many real frames actually happening
+			 * after a level's load finishes, not by the load itself. */
+			int frame_usec = (usec > 200000) ? 200000 : usec;
+
+			kaios_mapcycle_accum_usec += frame_usec;
 
 			if (kaios_mapcycle_accum_usec >=
 				(int)(kaios_mapcycle_interval->value * 1000000))
