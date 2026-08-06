@@ -27,6 +27,27 @@
 #include "header/client.h"
 #include "input/header/input.h"
 
+#ifdef __EMSCRIPTEN__
+#include <malloc.h>
+#include <emscripten/heap.h>
+
+/* Same idea as sv_init.c/sw_model.c's Kaios_LogHeapUsage -- bracketing
+ * CL_PrepRefresh (which calls into R_BeginRegistration, already logged
+ * on the renderer side) from the client side too, since an OOM was seen
+ * to happen somewhere between the server finishing a level's entity
+ * spawn and the renderer's own registration logging ever printing. */
+static void
+Kaios_LogHeapUsage(const char *label)
+{
+	struct mallinfo mi = mallinfo();
+	size_t heap_size = emscripten_get_heap_size();
+
+	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%)\n",
+		label, (unsigned)mi.uordblks, (unsigned)heap_size,
+		heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f);
+}
+#endif
+
 /* development tools for weapons */
 int gun_frame;
 struct model_s *gun_model;
@@ -244,6 +265,10 @@ CL_PrepRefresh(void)
 	char *name;
 	float rotate;
 	vec3_t axis;
+
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage("CL_PrepRefresh entry");
+#endif
 
 	if (!cl.configstrings[CS_MODELS + 1][0])
 	{

@@ -27,6 +27,29 @@
 #include "header/server.h"
 #include <limits.h>
 
+#ifdef __EMSCRIPTEN__
+#include <malloc.h>
+#include <emscripten/heap.h>
+
+/* Chasing an OOM (Aborted(OOM), an Emscripten runtime abort -- malloc
+ * itself failing inside the C library, not something our own code
+ * raises) that happened somewhere between a level's server-side init
+ * and the client finishing registration. sw_model.c has the renderer
+ * side of this same logging (KAIOS_MEM: ...); this covers the
+ * server-side stages (CM_LoadMap, entity spawn) that run first, in
+ * case the abort turns out to be here instead. */
+static void
+Kaios_LogHeapUsage(const char *label)
+{
+	struct mallinfo mi = mallinfo();
+	size_t heap_size = emscripten_get_heap_size();
+
+	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%)\n",
+		label, (unsigned)mi.uordblks, (unsigned)heap_size,
+		heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f);
+}
+#endif
+
 /* initialize the entities array to at least this many entities */
 #define ALLOC_ENTITIES_MIN 32
 #define MAX_SV_ENTNUM SHRT_MAX
@@ -307,6 +330,10 @@ SV_SpawnServer(char *server, char *spawnpoint, server_state_t serverstate,
 	strcpy(sv.name, server);
 	strcpy(sv.configstrings[CS_NAME], server);
 
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage(va("SV_SpawnServer(%s) before CM_LoadMap", server));
+#endif
+
 	if (serverstate != ss_game)
 	{
 		sv.models[1] = CM_LoadMap("", false, &checksum); /* no real map */
@@ -318,6 +345,10 @@ SV_SpawnServer(char *server, char *spawnpoint, server_state_t serverstate,
 		sv.models[1] = CM_LoadMap(sv.configstrings[CS_MODELS + 1],
 				false, &checksum);
 	}
+
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage("SV_SpawnServer after CM_LoadMap");
+#endif
 
 	Com_sprintf(sv.configstrings[CS_MAPCHECKSUM],
 			sizeof(sv.configstrings[CS_MAPCHECKSUM]),
@@ -340,6 +371,10 @@ SV_SpawnServer(char *server, char *spawnpoint, server_state_t serverstate,
 
 	/* load and spawn all other entities */
 	ge->SpawnEntities(sv.name, CM_EntityString(), spawnpoint);
+
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage("SV_SpawnServer after ge->SpawnEntities");
+#endif
 
 	/* run two frames to allow everything to settle */
 	ge->RunFrame();
