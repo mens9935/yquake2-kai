@@ -1630,17 +1630,23 @@ SDL_BackendInit(void)
 	 * not enough headroom for the worst frame spikes reported live
 	 * (repeated CPU:100% FPS:1 stats lines right after a level starts
 	 * rendering, likely a single frame running well past a second).
-	 * This is the ceiling: ScriptProcessorNode buffer sizes must be a
-	 * power of two from 256 to 16384, nothing bigger is possible with
-	 * this backend. Note this cannot help a stall inside the callback
-	 * itself either way -- while our C code is mid-frame the browser
-	 * cannot invoke the ScriptProcessorNode callback at all, there's
-	 * nothing running to mute. A bigger buffer only gives the browser
-	 * more already-mixed audio to keep playing from before it needs a
-	 * fresh callback; if a single frame stall outlasts even 16384
-	 * samples (~371ms), no buffer size fixes that -- the actual stall
-	 * needs to get shorter. */
-	spec.samples = 16384;
+	 * ScriptProcessorNode buffer sizes must be a power of two from 256
+	 * to 16384; 16384 was tried as a mitigation but made underruns
+	 * *worse* in practice on the real device, not better -- a buffer
+	 * that big means SDL_Callback has to mix ~371ms of audio in one
+	 * shot each time it runs, and that mixing itself now competes with
+	 * rendering for the same main thread, adding a large periodic stall
+	 * of its own on top of the render stalls it was meant to buffer
+	 * against. Settled back down to 2048 (~46ms), the same ballpark as
+	 * the non-Emscripten high-rate default just above, which keeps each
+	 * callback's own mixing work small. Note this still cannot help a
+	 * stall inside the callback itself either way -- while our C code
+	 * is mid-frame the browser cannot invoke the ScriptProcessorNode
+	 * callback at all, there's nothing running to mute. A bigger buffer
+	 * only gives the browser more already-mixed audio to keep playing
+	 * from before it needs a fresh callback; past a certain size the
+	 * cost of producing that buffer outweighs the slack it buys. */
+	spec.samples = 2048;
 #endif
 
 	spec.channels = sndchans;
