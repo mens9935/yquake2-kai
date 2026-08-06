@@ -106,7 +106,25 @@ size_t curhunksize;
  * allocation malloc gave out, is what the mmap/mremap path guaranteed
  * too (mremap without MREMAP_MAYMOVE, with an explicit Sys_Error if it
  * ever needed to move) -- match that invariant here instead of
- * chasing the extra few hundred KB a shrink would save. */
+ * chasing the extra few hundred KB a shrink would save.
+ *
+ * Also use calloc(), not malloc(): mmap(MAP_ANONYMOUS) is guaranteed
+ * zero-filled by the kernel, a guarantee every Hunk_Alloc caller
+ * across the whole id Quake II codebase (every platform, not just
+ * this one) has always been able to silently lean on for any struct
+ * field it never bothers to explicitly initialize. malloc() makes no
+ * such promise, and now that frees here genuinely return memory to
+ * the allocator (the point of this whole file), a freshly malloc'd
+ * hunk block routinely contains leftover bytes from whatever the
+ * previous evicted model or sound left behind. Confirmed on a real
+ * device: after the fix above stopped the pointer corruption, garbage
+ * kept appearing anyway, but only *after* something had actually been
+ * evicted and reloaded (a demo looping back to its first map, never
+ * on a level's first-ever load fresh off boot) -- e.g. alias model
+ * frame/skin indices read as huge nonsense numbers, and a cvar string
+ * read hundreds of bytes of leftover garbage before hitting a stray
+ * zero. That is exactly the shape of reading an uninitialized field
+ * that used to default to zero for free. */
 
 void *
 Hunk_Begin(int maxsize)
@@ -115,7 +133,7 @@ Hunk_Begin(int maxsize)
 	maxhunksize = maxsize + sizeof(size_t) + 32;
 	curhunksize = 0;
 
-	membase = (byte *)malloc(maxhunksize);
+	membase = (byte *)calloc(1, maxhunksize);
 
 	if (membase == NULL)
 	{
