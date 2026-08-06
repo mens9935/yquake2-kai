@@ -178,6 +178,7 @@ static cvar_t	*vid_gamma;
 static cvar_t	*r_lockpvs;
 static cvar_t	*r_palettedtexture;
 cvar_t	*r_cull;
+cvar_t	*r_distcull_dist;
 
 // sw_vars.c
 
@@ -445,6 +446,25 @@ R_RegisterVariables (void)
 	r_fixsurfsky = ri.Cvar_Get("r_fixsurfsky", "0", CVAR_ARCHIVE);
 	r_palettedtexture = ri.Cvar_Get("r_palettedtexture", "0", 0);
 	r_cull = ri.Cvar_Get("r_cull", "1", 0);
+
+	/* Cheap draw-distance cutoff for open/outdoor maps: world BSP nodes
+	 * whose whole bounding box is farther than this from the viewer get
+	 * skipped in R_RecursiveWorldNode (sw_bsp.c) the same way a
+	 * frustum-cull miss does, before a single one of their surfaces
+	 * gets anywhere near the scan converter. 0 (default) means off --
+	 * no cost, no change in behavior. This is NOT real atmospheric fog
+	 * (no distance-based color blend -- the 8-bit paletted framebuffer
+	 * this renderer works in has no cheap way to blend a source pixel
+	 * toward a fog color per-pixel without a whole extra remap table,
+	 * unlike a truecolor renderer), it is a hard cutoff: geometry
+	 * beyond r_distcull_dist units just doesn't get drawn at all, an
+	 * abrupt pop rather than a fade. Cheap PS1/N64-era ports leaned on
+	 * exactly this trick (sometimes paired with actual visual fog to
+	 * hide the pop, which this does not attempt). Useful on this
+	 * software renderer's large outdoor levels where the polygon count
+	 * from far-away, barely-visible geometry is a real per-frame cost
+	 * on a CPU this slow. */
+	r_distcull_dist = ri.Cvar_Get("r_distcull_dist", "0", CVAR_ARCHIVE);
 
 	vid_fullscreen = ri.Cvar_Get( "vid_fullscreen", "0", CVAR_ARCHIVE );
 	vid_gamma = ri.Cvar_Get( "vid_gamma", "1.0", CVAR_ARCHIVE );

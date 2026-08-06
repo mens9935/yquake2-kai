@@ -85,7 +85,22 @@ EMCC_LINK_FLAGS=(
 	-s MIN_FIREFOX_VERSION=0
 	-s MIN_CHROME_VERSION=0
 	-s MIN_SAFARI_VERSION=0
-	-s TOTAL_MEMORY=67108864
+	# Bumped from 64MB: a real device log showed Aborted(OOM) while
+	# heap_used was reported at only 36.9% (~24.7MB) of the old 64MB
+	# ceiling, right as CM_LoadMap tried to allocate a contiguous buffer
+	# for a map file after 12 prior map loads/frees in the same session
+	# (kaios_mapcycle soak test). That's heap fragmentation, not real
+	# exhaustion -- dlmalloc has no compaction, and a long enough run of
+	# alternating large (hunk/map file) and small (sound/image) alloc/
+	# free cycles on a fixed-size linear memory can fail a large
+	# allocation despite plenty of nominal free space elsewhere. 96MB
+	# gives fragmentation more room to happen without hitting the wall;
+	# it does not fix fragmentation itself. Must stay a multiple of
+	# 16MB (asm.js linear memory requirement). Watch for this making the
+	# KaiOS device's own memory pressure worse -- unlike the previous
+	# leak/corruption bugs, this is a real tradeoff against whatever
+	# total RAM budget the phone itself has for the browser tab.
+	-s TOTAL_MEMORY=100663296
 	-s ALLOW_MEMORY_GROWTH=0
 	-s FORCE_FILESYSTEM=1
 	-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS','callMain']

@@ -429,6 +429,42 @@ R_DrawSubmodelPolygons(entity_t *currententity, const model_t *currentmodel, int
 
 /*
 ================
+R_BoxDistSqFromOrigin
+
+Squared distance from r_origin (the viewer) to the closest point on an
+axis-aligned box -- 0 if the viewer is inside or touching the box.
+Used by r_distcull_dist below: comparing squared distances avoids a
+sqrt() on a call that can run thousands of times per frame walking a
+big outdoor map's BSP tree.
+================
+*/
+static float
+R_BoxDistSqFromOrigin (const vec3_t mins, const vec3_t maxs)
+{
+	float distsq = 0;
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		float v = r_origin[i];
+
+		if (v < mins[i])
+		{
+			float d = mins[i] - v;
+			distsq += d * d;
+		}
+		else if (v > maxs[i])
+		{
+			float d = v - maxs[i];
+			distsq += d * d;
+		}
+	}
+
+	return distsq;
+}
+
+/*
+================
 R_RecursiveWorldNode
 ================
 */
@@ -453,6 +489,16 @@ R_RecursiveWorldNode (entity_t *currententity, const model_t *currentmodel, mnod
 	if (r_cull->value && R_CullBox(node->minmaxs, node->minmaxs + 3, frustum))
 	{
 		return;
+	}
+
+	if (r_distcull_dist->value > 0)
+	{
+		float cutoff = r_distcull_dist->value;
+
+		if (R_BoxDistSqFromOrigin(node->minmaxs, node->minmaxs + 3) > cutoff * cutoff)
+		{
+			return;
+		}
 	}
 
 	// cull the clipping planes if not trivial accept
