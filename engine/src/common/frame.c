@@ -560,6 +560,74 @@ Qcommon_Frame(int usec)
 	}
 
 
+#if defined(__EMSCRIPTEN__) && !defined(DEDICATED_ONLY)
+	/* Stress-test / benchmark helper: force-advance through a fixed
+	 * list of maps on a timer instead of requiring a live playthrough
+	 * to actually walk into each level's exit trigger. Set
+	 * kaios_mapcycle to a space-separated map name list (e.g. "base1
+	 * base2 base3 refinery security") at the console or in
+	 * autoexec.cfg -- every kaios_mapcycle_interval seconds this
+	 * issues the next "map <name>" itself, so a whole run through
+	 * every level's load/eviction path (the thing that actually
+	 * exercises Hunk_Begin/Mod_Free/etc, unlike just idling on one
+	 * map) can be logged in a few minutes unattended. Clears itself
+	 * back to empty once the list is exhausted, so it only runs once
+	 * per Set. Self-contained accumulator here (not cls.realtime) --
+	 * this file is shared with the dedicated server build, no client
+	 * state to reach into. */
+	{
+		static cvar_t *kaios_mapcycle = NULL;
+		static cvar_t *kaios_mapcycle_interval = NULL;
+		static int kaios_mapcycle_index = 0;
+		static int kaios_mapcycle_accum_usec = 0;
+
+		if (!kaios_mapcycle)
+		{
+			kaios_mapcycle = Cvar_Get("kaios_mapcycle", "", 0);
+			kaios_mapcycle_interval = Cvar_Get("kaios_mapcycle_interval", "8", 0);
+		}
+
+		if (kaios_mapcycle->string[0])
+		{
+			kaios_mapcycle_accum_usec += usec;
+
+			if (kaios_mapcycle_accum_usec >=
+				(int)(kaios_mapcycle_interval->value * 1000000))
+			{
+				char list[1024];
+				char *saveptr, *tok;
+				int i;
+
+				kaios_mapcycle_accum_usec = 0;
+
+				Q_strlcpy(list, kaios_mapcycle->string, sizeof(list));
+				tok = strtok_r(list, " ", &saveptr);
+
+				for (i = 0; tok && i < kaios_mapcycle_index; i++)
+				{
+					tok = strtok_r(NULL, " ", &saveptr);
+				}
+
+				if (tok)
+				{
+					Com_Printf("KAIOS_MAPCYCLE: [%d] map %s\n",
+						kaios_mapcycle_index, tok);
+					Cbuf_AddText(va("map %s\n", tok));
+					kaios_mapcycle_index++;
+				}
+				else
+				{
+					Com_Printf("KAIOS_MAPCYCLE: done, %d maps cycled\n",
+						kaios_mapcycle_index);
+					Cvar_Set("kaios_mapcycle", "");
+					kaios_mapcycle_index = 0;
+				}
+			}
+		}
+	}
+#endif
+
+
 	if (log_stats->modified)
 	{
 		log_stats->modified = false;
