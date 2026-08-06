@@ -83,8 +83,22 @@ Mod_HasFreeSpace(void)
 		mod_max = used;
 	}
 
+#ifdef __EMSCRIPTEN__
+	/* This heuristic is about MAX_MOD_KNOWN slot count, not actual
+	 * bytes of memory -- on this KaiOS build's fixed 64MB heap (no
+	 * growth, build.sh) slot count never gets remotely close to full
+	 * while real memory does, so RE_EndRegistration's cleanup sweep
+	 * (which this gates, alongside R_ImageHasFreeSpace/S_HasFreeSpace)
+	 * essentially never fired here in practice, even with two levels'
+	 * worth of stale, no-longer-needed assets piling up and a
+	 * confirmed OOM crash to show for it. Always evict on this
+	 * platform instead: reloading something that gets revisited later
+	 * is cheap, running out of heap entirely is not. */
+	return false;
+#else
 	// should same size of free slots as currently used
 	return (mod_numknown + mod_max) < MAX_MOD_KNOWN;
+#endif
 }
 
 /*

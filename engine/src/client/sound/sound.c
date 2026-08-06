@@ -876,8 +876,21 @@ S_HasFreeSpace(void)
 		sound_max = used;
 	}
 
+#ifdef __EMSCRIPTEN__
+	/* Same fix as Mod_HasFreeSpace() (sw_model.c) and
+	 * R_ImageHasFreeSpace() (sw_image.c): this heuristic is about
+	 * MAX_SFX slot count, not actual bytes, and on this KaiOS build's
+	 * fixed 64MB heap it essentially never triggers the cleanup it
+	 * gates (S_EndRegistration's cache sweep) even as real memory runs
+	 * out -- confirmed directly: sound caching alone accounted for
+	 * ~17MB on just the first of two levels in one real test, and
+	 * disabling sound outright was the only thing that stopped an OOM
+	 * crash on the second. Always evict on this platform instead. */
+	return false;
+#else
 	// should same size of free slots as currently used
 	return (num_sfx + used) < MAX_SFX;
+#endif
 }
 
 /*

@@ -613,8 +613,17 @@ R_ImageHasFreeSpace(void)
 		image_max = used;
 	}
 
+#ifdef __EMSCRIPTEN__
+	/* Same fix as Mod_HasFreeSpace() (sw_model.c) and S_HasFreeSpace()
+	 * (sound.c): this heuristic is about MAX_RIMAGES slot count, not
+	 * actual bytes, and on this KaiOS build's fixed 64MB heap it
+	 * essentially never triggers the cleanup it gates even as real
+	 * memory runs out. Always evict on this platform instead. */
+	return false;
+#else
 	// should same size of free slots as currently used
 	return (numr_images + used) < MAX_RIMAGES;
+#endif
 }
 
 static struct texture_buffer {
