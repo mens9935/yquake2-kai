@@ -447,6 +447,27 @@ Qcommon_Init(int argc, char **argv)
 		 * that was crashing here. Just drop straight to the main menu,
 		 * same as when the user passed an explicit +command. */
 		SCR_EndLoadingPlaque();
+
+		/* platform/kaios/autoexec.cfg can't queue a "map"/"demomap"
+		 * command directly -- it execs during Qcommon_ExecConfigs()
+		 * above, which runs before SV_Init() (just above) registers
+		 * those commands, so a literal "map base1" or "demomap
+		 * demo1.dm2" line in that file is silently discarded as an
+		 * unknown command (confirmed against a real device's console
+		 * log: "Unknown command demomap"). Cvar_Set() has no such
+		 * ordering dependency, so autoexec.cfg sets kaios_startcmd
+		 * instead, and it's queued here, now that SV_Init()/CL_Init()
+		 * above have actually run and registered map/demomap/etc. */
+		{
+			cvar_t *kaios_startcmd = Cvar_Get("kaios_startcmd", "", 0);
+
+			if (kaios_startcmd->string[0])
+			{
+				Cbuf_AddText(kaios_startcmd->string);
+				Cbuf_AddText("\n");
+				Cbuf_Execute();
+			}
+		}
 #else
 		if (!dedicated->value)
 		{

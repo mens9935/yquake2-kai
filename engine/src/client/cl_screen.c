@@ -1730,36 +1730,76 @@ extern int kaios_effects_started_this_frame;
 extern int r_polycount;
 
 /*
- * Per-frame CPU/RAM/FPS/polycount/sound+effect-activation line for
- * chasing performance issues on real KaiOS hardware, where there's no
- * devtools profiler to attach. Printed to the console/log (captured via
- * the browser's own console, see Module.print in module-init.js)
- * instead of drawn on screen -- letting a demo run to build up a log
- * that lines frame cost up against what was happening that frame
- * (gunfire, explosions, polygon spikes) is the actual point now,
- * logging every single frame rather than sampling.
+ * CPU/RAM/FPS/polycount/sound+effect-activation line for chasing
+ * performance issues on real KaiOS hardware, where there's no devtools
+ * profiler to attach. Accumulates every frame but only flushes once a
+ * ~1 real-time second window has elapsed, averaging CPU/RAM/polycount
+ * over that window and totalling frame count (== FPS for the window)
+ * and sound/effect activations -- printing every single frame was
+ * tried first and flooded the log without being any easier to read.
  *
- * There's no OS-level CPU utilization figure available to a sandboxed
- * KaiOS webapp, so CPU% is a proxy: last frame's wall time against a
- * fixed 50ms (20fps) budget -- it can exceed 100% (up to ~1000% has
- * been seen) when a frame runs well over that budget, that's expected
- * and not a clamping bug.
+ * Goes straight to Sys_ConsoleOutput() (stdout, captured by the
+ * browser's own console via Module.print in module-init.js) instead of
+ * Com_Printf(), which would *also* feed this into the in-game console
+ * buffer/UI (Con_Print()) -- this is a log for offline analysis, not
+ * something to clutter the in-game console with.
  */
 static void
 SCR_DrawKaiosStats(void)
 {
+	static int window_start_ms = 0;
+	static int frames_in_window = 0;
+	static float cpu_pct_sum = 0.0f;
+	static float ram_pct_sum = 0.0f;
+	static int polys_sum = 0;
+	static int sounds_sum = 0;
+	static int effects_sum = 0;
+
 	struct mallinfo mi = mallinfo();
 	size_t heap_size = emscripten_get_heap_size();
 	float ram_pct = heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f;
-	float cpu_pct = (cls.rframetime / 0.05f) * 100.0f;
-	float fps = (cls.rframetime > 0.0f) ? (1.0f / cls.rframetime) : 0.0f;
 
-	Com_Printf("KAIOS_STATS: CPU:%.0f%% RAM:%.0f%% FPS:%.1f polys:%d sounds:%d effects:%d\n",
-		cpu_pct, ram_pct, fps, r_polycount,
-		kaios_sounds_started_this_frame, kaios_effects_started_this_frame);
+	/* There's no OS-level CPU utilization figure available to a
+	 * sandboxed KaiOS webapp, so CPU% is a proxy: last frame's wall
+	 * time against a budget. A real device showed this reading up to
+	 * ~1000% against the original 50ms (20fps) budget -- 10x over,
+	 * consistently -- so scale against a 500ms budget instead, putting
+	 * that device's actual sustained frame cost closer to 100%. */
+	float cpu_pct = (cls.rframetime / 0.5f) * 100.0f;
+
+	frames_in_window++;
+	cpu_pct_sum += cpu_pct;
+	ram_pct_sum += ram_pct;
+	polys_sum += r_polycount;
+	sounds_sum += kaios_sounds_started_this_frame;
+	effects_sum += kaios_effects_started_this_frame;
 
 	kaios_sounds_started_this_frame = 0;
 	kaios_effects_started_this_frame = 0;
+
+	if (window_start_ms == 0)
+	{
+		window_start_ms = cls.realtime;
+	}
+
+	if ((cls.realtime - window_start_ms >= 1000) && (frames_in_window > 0))
+	{
+		char line[128];
+
+		Com_sprintf(line, sizeof(line),
+			"KAIOS_STATS: CPU:%.0f%% RAM:%.0f%% FPS:%d polys:%d sounds:%d effects:%d\n",
+			cpu_pct_sum / frames_in_window, ram_pct_sum / frames_in_window,
+			frames_in_window, polys_sum / frames_in_window, sounds_sum, effects_sum);
+		Sys_ConsoleOutput(line);
+
+		window_start_ms = cls.realtime;
+		frames_in_window = 0;
+		cpu_pct_sum = 0.0f;
+		ram_pct_sum = 0.0f;
+		polys_sum = 0;
+		sounds_sum = 0;
+		effects_sum = 0;
+	}
 }
 #endif
 

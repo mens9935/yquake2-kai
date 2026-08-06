@@ -27,11 +27,15 @@ source "$HERE/sources.mk.sh"
 mkdir -p "$OUT" "$OBJDIR"
 
 COMMON_FLAGS=(
-	# emcc's own -O parser (distinct from clang's) only understands
-	# -O0/-O1/-O2/-O3/-Os/-Oz -- "-Ofast" errors out ("Invalid
-	# optimization level") despite being valid for clang itself. -O3
-	# plus -ffast-math explicitly is what -Ofast expands to anyway.
-	-O3 -ffast-math
+	# -ffast-math tried alongside -O3 and reverted: measured worse on
+	# a real device than -O3 alone (unconfirmed why -- possibly NaN/inf
+	# handling somewhere in the renderer's math relies on strict IEEE
+	# behavior that -ffast-math is allowed to break). -O3 by itself is
+	# still valid for emcc's own -O parser (distinct from clang's,
+	# which only understands -O0/-O1/-O2/-O3/-Os/-Oz -- "-Ofast" errors
+	# out ("Invalid optimization level") there despite being valid for
+	# clang itself).
+	-O3
 	-fno-strict-aliasing -fwrapv -fvisibility=hidden
 	-Wno-missing-braces
 	-DYQ2OSTYPE=\"KaiOS\"
