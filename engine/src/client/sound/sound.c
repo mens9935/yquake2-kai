@@ -101,6 +101,9 @@ cvar_t* s_occlusion_strength;
 cvar_t* s_reverb_preset;
 static cvar_t* s_ps_sorting;
 static cvar_t* s_feedback_kind;
+#ifdef __EMSCRIPTEN__
+static cvar_t* s_kaios_skip_prefixes;
+#endif
 
 channel_t channels[MAX_CHANNELS];
 static int num_sfx;
@@ -467,6 +470,38 @@ S_GetStatistics(const byte *data, int sound_length, int width, int channels,
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+/* name is the asset-relative sound name (e.g. "world/amb2.wav"),
+ * before "sound/" gets prepended -- matches what s_kaios_skip_prefixes
+ * entries (S_Init, above) are written against. */
+static qboolean
+Kaios_ShouldSkipSound(const char *name)
+{
+	char list[256];
+	char *prefix, *saveptr;
+
+	if (!s_kaios_skip_prefixes || !s_kaios_skip_prefixes->string[0])
+	{
+		return false;
+	}
+
+	Q_strlcpy(list, s_kaios_skip_prefixes->string, sizeof(list));
+
+	for (prefix = strtok_r(list, " ", &saveptr); prefix;
+		prefix = strtok_r(NULL, " ", &saveptr))
+	{
+		size_t len = strlen(prefix);
+
+		if (len && !strncmp(name, prefix, len))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+#endif
+
 /*
  * Loads one sample into memory
  */
@@ -507,6 +542,13 @@ S_LoadSound(sfx_t *s)
 	{
 		name = s->name;
 	}
+
+#ifdef __EMSCRIPTEN__
+	if (Kaios_ShouldSkipSound(name))
+	{
+		return NULL;
+	}
+#endif
 
 	if (name[0] == '#')
 	{
@@ -1726,6 +1768,20 @@ S_Init(void)
 	s_occlusion_strength = Cvar_Get("s_occlusion_strength", "0", CVAR_ARCHIVE);
 	/* Feedback kind: 0 - rumble, 1 - haptic */
 	s_feedback_kind = Cvar_Get("s_feedback_kind", "0", CVAR_ARCHIVE);
+
+#ifdef __EMSCRIPTEN__
+	/* Space-separated sound/ subpath prefixes to never actually load
+	 * (S_LoadSound, below, returns NULL immediately for a match --
+	 * S_StartSound already no-ops on a NULL sfx). Default is baseq2's
+	 * ambient/level-mechanism sounds (looping ambiance, radio chatter,
+	 * doors, plats, switches) -- weapons/, player/, items/, misc/, and
+	 * every monster-name directory (soldier/, infantry/, ...) are left
+	 * alone, so weapon fire and enemy sounds keep playing. Editable at
+	 * runtime (set s_kaios_skip_prefixes "..."), no rebuild needed to
+	 * retune which categories get cut. */
+	s_kaios_skip_prefixes = Cvar_Get("s_kaios_skip_prefixes",
+		"world/ doors/ plats/ switches/", CVAR_ARCHIVE);
+#endif
 
 	Cmd_AddCommand("play", S_Play);
 	Cmd_AddCommand("stopsound", S_StopAllSounds);
