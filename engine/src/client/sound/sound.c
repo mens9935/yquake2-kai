@@ -33,6 +33,31 @@
 #include "header/qal.h"
 #include "header/vorbis.h"
 
+#ifdef __EMSCRIPTEN__
+#include <malloc.h>
+#include <emscripten/heap.h>
+
+/* Same idea as sv_init.c/cl_view.c/sw_model.c's Kaios_LogHeapUsage --
+ * chasing an OOM that happens somewhere between a new level's
+ * svc_serverdata message and CL_PrepRefresh ever being entered
+ * (neither of those two points, both already logged, bracket it). A
+ * fresh level pulls in a batch of not-yet-cached sound effects right
+ * in that gap (each svc_sound/svc_spawnbaseline message can trigger
+ * S_LoadSound() on a name never seen this session) -- logging each
+ * actual (non-cache-hit) load's cost is meant to show whether that is
+ * where the memory actually goes. */
+static void
+Kaios_LogHeapUsage(const char *label)
+{
+	struct mallinfo mi = mallinfo();
+	size_t heap_size = emscripten_get_heap_size();
+
+	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%)\n",
+		label, (unsigned)mi.uordblks, (unsigned)heap_size,
+		heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f);
+}
+#endif
+
 /* During registration it is possible to have more sounds
    than could actually be referenced during gameplay,
    because we don't want to free anything until we are
@@ -560,6 +585,11 @@ S_LoadSound(sfx_t *s)
 	}
 
 	FS_FreeFile(data);
+
+#ifdef __EMSCRIPTEN__
+	Kaios_LogHeapUsage(va("S_LoadSound freshly loaded %s", namebuffer));
+#endif
+
 	return sc;
 }
 
