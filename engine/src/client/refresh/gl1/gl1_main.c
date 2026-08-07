@@ -112,7 +112,75 @@ RI_KaiosCubeTestFrame(void)
 	KAIOS_CUBE_TRACE(glClearColor(0.1f, 0.1f, 0.15f, 1.0f));
 	KAIOS_CUBE_TRACE(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
-	KAIOS_CUBE_TRACE(glDisable(GL_TEXTURE_2D));
+	/* Real content (fonts, world surfaces) never showed up -- only
+	 * occasional 1-2s flashes of small squares -- while this cube
+	 * test's plain colored (untextured) geometry rendered fine.
+	 * Everything real the game draws is textured; this cube test
+	 * never has been. Isolate that one variable: apply a fresh random
+	 * texture to the cube roughly once a second (this renderer's own
+	 * default texenv mode from R_SetDefaultState, GL_REPLACE, makes
+	 * the texture entirely determine the pixel color) to see whether
+	 * upload+sampling works at all with the exact same context that
+	 * already draws untextured geometry successfully. */
+	{
+		static GLuint kaios_tex_id = 0;
+		static qboolean kaios_tex_created = false;
+		qboolean do_tex_update = false;
+
+		if (!kaios_tex_created)
+		{
+			KAIOS_CUBE_TRACE(glGenTextures(1, &kaios_tex_id));
+			kaios_tex_created = true;
+			do_tex_update = true;
+		}
+		else if ((frame_counter % 60) == 0)
+		{
+			do_tex_update = true;
+		}
+
+		KAIOS_CUBE_TRACE(glBindTexture(GL_TEXTURE_2D, kaios_tex_id));
+
+		if (do_tex_update)
+		{
+			byte pixels[8 * 8 * 4];
+			int p;
+			static unsigned int seed = 12345;
+
+			for (p = 0; p < 8 * 8 * 4; p += 4)
+			{
+				/* Small xorshift-style PRNG -- no rand()/srand()
+				 * dependency, just needs to look visually random. */
+				seed ^= seed << 13;
+				seed ^= seed >> 17;
+				seed ^= seed << 5;
+
+				pixels[p + 0] = (byte)(seed & 0xFF);
+				pixels[p + 1] = (byte)((seed >> 8) & 0xFF);
+				pixels[p + 2] = (byte)((seed >> 16) & 0xFF);
+				pixels[p + 3] = 255;
+			}
+
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+			if (kaios_trace || frame_counter == 61)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: before glTexImage2D (frame %d)\n", frame_counter);
+			}
+
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 8, 8, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+			if (kaios_trace || frame_counter == 61)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: after glTexImage2D, glGetError=0x%x (frame %d)\n",
+					glGetError(), frame_counter);
+			}
+		}
+	}
+
+	KAIOS_CUBE_TRACE(glEnable(GL_TEXTURE_2D));
 	KAIOS_CUBE_TRACE(glDisable(GL_BLEND));
 	KAIOS_CUBE_TRACE(glDisable(GL_ALPHA_TEST));
 	KAIOS_CUBE_TRACE(glEnable(GL_DEPTH_TEST));
@@ -153,8 +221,18 @@ RI_KaiosCubeTestFrame(void)
 		static const GLfloat colors[6][3] = {
 			{1,0,0}, {0,1,0}, {0,0,1}, {1,1,0}, {1,0,1}, {0,1,1},
 		};
+		/* Same 0-1-2,0-2-3 vertex order as each face above, one UV
+		 * pair per vertex -- GL_REPLACE means colors[] above no
+		 * longer affects anything once texturing is on, kept only so
+		 * a texture-sampling failure that falls back to vertex color
+		 * would still be visible as the old rainbow cube instead of
+		 * going invisible entirely. */
+		static const GLfloat texcoords[12] = {
+			0,0, 1,0, 1,1,  0,0, 1,1, 0,1,
+		};
 
 		KAIOS_CUBE_TRACE(glEnableClientState(GL_VERTEX_ARRAY));
+		KAIOS_CUBE_TRACE(glEnableClientState(GL_TEXTURE_COORD_ARRAY));
 
 		if (kaios_trace)
 		{
@@ -167,6 +245,8 @@ RI_KaiosCubeTestFrame(void)
 			glColor4f(colors[i][0], colors[i][1], colors[i][2], 1.0f);
 			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glVertexPointer\n", i); }
 			glVertexPointer(3, GL_FLOAT, 0, faces[i]);
+			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glTexCoordPointer\n", i); }
+			glTexCoordPointer(2, GL_FLOAT, 0, texcoords);
 			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glDrawArrays\n", i); }
 			glDrawArrays(GL_TRIANGLES, 0, 6);
 			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: after face %d glDrawArrays\n", i); }
@@ -177,8 +257,11 @@ RI_KaiosCubeTestFrame(void)
 			Com_Printf("KAIOS_CUBE_TEST: glGetError after cube glDrawArrays: 0x%x\n", glGetError());
 		}
 
+		KAIOS_CUBE_TRACE(glDisableClientState(GL_TEXTURE_COORD_ARRAY));
 		KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
 	}
+
+	KAIOS_CUBE_TRACE(glDisable(GL_TEXTURE_2D));
 
 	/* 2D overlay: a bar that fills up and resets every 20 frames, the
 	 * simplest possible "is this actually updating" indicator without
