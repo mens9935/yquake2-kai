@@ -71,8 +71,16 @@ int r_polycount;
  * reach across into client code the same way r_polycount does above
  * (single static binary, no dlopen boundary) rather than pulling in
  * client.h wholesale, which the renderer is deliberately decoupled
- * from everywhere else in this file. */
-qboolean kaios_cube_test_active = true;
+ * from everywhere else in this file.
+ *
+ * Defaulted off now: it already answered its question (real device
+ * testing confirmed both untextured and textured geometry render
+ * correctly through this context), and demo2.dm2 should load right
+ * away for faster iteration on the remaining real-content issue.
+ * Flip back to true here to bring the cube test back for another
+ * one-off sanity check if this context ever needs re-validating from
+ * scratch again. */
+qboolean kaios_cube_test_active = false;
 extern qboolean keydown[];
 #define KAIOS_K_ENTER 13
 #define KAIOS_K_KP_ENTER 158
