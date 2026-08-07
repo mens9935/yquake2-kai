@@ -1017,6 +1017,20 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 		}
 #endif
 
+#ifdef __EMSCRIPTEN__
+		if (kaios_do_trace)
+		{
+			/* cls.state: 0=uninitialized 1=disconnected 2=connecting
+			 * 3=connected 4=active (client.h, connstate_t). If this
+			 * reads anything but 4 right as demo2.dm2 was supposed to
+			 * start playing, the demo never actually got to ca_active
+			 * -- which would explain the untraced SCR_UpdateScreen()
+			 * call from Key_Console (cl_keyboard.c) firing on the very
+			 * next OK press, that being cls.state==ca_disconnected's
+			 * own separate "force an update" call site. */
+			Com_Printf("KAIOS_CLFRAME_TRACE: cls.state=%d key_dest=%d\n", cls.state, cls.key_dest);
+		}
+#endif
 		KAIOS_CLFRAME_TRACE(SCR_UpdateScreen());
 #undef KAIOS_CLFRAME_TRACE
 
