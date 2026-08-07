@@ -370,80 +370,68 @@ int RI_InitContext(void* win)
 		attribs.majorVersion = 1;
 		attribs.minorVersion = 0;
 
-		/* Raw, code-independent probe: call canvas.getContext() directly
-		 * from JS with the exact same attributes, bypassing every layer
-		 * of C code above (SDL, Emscripten's own C->JS argument marshalling
-		 * for emscripten_webgl_create_context) entirely. Every previous
-		 * real-device attempt only ever saw "failed"/null back from the
-		 * C side, with no browser-level reason available outside of a
-		 * GL_DEBUG build -- this logs the actual thrown exception (if
-		 * any) straight to the console this project already reads back
-		 * from real-device testing, independent of build type. */
-		/* Built via individual property assignments (statements ending
-		 * in ';'), not a single {a: 1, b: 2} object literal -- the C
-		 * preprocessor splits EM_ASM's macro arguments on any
-		 * unparenthesized top-level comma, and it has no concept of
-		 * curly braces grouping anything, so a literal with several
-		 * comma-separated properties silently corrupts this into a
-		 * multi-argument macro call and fails to compile. */
-		EM_ASM({
-			try {
-				var c = document.getElementById('canvas');
-				if (!c) {
-					console.log('[kaios] GL probe: no #canvas element found');
-				} else {
-					var attrs = {};
-					attrs.alpha = false;
-					attrs.depth = !!$0;
-					attrs.stencil = false;
-					attrs.antialias = false;
-					attrs.majorVersion = 1;
-					attrs.minorVersion = 0;
-					var gl = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
-					console.log('[kaios] GL probe (depth=' + (!!$0) + '): ' +
-						(gl ? 'context created OK' : 'getContext returned null'));
-				}
-			} catch (e) {
-				console.log('[kaios] GL probe threw: ' + e);
-			}
-		}, attribs.depth);
-
+		/* Exactly ONE attempt, nothing before it touches "#canvas" at
+		 * all. Two things learned from a real-device test that had a
+		 * diagnostic probe (a raw canvas.getContext('webgl', ...) call)
+		 * placed right here, before this real attempt:
+		 *
+		 * 1. That probe's own call succeeded -- "context created OK" --
+		 *    on a virgin canvas, at this exact native resolution, with
+		 *    these exact attributes. A working context is genuinely
+		 *    obtainable here.
+		 *
+		 * 2. The *real* emscripten_webgl_create_context() call right
+		 *    after it then failed anyway -- because per the HTML Canvas
+		 *    spec, a given canvas element only ever gets ONE context of
+		 *    a given type for its entire lifetime; the first
+		 *    getContext('webgl', ...) call against it (the probe, in
+		 *    that test) permanently claims that slot, and every later
+		 *    call for the same type -- including Emscripten's own
+		 *    internal one -- returns null from then on, no matter what
+		 *    attributes it asks for. Self-inflicted: same class of bug
+		 *    as the SDL_WINDOW_OPENGL/EGL-surface one already documented
+		 *    in RI_PrepareForWindow() above, just reintroduced by this
+		 *    diagnostic itself.
+		 *
+		 * The same spec rule is *why* there is no same-canvas retry
+		 * rung here (an earlier version of this code tried a depth=false
+		 * fallback on this same canvas after a depth=true failure) --
+		 * once the first real attempt fails for any reason, the canvas
+		 * is permanently poisoned for 'webgl' and a second call on it
+		 * cannot ever succeed, regardless of what attributes it changes.
+		 * A genuine retry would need a *fresh* canvas element, not a
+		 * second call on this one -- not attempted here. */
 		em_ctx_handle = emscripten_webgl_create_context("#canvas", &attribs);
 
 		if (!em_ctx_handle)
 		{
-			Com_Printf("%s: emscripten_webgl_create_context() failed with depth=true, "
-				"retrying with depth=false\n", __func__);
+			Com_Printf("%s: emscripten_webgl_create_context() failed\n", __func__);
 
-			/* One more, even more minimal rung before giving up: no
-			 * depth buffer at all. Untested prior to this -- every
-			 * earlier attempt requested a depth buffer of some form. */
-			attribs.depth = false;
-
+			/* Nothing else is ever going to get a context from this
+			 * canvas now (see above) -- safe to probe purely for a
+			 * browser-level reason to log, instead of just "failed"
+			 * with nothing else to go on. */
 			EM_ASM({
 				try {
 					var c = document.getElementById('canvas');
-					var attrs = {};
-					attrs.alpha = false;
-					attrs.depth = false;
-					attrs.stencil = false;
-					attrs.antialias = false;
-					attrs.majorVersion = 1;
-					attrs.minorVersion = 0;
-					var gl = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
-					console.log('[kaios] GL probe (depth=false retry): ' +
-						(gl ? 'context created OK' : 'getContext returned null'));
+					if (!c) {
+						console.log('[kaios] GL probe: no #canvas element found');
+					} else {
+						var attrs = {};
+						attrs.alpha = false;
+						attrs.depth = false;
+						attrs.stencil = false;
+						attrs.antialias = false;
+						attrs.majorVersion = 1;
+						attrs.minorVersion = 0;
+						var gl = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
+						console.log('[kaios] GL probe (post-failure, diagnostic only): ' +
+							(gl ? 'context created OK (!)' : 'getContext returned null'));
+					}
 				} catch (e) {
-					console.log('[kaios] GL probe (depth=false retry) threw: ' + e);
+					console.log('[kaios] GL probe threw: ' + e);
 				}
 			});
-
-			em_ctx_handle = emscripten_webgl_create_context("#canvas", &attribs);
-		}
-
-		if (!em_ctx_handle)
-		{
-			Com_Printf("%s: emscripten_webgl_create_context() failed\n", __func__);
 
 			window = NULL;
 
