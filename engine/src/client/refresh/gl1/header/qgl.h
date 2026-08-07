@@ -44,6 +44,32 @@
 #endif
 #endif
 
+#ifdef __EMSCRIPTEN__
+/* glad's runtime proc-address lookup for glTexEnvi resolves to NULL on
+ * this platform. emscripten_GetProcAddress() (gl.c, part of
+ * Emscripten's own LEGACY_GL_EMULATION runtime) only exposes a
+ * hand-picked allow-list of legacy GL1.x function names through the
+ * generic SDL_GL_GetProcAddress()-style lookup GLAD uses
+ * (RETURN_GL_EMU_FN(...) entries in gl.c) -- glShadeModel is on that
+ * list (confirmed harmless on a real device: round-trips as a "TODO:
+ * glShadeModel" stub and returns), but the whole glTexEnv family
+ * (glTexEnvi/glTexEnvf/glTexEnviv/glTexEnvfv) is not, despite the
+ * underlying emscripten_glTexEnvi() etc. genuinely existing and being
+ * fully wired into GLImmediate's fixed-pipeline texture-environment
+ * emulation (TexEnvJIT.hook_texEnvi, library_glemu.js) -- just not
+ * discoverable through that particular lookup path. Confirmed on a
+ * real device: glad_glTexEnvi silently loads as NULL, and calling
+ * through it crashes ("TypeError: ... is not a function", an invalid
+ * function-table call) the moment R_SetDefaultState() first calls
+ * R_TexEnv(). Bypass GLAD's runtime lookup for just this one function
+ * and call the real, always-linked-in emscripten_glTexEnvi() directly
+ * -- this renderer never calls glTexEnvf/glTexEnviv/glTexEnvfv at all
+ * (confirmed by grep), so only this one needs the same treatment. */
+extern void emscripten_glTexEnvi(GLenum target, GLenum pname, GLint param);
+#undef glTexEnvi
+#define glTexEnvi emscripten_glTexEnvi
+#endif
+
 #ifndef APIENTRY
 #define APIENTRY
 #endif
