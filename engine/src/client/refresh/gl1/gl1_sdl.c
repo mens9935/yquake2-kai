@@ -370,124 +370,69 @@ int RI_InitContext(void* win)
 		attribs.majorVersion = 1;
 		attribs.minorVersion = 0;
 
-		/* Exactly ONE attempt, nothing before it touches "#canvas" at
-		 * all. Two things learned from a real-device test that had a
-		 * diagnostic probe (a raw canvas.getContext('webgl', ...) call)
-		 * placed right here, before this real attempt:
+		/* Everything above this point was ruled out on a real device,
+		 * one variable at a time: the canvas-poisoning self-inflicted
+		 * bug (fixed), Module.canvas resolving to something stale
+		 * (it doesn't -- confirmed identical to a fresh DOM lookup),
+		 * and the extra/newer context-attribute properties Emscripten's
+		 * own call adds beyond this file's 6 (raw getContext() with
+		 * that *exact* full property set also succeeds standalone).
+		 * Every raw getContext() call tried here has succeeded, every
+		 * emscripten_webgl_create_context() call has failed, with
+		 * canvas, attributes, and resolution all confirmed equivalent
+		 * between them -- narrowing this to something inside
+		 * Emscripten's own createContext()/registerContext() JS
+		 * (library_webgl.js), not anything this C code controls via
+		 * the public API's inputs.
 		 *
-		 * 1. That probe's own call succeeded -- "context created OK" --
-		 *    on a virgin canvas, at this exact native resolution, with
-		 *    these exact attributes. A working context is genuinely
-		 *    obtainable here.
-		 *
-		 * 2. The *real* emscripten_webgl_create_context() call right
-		 *    after it then failed anyway -- because per the HTML Canvas
-		 *    spec, a given canvas element only ever gets ONE context of
-		 *    a given type for its entire lifetime; the first
-		 *    getContext('webgl', ...) call against it (the probe, in
-		 *    that test) permanently claims that slot, and every later
-		 *    call for the same type -- including Emscripten's own
-		 *    internal one -- returns null from then on, no matter what
-		 *    attributes it asks for. Self-inflicted: same class of bug
-		 *    as the SDL_WINDOW_OPENGL/EGL-surface one already documented
-		 *    in RI_PrepareForWindow() above, just reintroduced by this
-		 *    diagnostic itself.
-		 *
-		 * The same spec rule is *why* there is no same-canvas retry
-		 * rung here (an earlier version of this code tried a depth=false
-		 * fallback on this same canvas after a depth=true failure) --
-		 * once the first real attempt fails for any reason, the canvas
-		 * is permanently poisoned for 'webgl' and a second call on it
-		 * cannot ever succeed, regardless of what attributes it changes.
-		 * A genuine retry would need a *fresh* canvas element, not a
-		 * second call on this one -- not attempted here. */
-
-		/* Module.canvas theory ruled out by a real-device test: it was
-		 * set, and was the exact same object as a fresh
-		 * getElementById('canvas') lookup. Emscripten's internal call
-		 * still failed anyway, immediately, canvas correctly resolved.
-		 *
-		 * New theory: the object emscripten_webgl_do_create_context()
-		 * (library_html5_webgl.js) actually passes to
-		 * canvas.getContext() is NOT just the 6 properties this file
-		 * sets on `attribs` -- emscripten_webgl_init_context_attributes()
-		 * fills in a full ~14-property dictionary (alpha, depth,
-		 * stencil, antialias, premultipliedAlpha, preserveDrawingBuffer,
-		 * powerPreference: 'default', failIfMajorPerformanceCaveat,
-		 * majorVersion, minorVersion, enableExtensionsByDefault,
-		 * explicitSwapControl, proxyContextToMainThread,
-		 * renderViaOffscreenBackBuffer), several of which are newer
-		 * WebGL spec additions (powerPreference in particular) that
-		 * predate this device's Gecko-48-class engine and this file's
-		 * own C code has no way to omit from that call -- they're
-		 * unconditionally included by Emscripten's own JS glue.
-		 * Every previous raw-JS probe in this file only ever sent the
-		 * 6 properties actually needed (alpha/depth/stencil/antialias/
-		 * majorVersion/minorVersion), and once (before the probe-
-		 * poisoning bug was found) succeeded with exactly those 6.
-		 * This probe instead sends the *same full ~14-property object*
-		 * Emscripten's own internal call would send, as the only thing
-		 * touching the canvas this run, to test whether the extra,
-		 * newer properties are themselves what this browser rejects --
-		 * independent of anything else about how the C call marshals
-		 * or invokes it. */
-		EM_ASM({
+		 * ClassiCube's own compiled output (confirmed working on this
+		 * exact device) has a dramatically simpler GL.createContext --
+		 * no OffscreenCanvas/Safari/GL_PREINITIALIZED_CONTEXT/chrome-
+		 * version branches at all, just getContext() then
+		 * GL.registerContext() -- consistent with an older/leaner
+		 * emsdk than this build's 2.0.34. Bypass emscripten_webgl_
+		 * create_context() entirely and do those exact two steps
+		 * ourselves via EM_ASM_INT, wrapped in try/catch this time
+		 * (unlike the C API, which gives no way to see an exception
+		 * thrown *inside* GL.registerContext() itself -- if that's
+		 * where this actually fails, every probe so far would have
+		 * been blind to it, since none of them called it). GL is a
+		 * real global object in this runtime (library_webgl.js runs
+		 * unconditionally whenever any GL code is linked in), reachable
+		 * directly from EM_ASM/EM_ASM_INT same as any other JS here. */
+		em_ctx_handle = (EMSCRIPTEN_WEBGL_CONTEXT_HANDLE)EM_ASM_INT({
 			try {
 				var c = document.getElementById('canvas');
+				if (!c) {
+					console.log('[kaios] manual GL context: no #canvas element found');
+					return 0;
+				}
 				var attrs = {};
 				attrs.alpha = false;
 				attrs.depth = true;
 				attrs.stencil = false;
 				attrs.antialias = false;
-				attrs.premultipliedAlpha = true;
-				attrs.preserveDrawingBuffer = false;
-				attrs.powerPreference = 'default';
-				attrs.failIfMajorPerformanceCaveat = false;
 				attrs.majorVersion = 1;
 				attrs.minorVersion = 0;
-				attrs.enableExtensionsByDefault = true;
-				attrs.explicitSwapControl = false;
-				attrs.proxyContextToMainThread = 0;
-				attrs.renderViaOffscreenBackBuffer = 0;
-				var gl = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
-				console.log('[kaios] GL probe (full emscripten-style attrs): ' +
-					(gl ? 'context created OK' : 'getContext returned null'));
+				var ctx = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
+				if (!ctx) {
+					console.log('[kaios] manual GL context: getContext returned null');
+					return 0;
+				}
+				console.log('[kaios] manual GL context: getContext OK, registering with GL...');
+				var handle = GL.registerContext(ctx, attrs);
+				console.log('[kaios] manual GL context: GL.registerContext handle=' + handle);
+				return handle;
 			} catch (e) {
-				console.log('[kaios] GL probe (full attrs) threw: ' + e);
+				console.log('[kaios] manual GL context threw: ' + e);
+				return 0;
 			}
 		});
 
-		em_ctx_handle = emscripten_webgl_create_context("#canvas", &attribs);
-
 		if (!em_ctx_handle)
 		{
-			Com_Printf("%s: emscripten_webgl_create_context() failed\n", __func__);
-
-			/* Nothing else is ever going to get a context from this
-			 * canvas now (see above) -- safe to probe purely for a
-			 * browser-level reason to log, instead of just "failed"
-			 * with nothing else to go on. */
-			EM_ASM({
-				try {
-					var c = document.getElementById('canvas');
-					if (!c) {
-						console.log('[kaios] GL probe: no #canvas element found');
-					} else {
-						var attrs = {};
-						attrs.alpha = false;
-						attrs.depth = false;
-						attrs.stencil = false;
-						attrs.antialias = false;
-						attrs.majorVersion = 1;
-						attrs.minorVersion = 0;
-						var gl = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
-						console.log('[kaios] GL probe (post-failure, diagnostic only): ' +
-							(gl ? 'context created OK (!)' : 'getContext returned null'));
-					}
-				} catch (e) {
-					console.log('[kaios] GL probe threw: ' + e);
-				}
-			});
+			Com_Printf("%s: manual GL.registerContext() path failed too "
+				"(see console for the JS-level reason)\n", __func__);
 
 			window = NULL;
 
