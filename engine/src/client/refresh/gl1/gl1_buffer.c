@@ -47,6 +47,22 @@ R_ResetGLBuffer(void)
 /*
  * Draws what's stored in the buffer and clears it up
  */
+#ifdef __EMSCRIPTEN__
+static qboolean kaios_buf_traced = false;
+
+/* The one-shot trace below fires on the first non-empty call it sees --
+ * which, when the cube test manually calls R_ApplyGLBuffer() itself to
+ * exercise this path early, means IT consumes the one-shot budget and
+ * the real game's own first buffered draw (once the demo actually
+ * loads) never gets traced. Let the cube test call this right after its
+ * own manual call so the budget is still there for the real thing. */
+void
+RI_KaiosResetBufTrace(void)
+{
+	kaios_buf_traced = false;
+}
+#endif
+
 void
 R_ApplyGLBuffer(void)
 {
@@ -62,7 +78,6 @@ R_ApplyGLBuffer(void)
 	 * fine, but real game content still doesn't -- trace the first
 	 * real (non-empty) call only, so this doesn't flood the log on
 	 * every one of the many calls per frame afterward. */
-	static qboolean kaios_buf_traced = false;
 	qboolean kaios_trace = (!kaios_buf_traced && vtx_ptr != 0 && idx_ptr != 0) ? true : false;
 #define KAIOS_BUF_TRACE(x) \
 	do { \

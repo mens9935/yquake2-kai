@@ -91,6 +91,7 @@ int r_polycount;
 qboolean kaios_cube_test_active = true;
 extern qboolean keydown[];
 extern image_t *draw_chars;
+extern void RI_KaiosResetBufTrace(void);
 #define KAIOS_K_ENTER 13
 #define KAIOS_K_KP_ENTER 158
 
@@ -194,9 +195,26 @@ RI_KaiosCubeTestFrame(void)
 		 * longer affects anything once texturing is on, kept only so
 		 * a texture-sampling failure that falls back to vertex color
 		 * would still be visible as the old rainbow cube instead of
-		 * going invisible entirely. */
+		 * going invisible entirely.
+		 *
+		 * conchars.pcx is a 256x256 16x16 grid of 8x8 glyph cells,
+		 * each mostly transparent/background padding around a small
+		 * actual glyph -- mapping the WHOLE [0,1]x[0,1] sheet (as
+		 * before) onto a single face samples predominantly empty
+		 * space, so a real render and a totally-broken texture unit
+		 * would look almost identical (near-black). Zoom into one
+		 * specific, known-opaque cell instead: digit '0' is ASCII
+		 * 48, row = 48>>4 = 3, col = 48&15 = 0, so its cell covers
+		 * u=[0, 0.0625], v=[0.1875, 0.25] -- if this shows a visible
+		 * glyph shape, texturing works; if it's still flat black,
+		 * the bug is upstream of texcoord choice. */
 		static const GLfloat texcoords[12] = {
-			0,0, 1,0, 1,1,  0,0, 1,1, 0,1,
+			0.0f,    0.1875f,
+			0.0625f, 0.1875f,
+			0.0625f, 0.25f,
+			0.0f,    0.1875f,
+			0.0625f, 0.25f,
+			0.0f,    0.25f,
 		};
 
 		KAIOS_CUBE_TRACE(glEnableClientState(GL_VERTEX_ARRAY));
@@ -306,6 +324,12 @@ RI_KaiosCubeTestFrame(void)
 			Com_Printf("KAIOS_CUBE_TEST: after R_ApplyGLBuffer (HUD text), glGetError=0x%x\n",
 				glGetError());
 		}
+
+		/* The manual call above just consumed R_ApplyGLBuffer's own
+		 * one-shot trace budget -- reset it so the real game's first
+		 * buffered 2D draw (once the demo actually loads after OK) is
+		 * still what gets traced, not this test call. */
+		RI_KaiosResetBufTrace();
 	}
 #undef KAIOS_CUBE_TRACE
 
