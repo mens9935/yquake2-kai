@@ -178,10 +178,22 @@ RI_KaiosCubeTestFrame(void)
 		Com_Printf("KAIOS_CUBE_TEST: frame %d, press OK to continue loading\n", frame_counter);
 	}
 
-	if (keydown[KAIOS_K_ENTER] || keydown[KAIOS_K_KP_ENTER])
+	/* Edge-triggered (was up last frame, is down now), not just "is
+	 * currently down" -- the physical OK press used to launch this app
+	 * from the KaiOS home screen could plausibly still read as held by
+	 * the time this first frame runs, which would otherwise exit the
+	 * test on frame 1 before anyone ever saw the cube. */
 	{
-		kaios_cube_test_active = false;
-		Com_Printf("KAIOS_CUBE_TEST: OK pressed after %d frames, continuing to load\n", frame_counter);
+		static qboolean was_down = false;
+		qboolean is_down = (keydown[KAIOS_K_ENTER] || keydown[KAIOS_K_KP_ENTER]) ? true : false;
+
+		if (is_down && !was_down)
+		{
+			kaios_cube_test_active = false;
+			Com_Printf("KAIOS_CUBE_TEST: OK pressed after %d frames, continuing to load\n", frame_counter);
+		}
+
+		was_down = is_down;
 	}
 }
 #endif

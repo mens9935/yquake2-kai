@@ -41,6 +41,17 @@
  * sanity check before any real game loading is attempted. */
 extern qboolean kaios_cube_test_active;
 extern void RI_KaiosCubeTestFrame(void);
+
+/* Shared between Qcommon_Init() (fires immediately when the cube test
+ * is inactive/stubbed-off, i.e. the shipped soft build, exactly like
+ * before this feature existed) and Qcommon_EmscriptenTick() (fires
+ * once, later, the first tick after an active cube test clears) --
+ * without this shared guard the soft build (kaios_cube_test_active
+ * always false there) would fire kaios_startcmd from Qcommon_Init()
+ * as normal, and then a second time from the tick callback, since
+ * that callback has no other way to know Qcommon_Init() already
+ * handled it. */
+static qboolean kaios_startcmd_fired = false;
 #endif
 #endif
 
@@ -201,21 +212,58 @@ Qcommon_EmscriptenTick(void *arg)
 	curtime = (int)(newtime / 1000ll);
 
 #ifndef DEDICATED_ONLY
+	{
+		/* Unconditional, first-few-ticks-only: settle, with zero
+		 * ambiguity, whether the cube test is even being entered and
+		 * what it sees, before trusting any of its own conditional
+		 * prints. */
+		static int kaios_tick_count = 0;
+
+		if (kaios_tick_count < 5)
+		{
+			kaios_tick_count++;
+			Com_Printf("KAIOS_TICK: #%d kaios_cube_test_active=%d\n",
+				kaios_tick_count, (int)kaios_cube_test_active);
+		}
+	}
+
 	/* Spinning-cube sanity check first, using the exact same GL1
 	 * context RI_InitContext() already created -- see the comment by
 	 * kaios_cube_test_active's extern declaration above. Draws
 	 * directly and polls input itself, entirely independent of
 	 * Qcommon_Frame()/the normal client frame loop, so it can run
-	 * before any game/menu/console state exists at all. Once it
-	 * clears (OK pressed), this falls through to normal ticking on
-	 * every later frame -- including the one where kaios_startcmd
-	 * finally gets to fire, from the (!kaios_cube_test_active) branch
-	 * inside Qcommon_Init() above. */
+	 * before any game/menu/console state exists at all. */
 	if (kaios_cube_test_active)
 	{
 		RI_KaiosCubeTestFrame();
 		oldtime = newtime;
 		return;
+	}
+
+	/* The tick where kaios_cube_test_active just flipped false (OK
+	 * pressed) -- kaios_startcmd was deliberately skipped inside
+	 * Qcommon_Init() above (that check runs synchronously, long before
+	 * the cube test ever gets a chance to clear, so it always saw
+	 * kaios_cube_test_active still true and always skipped). Fire it
+	 * exactly once, here, now that the renderer has been visually
+	 * confirmed to present a frame. kaios_startcmd_fired is shared with
+	 * Qcommon_Init()'s own copy of this same firing logic -- on the
+	 * soft build kaios_cube_test_active is always false, so that one
+	 * already fired it normally and this must not do it again. */
+	{
+		if (!kaios_startcmd_fired)
+		{
+			cvar_t *kaios_startcmd = Cvar_Get("kaios_startcmd", "", 0);
+
+			kaios_startcmd_fired = true;
+
+			if (kaios_startcmd->string[0])
+			{
+				Cbuf_AddText(kaios_startcmd->string);
+				Cbuf_AddText("\n");
+				Cbuf_Execute();
+			}
+		}
 	}
 #endif
 
@@ -504,6 +552,8 @@ Qcommon_Init(int argc, char **argv)
 		if (!kaios_cube_test_active)
 		{
 			cvar_t *kaios_startcmd = Cvar_Get("kaios_startcmd", "", 0);
+
+			kaios_startcmd_fired = true;
 
 			if (kaios_startcmd->string[0])
 			{
