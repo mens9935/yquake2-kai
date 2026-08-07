@@ -2724,14 +2724,32 @@ static menulist_s s_kaios_lights_box;
 static menulist_s s_kaios_particles_box;
 static menulist_s s_kaios_prewarm_box;
 
+/* Set by the buffer slider / sample rate box below instead of calling
+ * CL_Snd_Restart_f() directly from their own callback -- a slider fires
+ * its callback on EVERY single step while the player holds the arrow
+ * key to drag it, and CL_Snd_Restart_f() is not cheap (S_Shutdown() +
+ * S_Init(): tears down and recreates the whole SDL/WebAudio backend,
+ * including a fresh browser AudioContext). Holding the buffer-size
+ * slider down was seen on a real device to fire that teardown/rebuild
+ * many times in a couple of seconds, faster than the browser's own
+ * async AudioContext cleanup could keep up with, eventually failing
+ * with "Couldn't init SDL audio: Audio target '-1' not available" and
+ * leaving sound dead for the rest of the session. Instead, just flag
+ * that a restart is owed and apply it once, when the menu is actually
+ * left (KaiosTuning_MenuKey's K_ESCAPE case below) -- same "stage
+ * changes, apply on exit" shape the Video menu already uses for its
+ * own restart-requiring settings (ApplyChanges, videomenu.c). */
+static qboolean s_kaios_snd_dirty = false;
+
 static void
-KaiosBufferSliderFunc(void *unused)
+KaiosApplySndRestart(void)
 {
-	/* SDL_BackendInit (sdl.c) snaps whatever's in the cvar to the
-	 * nearest valid ScriptProcessorNode size and writes that back, but
-	 * only takes effect on the next audio init -- same restart dance
-	 * UpdateSoundBackendFunc above already does for the OpenAL/SDL
-	 * switch. */
+	if (!s_kaios_snd_dirty)
+	{
+		return;
+	}
+	s_kaios_snd_dirty = false;
+
 	m_popup_string = "Restarting the sound system. This\n"
 					 "could take up to a minute, so\n"
 					 "please be patient.";
@@ -2741,6 +2759,17 @@ KaiosBufferSliderFunc(void *unused)
 	R_EndFrame();
 
 	CL_Snd_Restart_f();
+}
+
+static void
+KaiosBufferSliderFunc(void *unused)
+{
+	/* SDL_BackendInit (sdl.c) snaps whatever's in the cvar to the
+	 * nearest valid ScriptProcessorNode size and writes that back, but
+	 * only takes effect on the next audio init. Slider_DoSlide already
+	 * wrote the raw dragged value into s_kaios_buffer's cvar before
+	 * calling this -- just flag the restart, see s_kaios_snd_dirty. */
+	s_kaios_snd_dirty = true;
 }
 
 static void
@@ -2756,15 +2785,10 @@ KaiosKhzFunc(void *unused)
 
 	Cvar_SetValue("s_khz", (float)khz_values[idx]);
 
-	m_popup_string = "Restarting the sound system. This\n"
-					 "could take up to a minute, so\n"
-					 "please be patient.";
-	m_popup_endtime = cls.realtime + 2000;
-	M_Popup();
-
-	R_EndFrame();
-
-	CL_Snd_Restart_f();
+	/* See s_kaios_snd_dirty's comment above the buffer slider's
+	 * callback -- same reasoning applies here, this spincontrol can
+	 * also be stepped through rapidly. */
+	s_kaios_snd_dirty = true;
 }
 
 static void
@@ -2900,6 +2924,18 @@ KaiosTuning_MenuKey(int key)
 		m_popup_string = NULL;
 		return NULL;
 	}
+
+	/* Apply any pending sound restart (buffer size / sample rate,
+	 * staged instead of applied live -- see s_kaios_snd_dirty) on the
+	 * way out, same "leaving this screen" trigger point the Video menu
+	 * uses for its own staged settings. */
+	if (Key_GetMenuKey(key) == K_ESCAPE)
+	{
+		KaiosApplySndRestart();
+		M_PopMenu();
+		return NULL;
+	}
+
 	return Default_MenuKey(&s_kaios_menu, key);
 }
 

@@ -53,6 +53,60 @@ window.addEventListener('contextmenu', function (ev) {
 }, true);
 
 // ---------------------------------------------------------------------
+// Suppress the OK-button long-press -> Google Assistant gesture
+// ---------------------------------------------------------------------
+// The previous attempt here only ever watched the plain "Enter" key and
+// still reached Assistant on a real device -- because KaiOS reports the
+// long-press-Enter voice-assistant gesture as its own distinct named
+// key, "MicrophoneToggle" (per kaios.dev's "Special Keys" list), a
+// completely separate keydown from the normal short-press "Enter" one.
+// Nothing in KEY_MAP/PREVENT_DEFAULT below was ever looking for that
+// key at all, so every prior preventDefault()/stopImmediatePropagation()
+// on "Enter" was defending against an event that was never the one
+// actually firing. Swallow "MicrophoneToggle" outright.
+//
+// As a defensive fallback for firmware that instead just keeps re-firing
+// "Enter" past a hold threshold rather than emitting a distinct key,
+// also swallow Enter itself once it's been held past the OS's own
+// long-press window -- just below where Assistant would normally
+// trigger. Short-press Enter (fire) is deliberately left alone here:
+// only later repeat keydowns past the threshold get swallowed, so the
+// initial keydown still reaches installKeyHandlers()'s own listener
+// below and starts +attack normally; the matching keyup is never
+// swallowed either, so a held shot still releases correctly.
+//
+// Registered here, at the top of the file (so before installKeyHandlers()
+// runs, later, from start()) specifically so this listener's capture-phase
+// stopImmediatePropagation() -- when it fires -- runs before
+// installKeyHandlers()'s own capture-phase listener on the same events;
+// capture-phase listeners on the same target run in registration order.
+var ENTER_HOLD_SWALLOW_MS = 400;
+var enterDownAt = 0;
+
+window.addEventListener('keydown', function (ev) {
+	if (ev.key === 'MicrophoneToggle') {
+		ev.preventDefault();
+		ev.stopImmediatePropagation();
+		return;
+	}
+	if (ev.key === 'Enter') {
+		if (!enterDownAt) {
+			enterDownAt = Date.now();
+		}
+		if (Date.now() - enterDownAt >= ENTER_HOLD_SWALLOW_MS) {
+			ev.preventDefault();
+			ev.stopImmediatePropagation();
+		}
+	}
+}, true);
+
+window.addEventListener('keyup', function (ev) {
+	if (ev.key === 'Enter') {
+		enterDownAt = 0;
+	}
+}, true);
+
+// ---------------------------------------------------------------------
 // KaiOS keypad -> Quake II key names
 // (names match keynames[] in src/client/cl_keyboard.c / bind syntax)
 // ---------------------------------------------------------------------
@@ -116,29 +170,12 @@ function installKeyHandlers() {
 	// Capture phase: runs before the OS's own long-press/Assistant
 	// gesture recognizer gets a look at the event, on builds where that
 	// recognizer is itself just another content-side listener rather
-	// than something below the DOM entirely (unverified which KaiOS 2.5
-	// is -- capturing costs nothing either way, so do it regardless).
+	// than something below the DOM entirely. The MicrophoneToggle/
+	// held-Enter suppression above is registered earlier (at file load,
+	// before this function ever runs) specifically so it gets first
+	// crack at the same events on this same capture phase.
 	window.addEventListener('keydown', handle(true), true);
 	window.addEventListener('keyup', handle(false), true);
-
-	// Belt-and-suspenders for the same long-press-OK-opens-Assistant
-	// gesture: some Gecko builds are known to route a long-press
-	// through a synthesized 'keypress' rather than (or in addition to)
-	// 'keydown'/'keyup'. Still reported reaching Assistant despite the
-	// keydown/keyup capture above and the window-level contextmenu
-	// prevention below, so cover this third path too. Genuinely
-	// uncertain this closes it: if KaiOS recognizes the hold via its
-	// own hardware-key driver below the DOM entirely (plausible if the
-	// same gesture also fires from the lock screen or home screen, not
-	// just inside this app), no content-side JS -- captured, prevented,
-	// or otherwise -- can intercept it, and the actual fix would be a
-	// device Settings toggle instead, if the firmware exposes one.
-	window.addEventListener('keypress', function (ev) {
-		if (ev.key === 'Enter') {
-			ev.preventDefault();
-			ev.stopImmediatePropagation();
-		}
-	}, true);
 }
 
 // ---------------------------------------------------------------------
