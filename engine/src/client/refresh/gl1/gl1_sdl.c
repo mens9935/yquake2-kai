@@ -441,6 +441,39 @@ int RI_InitContext(void* win)
 
 		emscripten_webgl_make_context_current(em_ctx_handle);
 
+		/* The manual GL.registerContext()/make_context_current() path
+		 * above got a real, working WebGL context on a real device --
+		 * confirmed by "Initialized OpenGL ES version 2.0 context" and
+		 * a real GL_VENDOR/GL_RENDERER/GL_EXTENSIONS dump right
+		 * afterward -- but then hit "TypeError: s_texUnits is null"
+		 * inside GLImmediate (library_glemu.js), the LEGACY_GL_EMULATION
+		 * fixed-pipeline layer this GLES1 renderer's glBegin/glVertex/
+		 * glTexEnv-style calls depend on entirely. s_texUnits is set up
+		 * by GLImmediate.init(), which normal SDL2/Emscripten context
+		 * creation reaches through Browser.createContext() -> ... ->
+		 * Browser.moduleContextCreatedCallbacks.forEach(cb => cb())
+		 * (library_browser.js) -- a step our manual, minimal
+		 * getContext()+registerContext() bypass above has no equivalent
+		 * of, since it never goes through Browser.createContext() at
+		 * all. Fire those callbacks ourselves now that a context is
+		 * current, so GLImmediate.init() (and anything else normally
+		 * wired to "a WebGL context just became active") actually runs. */
+		EM_ASM({
+			try {
+				if (typeof Browser !== 'undefined' && Browser.moduleContextCreatedCallbacks) {
+					Browser.moduleContextCreatedCallbacks.forEach(function (callback) {
+						callback();
+					});
+					console.log('[kaios] fired ' + Browser.moduleContextCreatedCallbacks.length +
+						' moduleContextCreatedCallbacks manually');
+				} else {
+					console.log('[kaios] Browser.moduleContextCreatedCallbacks not available to fire manually');
+				}
+			} catch (e) {
+				console.log('[kaios] firing moduleContextCreatedCallbacks threw: ' + e);
+			}
+		});
+
 		// Only used by RI_ShutdownContext()'s guard -- never dereferenced
 		// as a real SDL_GLContext.
 		context = (SDL_GLContext)(uintptr_t)em_ctx_handle;
