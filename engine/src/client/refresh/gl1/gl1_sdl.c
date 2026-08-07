@@ -401,6 +401,39 @@ int RI_InitContext(void* win)
 		 * cannot ever succeed, regardless of what attributes it changes.
 		 * A genuine retry would need a *fresh* canvas element, not a
 		 * second call on this one -- not attempted here. */
+
+		/* Read-only diagnostic, no getContext() call anywhere in here
+		 * -- can't poison anything. "#canvas" as a target string is
+		 * NOT resolved via document.querySelector/getElementById by
+		 * Emscripten's own findEventTarget() (library_html5.js): for
+		 * the literal special-case string "#canvas" it returns
+		 * Module['canvas'] directly instead, wherever that currently
+		 * points. module-init.js sets Module.canvas = document.
+		 * getElementById('canvas') once, at page load -- if SDL2's own
+		 * window/canvas setup (SDL_CreateWindow, RI_PrepareForWindow
+		 * above, or Emscripten's SDL2 port internals) ever replaces or
+		 * re-wraps that DOM element instead of mutating it in place,
+		 * Module.canvas would still point at the original, now-detached
+		 * element while the live, visible canvas is a different object
+		 * -- exactly the kind of mismatch that would make
+		 * emscripten_webgl_create_context("#canvas", ...) silently
+		 * resolve to nothing and bail before ever calling
+		 * canvas.getContext() at all (matches the observed failure:
+		 * no WebGL-level error, immediate return). */
+		EM_ASM({
+			var live = document.getElementById('canvas');
+			console.log('[kaios] Module.canvas set: ' + (typeof Module.canvas !== 'undefined' && Module.canvas !== null));
+			console.log('[kaios] Module.canvas === live #canvas element: ' + (Module.canvas === live));
+			if (Module.canvas) {
+				console.log('[kaios] Module.canvas.tagName=' + Module.canvas.tagName +
+					' id=' + Module.canvas.id +
+					' isConnected=' + Module.canvas.isConnected);
+			}
+			if (live) {
+				console.log('[kaios] live #canvas .isConnected=' + live.isConnected);
+			}
+		});
+
 		em_ctx_handle = emscripten_webgl_create_context("#canvas", &attribs);
 
 		if (!em_ctx_handle)
