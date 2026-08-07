@@ -117,17 +117,22 @@ RI_KaiosCubeTestFrame(void)
 	 * actually builds against (confirmed by the compiler rejecting
 	 * them outright, not just at runtime). Vertex arrays + glDrawArrays
 	 * is what the rest of this renderer already uses (R_DrawParticles
-	 * above, for one) and what real GLES1 supports -- one glColor4f +
-	 * glDrawArrays(GL_TRIANGLE_FAN, ...) call per cube face instead of
-	 * a single immediate-mode block. */
+	 * above, for one) and what real GLES1 supports. Each face is 2
+	 * triangles (6 verts: 0-1-2, 0-2-3), not GL_TRIANGLE_FAN -- plain
+	 * GL_TRIANGLES to rule out the fan primitive specifically not
+	 * being handled by Emscripten's client-array-to-WebGL-buffer
+	 * emulation, since this is literally the first real draw call this
+	 * whole investigation has ever visually confirmed (or not) -- every
+	 * earlier "success" only meant the call *returned*, never that it
+	 * produced pixels. */
 	{
-		static const GLfloat faces[6][12] = {
-			{-1,-1, 1,  1,-1, 1,  1, 1, 1, -1, 1, 1}, /* +Z */
-			{-1,-1,-1, -1, 1,-1,  1, 1,-1,  1,-1,-1}, /* -Z */
-			{ 1,-1,-1,  1, 1,-1,  1, 1, 1,  1,-1, 1}, /* +X */
-			{-1,-1,-1, -1,-1, 1, -1, 1, 1, -1, 1,-1}, /* -X */
-			{-1, 1,-1, -1, 1, 1,  1, 1, 1,  1, 1,-1}, /* +Y */
-			{-1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1}, /* -Y */
+		static const GLfloat faces[6][18] = {
+			{-1,-1, 1,  1,-1, 1,  1, 1, 1,   -1,-1, 1,  1, 1, 1, -1, 1, 1}, /* +Z */
+			{-1,-1,-1, -1, 1,-1,  1, 1,-1,   -1,-1,-1,  1, 1,-1,  1,-1,-1}, /* -Z */
+			{ 1,-1,-1,  1, 1,-1,  1, 1, 1,    1,-1,-1,  1, 1, 1,  1,-1, 1}, /* +X */
+			{-1,-1,-1, -1,-1, 1, -1, 1, 1,   -1,-1,-1, -1, 1, 1, -1, 1,-1}, /* -X */
+			{-1, 1,-1, -1, 1, 1,  1, 1, 1,   -1, 1,-1,  1, 1, 1,  1, 1,-1}, /* +Y */
+			{-1,-1,-1,  1,-1,-1,  1,-1, 1,   -1,-1,-1,  1,-1, 1, -1,-1, 1}, /* -Y */
 		};
 		static const GLfloat colors[6][3] = {
 			{1,0,0}, {0,1,0}, {0,0,1}, {1,1,0}, {1,0,1}, {0,1,1},
@@ -135,11 +140,21 @@ RI_KaiosCubeTestFrame(void)
 
 		glEnableClientState(GL_VERTEX_ARRAY);
 
+		if (frame_counter == 1)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: glGetError after glEnableClientState: 0x%x\n", glGetError());
+		}
+
 		for (i = 0; i < 6; i++)
 		{
 			glColor4f(colors[i][0], colors[i][1], colors[i][2], 1.0f);
 			glVertexPointer(3, GL_FLOAT, 0, faces[i]);
-			glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+			glDrawArrays(GL_TRIANGLES, 0, 6);
+		}
+
+		if (frame_counter == 1)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: glGetError after cube glDrawArrays: 0x%x\n", glGetError());
 		}
 
 		glDisableClientState(GL_VERTEX_ARRAY);
@@ -150,7 +165,8 @@ RI_KaiosCubeTestFrame(void)
 	 * needing the game's own font/pic system (Draw_InitLocal has not
 	 * run against any real content yet -- this deliberately runs
 	 * before all of that). Same vertex-array approach as the cube
-	 * above, one small GL_TRIANGLE_FAN draw per bar. */
+	 * above, GL_TRIANGLES (2 tris, 6 verts) per bar, not
+	 * GL_TRIANGLE_FAN, for the same reason as the cube faces above. */
 	glDisable(GL_DEPTH_TEST);
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
@@ -165,10 +181,18 @@ RI_KaiosCubeTestFrame(void)
 	for (i = 0; i < bar_count; i++)
 	{
 		float x = 4 + i * 10;
-		GLfloat quad[8] = { x, 4, x + 8, 4, x + 8, 12, x, 12 };
+		GLfloat quad[12] = {
+			x, 4,  x + 8, 4,  x + 8, 12,
+			x, 4,  x + 8, 12,  x, 12,
+		};
 
 		glVertexPointer(2, GL_FLOAT, 0, quad);
-		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
+	}
+
+	if (frame_counter == 1)
+	{
+		Com_Printf("KAIOS_CUBE_TEST: glGetError after bar glDrawArrays: 0x%x\n", glGetError());
 	}
 
 	glDisableClientState(GL_VERTEX_ARRAY);
