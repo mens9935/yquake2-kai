@@ -45,6 +45,17 @@ int r_framecount; /* used for dlight push checking */
 
 int c_brush_polys, c_alias_polys;
 
+#ifdef __EMSCRIPTEN__
+/* cl_screen.c's KAIOS_STATS diagnostic (SCR_DrawKaiosStats) references
+ * r_polycount directly (extern int r_polycount;) -- that global only
+ * really exists in the software renderer (sw_main.c), which is the one
+ * KaiOS build this diagnostic was written for. Stubbed here purely so a
+ * one-off gl1 test build (RENDERER=gl1, see build.sh) links at all;
+ * gl1's own poly counters are c_brush_polys/c_alias_polys above, this
+ * stays 0 and unused otherwise. */
+int r_polycount;
+#endif
+
 float v_blend[4]; /* final blending color */
 
 void R_Strings(void);

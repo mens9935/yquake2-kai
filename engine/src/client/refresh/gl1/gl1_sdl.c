@@ -54,6 +54,7 @@
  * SDL_GL_DeleteContext specifically for this one path, while still using
  * SDL for window creation, input, and everything else. */
 #include <emscripten/html5.h>
+#include <emscripten/em_asm.h>
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE em_ctx_handle = 0;
 #endif
 
@@ -358,8 +359,87 @@ int RI_InitContext(void* win)
 		 * instead of silently downgrading. */
 		attribs.stencil = false;
 		attribs.antialias = false;
+		/* emscripten_webgl_init_context_attributes() already defaults
+		 * majorVersion/minorVersion to 1/0 (confirmed by reading
+		 * library_html5_webgl.js directly) -- set explicitly anyway so
+		 * this isn't relying on an unstated default staying that way
+		 * across emsdk versions; this old Gecko-48-class engine has no
+		 * WebGL2 support at all, so a majorVersion of 2 here would
+		 * request "webgl2" and fail outright regardless of anything
+		 * else in this function. */
+		attribs.majorVersion = 1;
+		attribs.minorVersion = 0;
+
+		/* Raw, code-independent probe: call canvas.getContext() directly
+		 * from JS with the exact same attributes, bypassing every layer
+		 * of C code above (SDL, Emscripten's own C->JS argument marshalling
+		 * for emscripten_webgl_create_context) entirely. Every previous
+		 * real-device attempt only ever saw "failed"/null back from the
+		 * C side, with no browser-level reason available outside of a
+		 * GL_DEBUG build -- this logs the actual thrown exception (if
+		 * any) straight to the console this project already reads back
+		 * from real-device testing, independent of build type. */
+		/* Built via individual property assignments (statements ending
+		 * in ';'), not a single {a: 1, b: 2} object literal -- the C
+		 * preprocessor splits EM_ASM's macro arguments on any
+		 * unparenthesized top-level comma, and it has no concept of
+		 * curly braces grouping anything, so a literal with several
+		 * comma-separated properties silently corrupts this into a
+		 * multi-argument macro call and fails to compile. */
+		EM_ASM({
+			try {
+				var c = document.getElementById('canvas');
+				if (!c) {
+					console.log('[kaios] GL probe: no #canvas element found');
+				} else {
+					var attrs = {};
+					attrs.alpha = false;
+					attrs.depth = !!$0;
+					attrs.stencil = false;
+					attrs.antialias = false;
+					attrs.majorVersion = 1;
+					attrs.minorVersion = 0;
+					var gl = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
+					console.log('[kaios] GL probe (depth=' + (!!$0) + '): ' +
+						(gl ? 'context created OK' : 'getContext returned null'));
+				}
+			} catch (e) {
+				console.log('[kaios] GL probe threw: ' + e);
+			}
+		}, attribs.depth);
 
 		em_ctx_handle = emscripten_webgl_create_context("#canvas", &attribs);
+
+		if (!em_ctx_handle)
+		{
+			Com_Printf("%s: emscripten_webgl_create_context() failed with depth=true, "
+				"retrying with depth=false\n", __func__);
+
+			/* One more, even more minimal rung before giving up: no
+			 * depth buffer at all. Untested prior to this -- every
+			 * earlier attempt requested a depth buffer of some form. */
+			attribs.depth = false;
+
+			EM_ASM({
+				try {
+					var c = document.getElementById('canvas');
+					var attrs = {};
+					attrs.alpha = false;
+					attrs.depth = false;
+					attrs.stencil = false;
+					attrs.antialias = false;
+					attrs.majorVersion = 1;
+					attrs.minorVersion = 0;
+					var gl = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
+					console.log('[kaios] GL probe (depth=false retry): ' +
+						(gl ? 'context created OK' : 'getContext returned null'));
+				} catch (e) {
+					console.log('[kaios] GL probe (depth=false retry) threw: ' + e);
+				}
+			});
+
+			em_ctx_handle = emscripten_webgl_create_context("#canvas", &attribs);
+		}
 
 		if (!em_ctx_handle)
 		{

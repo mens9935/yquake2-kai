@@ -16,6 +16,18 @@ ENGINE="$ROOT/engine"
 OUT="$HERE/dist"
 OBJDIR="$HERE/obj"
 
+# RENDERER=gl1 builds the (normally shelved) GLES1-via-WebGL1 renderer
+# instead of the shipped software one, for one-off real-device GL context
+# testing -- see the comment by "gl1 shelved for now" below. Defaults to
+# "soft", the one that actually ships. TOTAL_MEMORY_OVERRIDE and OUT_NAME
+# exist for the same reason: testing a smaller heap reservation, or
+# writing the build somewhere other than platform/kaios/ so a diagnostic
+# build never overwrites the working shipped one.
+RENDERER="${RENDERER:-soft}"
+TOTAL_MEMORY_OVERRIDE="${TOTAL_MEMORY_OVERRIDE:-100663296}"
+OUT_NAME="${OUT_NAME:-quake2-kaios}"
+KAIOS_DIR="${KAIOS_DIR:-$ROOT/platform/kaios}"
+
 if ! command -v emcc >/dev/null 2>&1; then
 	echo "error: emcc not found on PATH. Run 'source <emsdk>/emsdk_env.sh' first." >&2
 	exit 1
@@ -44,9 +56,14 @@ COMMON_FLAGS=(
 	-s USE_SDL=2
 )
 
-# gl1 shelved for now (see autoexec.cfg's comment) -- needs
-# -s LEGACY_GL_EMULATION=1 added back to COMMON_FLAGS and the refgl1
-# compile_group call restored in place of refsoft below, if revisited.
+# gl1 shelved by default (see autoexec.cfg's comment: real-device WebGL
+# context creation has failed every attempt so far, even bypassing SDL
+# entirely and matching a known-working reference implementation's exact
+# context attributes) -- RENDERER=gl1 brings it back for one-off testing
+# of new theories without disturbing the shipped soft build.
+if [ "$RENDERER" = "gl1" ]; then
+	COMMON_FLAGS+=(-s LEGACY_GL_EMULATION=1)
+fi
 
 GL1_FLAGS=(
 	-DYQ2_GL1_GLES
@@ -100,7 +117,7 @@ EMCC_LINK_FLAGS=(
 	# KaiOS device's own memory pressure worse -- unlike the previous
 	# leak/corruption bugs, this is a real tradeoff against whatever
 	# total RAM budget the phone itself has for the browser tab.
-	-s TOTAL_MEMORY=100663296
+	-s TOTAL_MEMORY=$TOTAL_MEMORY_OVERRIDE
 	-s ALLOW_MEMORY_GROWTH=0
 	-s FORCE_FILESYSTEM=1
 	-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS','callMain']
@@ -134,8 +151,13 @@ OBJS=()
 echo "==> Compiling client+server (${#CLIENT_SRCS[@]} files)"
 compile_group client NO_EXTRA CLIENT_SRCS
 
-echo "==> Compiling software renderer (${#REFSOFT_SRCS[@]} files)"
-compile_group refsoft NO_EXTRA REFSOFT_SRCS
+if [ "$RENDERER" = "gl1" ]; then
+	echo "==> Compiling gl1/GLES1 renderer (${#REFGL1_SRCS[@]} files)"
+	compile_group refgl1 GL1_FLAGS REFGL1_SRCS
+else
+	echo "==> Compiling software renderer (${#REFSOFT_SRCS[@]} files)"
+	compile_group refsoft NO_EXTRA REFSOFT_SRCS
+fi
 
 echo "==> Compiling baseq2 game (${#GAME_SRCS[@]} files)"
 compile_group game GAME_ONLY_FLAGS GAME_SRCS
@@ -143,9 +165,7 @@ compile_group game GAME_ONLY_FLAGS GAME_SRCS
 echo "==> Linking ${#OBJS[@]} object files ($(emcc --version | head -1))"
 emcc "${COMMON_FLAGS[@]}" "${EMCC_LINK_FLAGS[@]}" \
 	"${OBJS[@]}" \
-	-o "$OUT/quake2-kaios.js"
-
-KAIOS_DIR="$ROOT/platform/kaios"
+	-o "$OUT/$OUT_NAME.js"
 
 # autoexec.cfg is no longer baked into a generated .js at build time --
 # platform/kaios/app.js now fetches the plain text file at runtime, once
@@ -155,6 +175,7 @@ KAIOS_DIR="$ROOT/platform/kaios"
 # index.html, which it already does.
 
 echo "==> Copying engine build into $KAIOS_DIR"
-cp "$OUT/quake2-kaios.js" "$OUT/quake2-kaios.js.mem" "$KAIOS_DIR/"
+mkdir -p "$KAIOS_DIR"
+cp "$OUT/$OUT_NAME.js" "$OUT/$OUT_NAME.js.mem" "$KAIOS_DIR/"
 
 echo "==> Build complete: $KAIOS_DIR/ is ready to package/sideload"
