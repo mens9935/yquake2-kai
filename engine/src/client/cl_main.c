@@ -570,8 +570,24 @@ CL_InitLocal(void)
 	cin_force43 = Cvar_Get("cin_force43", "1", CVAR_ARCHIVE);
 
 	cl_add_blend = Cvar_Get("cl_blend", "1", 0);
+#ifdef __EMSCRIPTEN__
+	/* Off by default on this port: dynamic per-frame relighting/
+	 * particle spawning (rockets, muzzle flashes, blood, explosions)
+	 * is real per-frame renderer cost this device's CPU can't spare
+	 * (see R_PushDlights/R_AddDynamicLights, sw_light.c, and
+	 * CL_AddParticles, cl_view.c). Used to be forced via an
+	 * unconditional "set cl_lights 0"/"set cl_particles 0" in
+	 * autoexec.cfg; moved into the default here instead now that both
+	 * are CVAR_ARCHIVE and exposed in the KaiOS Tuning options menu
+	 * (menu.c) -- a forced `set` would silently undo the player's own
+	 * menu choice on every next launch, since autoexec.cfg execs after
+	 * config.cfg (Qcommon_ExecConfigs, frame.c). */
+	cl_add_lights = Cvar_Get("cl_lights", "0", CVAR_ARCHIVE);
+	cl_add_particles = Cvar_Get("cl_particles", "0", CVAR_ARCHIVE);
+#else
 	cl_add_lights = Cvar_Get("cl_lights", "1", 0);
 	cl_add_particles = Cvar_Get("cl_particles", "1", 0);
+#endif
 	cl_add_entities = Cvar_Get("cl_entities", "1", 0);
 	cl_kickangles = Cvar_Get("cl_kickangles", "1", 0);
 	cl_gun = Cvar_Get("cl_gun", "2", CVAR_ARCHIVE);

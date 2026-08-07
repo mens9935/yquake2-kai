@@ -120,6 +120,25 @@ function installKeyHandlers() {
 	// is -- capturing costs nothing either way, so do it regardless).
 	window.addEventListener('keydown', handle(true), true);
 	window.addEventListener('keyup', handle(false), true);
+
+	// Belt-and-suspenders for the same long-press-OK-opens-Assistant
+	// gesture: some Gecko builds are known to route a long-press
+	// through a synthesized 'keypress' rather than (or in addition to)
+	// 'keydown'/'keyup'. Still reported reaching Assistant despite the
+	// keydown/keyup capture above and the window-level contextmenu
+	// prevention below, so cover this third path too. Genuinely
+	// uncertain this closes it: if KaiOS recognizes the hold via its
+	// own hardware-key driver below the DOM entirely (plausible if the
+	// same gesture also fires from the lock screen or home screen, not
+	// just inside this app), no content-side JS -- captured, prevented,
+	// or otherwise -- can intercept it, and the actual fix would be a
+	// device Settings toggle instead, if the firmware exposes one.
+	window.addEventListener('keypress', function (ev) {
+		if (ev.key === 'Enter') {
+			ev.preventDefault();
+			ev.stopImmediatePropagation();
+		}
+	}, true);
 }
 
 // ---------------------------------------------------------------------
@@ -657,9 +676,12 @@ function loadEngineScripts() {
 	if (engineScriptsLoaded) {
 		return Promise.resolve();
 	}
+	// autoexec.cfg itself is no longer loaded here -- it used to be
+	// pre-baked at build time into a generated autoexec.cfg.js
+	// (window.KAIOS_AUTOEXEC_CFG), which meant any edit to it needed a
+	// full engine rebuild to take effect. writeAutoexec() below now
+	// fetches the plain text file at runtime instead, once per launch.
 	return loadScript('quake2-kaios.js').then(function () {
-		return loadScript('autoexec.cfg.js');
-	}).then(function () {
 		engineScriptsLoaded = true;
 
 		if (Module.calledRun) {
@@ -686,25 +708,60 @@ function loadEngineScripts() {
 	});
 }
 
-function writeAutoexec() {
-	var text = window.KAIOS_AUTOEXEC_CFG || '';
-	if (!text) {
-		return;
-	}
-	// Write to the gamedir (read search path) and to the engine's
-	// writable config dir (~/.yq2/baseq2 under Emscripten's synthesized
-	// HOME) so it's found regardless of which one FS_LoadFile checks.
-	try {
-		mkdirTreeFor('/' + GAMEDIR + '/autoexec.cfg');
-		FS.writeFile('/' + GAMEDIR + '/autoexec.cfg', text);
-	} catch (e) { console.log('[kaios] ' + e); }
+// autoexec.cfg used to be embedded at build time (a generated
+// autoexec.cfg.js defining window.KAIOS_AUTOEXEC_CFG, loaded as a
+// <script> tag) -- editing it meant a full engine rebuild before the
+// change took effect. Fetching the plain text file here instead, once
+// per app launch, means autoexec.cfg can be edited and redeployed on
+// its own, same as any other static asset next to index.html.
+function fetchText(url) {
+	return new Promise(function (resolve, reject) {
+		var xhr = new XMLHttpRequest();
+		xhr.open('GET', url, true);
+		xhr.onload = function () {
+			// status 0 covers the packaged-app (app://) origin, where
+			// XHR against a local file doesn't always populate a real
+			// HTTP status.
+			if (xhr.status === 200 || xhr.status === 0) {
+				resolve(xhr.responseText);
+			} else {
+				reject(new Error('HTTP ' + xhr.status));
+			}
+		};
+		xhr.onerror = function () {
+			reject(new Error('network error'));
+		};
+		xhr.send(null);
+	});
+}
 
-	try {
-		var home = (typeof ENV !== 'undefined' && ENV.HOME) || '/home/web_user';
-		var writeDir = home + '/.yq2/' + GAMEDIR;
-		mkdirTreeFor(writeDir + '/autoexec.cfg');
-		FS.writeFile(writeDir + '/autoexec.cfg', text);
-	} catch (e) { console.log('[kaios] ' + e); }
+function writeAutoexec() {
+	return fetchText('autoexec.cfg').then(function (text) {
+		if (!text) {
+			return;
+		}
+		// Write to the gamedir (read search path) and to the engine's
+		// writable config dir (~/.yq2/baseq2 under Emscripten's
+		// synthesized HOME) so it's found regardless of which one
+		// FS_LoadFile checks.
+		try {
+			mkdirTreeFor('/' + GAMEDIR + '/autoexec.cfg');
+			FS.writeFile('/' + GAMEDIR + '/autoexec.cfg', text);
+		} catch (e) { console.log('[kaios] ' + e); }
+
+		try {
+			var home = (typeof ENV !== 'undefined' && ENV.HOME) || '/home/web_user';
+			var writeDir = home + '/.yq2/' + GAMEDIR;
+			mkdirTreeFor(writeDir + '/autoexec.cfg');
+			FS.writeFile(writeDir + '/autoexec.cfg', text);
+		} catch (e) { console.log('[kaios] ' + e); }
+	}, function (err) {
+		// Not fatal -- default.cfg (inside pak0.pak) still gives a
+		// playable, if unconfigured, control scheme. Missing KaiOS
+		// keypad binds is a worse experience than none of this code
+		// running at all, so don't block boot on it.
+		console.log('[kaios] failed to fetch autoexec.cfg at runtime: ' + describeError(err));
+	});
 }
 
 var bootedOnce = false;
@@ -742,21 +799,27 @@ function bootEngine() {
 	}
 
 	setStatus('Starting...', 1);
-	writeAutoexec();
 
-	// #canvas is display:block from first paint now (see index.html) --
-	// only the #status overlay covering it needs to go away here.
-	statusEl.style.display = 'none';
+	// writeAutoexec() now fetches its text at runtime (see its own
+	// comment) instead of reading a build-time-baked global, so it has
+	// to actually finish -- autoexec.cfg needs to already be on the FS
+	// before main() gets anywhere near "exec autoexec.cfg" -- before
+	// arming/calling Module.callMain() below.
+	writeAutoexec().then(function () {
+		// #canvas is display:block from first paint now (see index.html)
+		// -- only the #status overlay covering it needs to go away here.
+		statusEl.style.display = 'none';
 
-	engineStarted = true;
-	// Only past this point is Module.callMain() allowed to actually do
-	// anything -- see the guard installed at the top of this file.
-	callMainArmed = true;
+		engineStarted = true;
+		// Only past this point is Module.callMain() allowed to actually
+		// do anything -- see the guard installed at the top of this file.
+		callMainArmed = true;
 
-	// Wait for Module.asm (and the rest of the runtime) to actually be
-	// ready -- see runtimeReadyPromise's comment above for why this is
-	// necessary now and wasn't before.
-	runtimeReadyPromise.then(function () {
+		// Wait for Module.asm (and the rest of the runtime) to actually be
+		// ready -- see runtimeReadyPromise's comment above for why this is
+		// necessary now and wasn't before.
+		return runtimeReadyPromise;
+	}).then(function () {
 		// NOTE: this emsdk version's callMain() ignores its args entirely
 		// (hardcodes argc=0) -- and "vid_width"/"vid_height" were never
 		// real cvars here anyway (r_customwidth/r_customheight are, see

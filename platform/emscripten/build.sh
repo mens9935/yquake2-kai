@@ -147,16 +147,12 @@ emcc "${COMMON_FLAGS[@]}" "${EMCC_LINK_FLAGS[@]}" \
 
 KAIOS_DIR="$ROOT/platform/kaios"
 
-echo "==> Generating $KAIOS_DIR/autoexec.cfg.js from autoexec.cfg"
-python3 - "$KAIOS_DIR/autoexec.cfg" "$KAIOS_DIR/autoexec.cfg.js" <<'PYEOF'
-import json, sys
-src, dst = sys.argv[1], sys.argv[2]
-with open(src) as f:
-	text = f.read()
-with open(dst, 'w') as f:
-	f.write('// Generated from autoexec.cfg by build.sh -- do not edit directly.\n')
-	f.write('window.KAIOS_AUTOEXEC_CFG = ' + json.dumps(text) + ';\n')
-PYEOF
+# autoexec.cfg is no longer baked into a generated .js at build time --
+# platform/kaios/app.js now fetches the plain text file at runtime, once
+# per app launch (see writeAutoexec() there), so it can be edited and
+# redeployed on its own without a full engine rebuild. Nothing to
+# generate here anymore; autoexec.cfg just needs to sit next to
+# index.html, which it already does.
 
 echo "==> Copying engine build into $KAIOS_DIR"
 cp "$OUT/quake2-kaios.js" "$OUT/quake2-kaios.js.mem" "$KAIOS_DIR/"

@@ -62,6 +62,9 @@ static void M_Menu_StartServer_f(void);
 static void M_Menu_DMOptions_f(void);
 void M_Menu_Video_f(void);
 static void M_Menu_Options_f(void);
+#ifdef __EMSCRIPTEN__
+static void M_Menu_KaiosTuning_f(void);
+#endif
 static void M_Menu_Keys_f(void);
 static void M_Menu_Joy_f(void);
 static void M_Menu_ControllerButtons_f(void);
@@ -2494,6 +2497,9 @@ static menuslider_s s_options_oggvolume_slider;
 static menulist_s s_options_oggenable_box;
 static menulist_s s_options_quality_list;
 static menulist_s s_options_console_action;
+#ifdef __EMSCRIPTEN__
+static menuaction_s s_options_kaios_action;
+#endif
 
 static void
 CrosshairFunc(void *unused)
@@ -2695,6 +2701,225 @@ UpdateSoundBackendFunc(void *unused)
 	CL_Snd_Restart_f();
 }
 
+#ifdef __EMSCRIPTEN__
+/*
+ * A submenu (not folded into the vanilla Options screen above) for the
+ * KaiOS-specific tuning cvars added while chasing OOM crashes, render
+ * spikes, and audio stutter on real hardware this port has been tested
+ * against (see the comments on r_distcull_dist in sw_main.c,
+ * s_kaios_buffer/s_khz in sdl.c, cl_lights/cl_particles in cl_view.c/
+ * cl_main.c, kaios_prewarm_cache in cl_view.c). All of it used to be
+ * only reachable by hand-editing autoexec.cfg before every launch --
+ * this exposes the same cvars as live, on-device sliders/toggles, with
+ * no console needed. Every cvar here is CVAR_ARCHIVE, so a change made
+ * here persists the same way as any other options-menu setting
+ * (config.cfg, synced to IndexedDB by platform/kaios/app.js).
+ */
+static menuframework_s s_kaios_menu;
+static menuslider_s s_kaios_distcull_slider;
+static menuslider_s s_kaios_buffer_slider;
+static menuslider_s s_kaios_crosshair_slider;
+static menulist_s s_kaios_khz_box;
+static menulist_s s_kaios_lights_box;
+static menulist_s s_kaios_particles_box;
+static menulist_s s_kaios_prewarm_box;
+
+static void
+KaiosBufferSliderFunc(void *unused)
+{
+	/* SDL_BackendInit (sdl.c) snaps whatever's in the cvar to the
+	 * nearest valid ScriptProcessorNode size and writes that back, but
+	 * only takes effect on the next audio init -- same restart dance
+	 * UpdateSoundBackendFunc above already does for the OpenAL/SDL
+	 * switch. */
+	m_popup_string = "Restarting the sound system. This\n"
+					 "could take up to a minute, so\n"
+					 "please be patient.";
+	m_popup_endtime = cls.realtime + 2000;
+	M_Popup();
+
+	R_EndFrame();
+
+	CL_Snd_Restart_f();
+}
+
+static void
+KaiosKhzFunc(void *unused)
+{
+	static const int khz_values[] = { 11, 22, 44, 48 };
+	int idx = s_kaios_khz_box.curvalue;
+
+	if (idx < 0 || idx >= (int)ARRLEN(khz_values))
+	{
+		idx = 2; /* 44khz */
+	}
+
+	Cvar_SetValue("s_khz", (float)khz_values[idx]);
+
+	m_popup_string = "Restarting the sound system. This\n"
+					 "could take up to a minute, so\n"
+					 "please be patient.";
+	m_popup_endtime = cls.realtime + 2000;
+	M_Popup();
+
+	R_EndFrame();
+
+	CL_Snd_Restart_f();
+}
+
+static void
+KaiosLightsFunc(void *unused)
+{
+	Cvar_SetValue("cl_lights", (float)s_kaios_lights_box.curvalue);
+}
+
+static void
+KaiosParticlesFunc(void *unused)
+{
+	Cvar_SetValue("cl_particles", (float)s_kaios_particles_box.curvalue);
+}
+
+static void
+KaiosPrewarmFunc(void *unused)
+{
+	Cvar_SetValue("kaios_prewarm_cache", (float)s_kaios_prewarm_box.curvalue);
+}
+
+static void
+KaiosTuning_MenuInit(void)
+{
+	static const char *khz_items[] =
+	{
+		"11025 Hz", "22050 Hz", "44100 Hz", "48000 Hz", 0
+	};
+
+	static const char *onoff_items[] =
+	{
+		"off", "on", 0
+	};
+
+	cvar_t *s_khz = Cvar_Get("s_khz", "44", CVAR_ARCHIVE);
+	cvar_t *cl_lights = Cvar_Get("cl_lights", "1", 0);
+	cvar_t *cl_particles = Cvar_Get("cl_particles", "1", 0);
+	cvar_t *kaios_prewarm_cache = Cvar_Get("kaios_prewarm_cache", "1", CVAR_ARCHIVE);
+	float scale = SCR_GetMenuScale();
+	unsigned short int y = 0;
+	int khz_idx;
+
+	s_kaios_menu.x = viddef.width / 2;
+	s_kaios_menu.y = viddef.height / (2 * scale) - 58;
+	s_kaios_menu.nitems = 0;
+
+	s_kaios_distcull_slider.generic.type = MTYPE_SLIDER;
+	s_kaios_distcull_slider.generic.x = 0;
+	s_kaios_distcull_slider.generic.y = y;
+	s_kaios_distcull_slider.generic.name = "draw distance";
+	s_kaios_distcull_slider.cvar = "r_distcull_dist";
+	s_kaios_distcull_slider.minvalue = 0.0f;
+	s_kaios_distcull_slider.maxvalue = 3000.0f;
+	s_kaios_distcull_slider.slidestep = 200.0f;
+
+	s_kaios_crosshair_slider.generic.type = MTYPE_SLIDER;
+	s_kaios_crosshair_slider.generic.x = 0;
+	s_kaios_crosshair_slider.generic.y = (y += 10);
+	s_kaios_crosshair_slider.generic.name = "crosshair size";
+	s_kaios_crosshair_slider.cvar = "crosshair_scale";
+	s_kaios_crosshair_slider.minvalue = 0.5f;
+	s_kaios_crosshair_slider.maxvalue = 3.0f;
+	s_kaios_crosshair_slider.slidestep = 0.1f;
+
+	s_kaios_buffer_slider.generic.type = MTYPE_SLIDER;
+	s_kaios_buffer_slider.generic.x = 0;
+	s_kaios_buffer_slider.generic.y = (y += 10);
+	s_kaios_buffer_slider.generic.name = "audio buffer";
+	s_kaios_buffer_slider.generic.callback = KaiosBufferSliderFunc;
+	s_kaios_buffer_slider.cvar = "s_kaios_buffer";
+	s_kaios_buffer_slider.minvalue = 256.0f;
+	s_kaios_buffer_slider.maxvalue = 16384.0f;
+	s_kaios_buffer_slider.slidestep = 256.0f;
+
+	khz_idx = (s_khz->value <= 11) ? 0 :
+		(s_khz->value <= 22) ? 1 :
+		(s_khz->value <= 44) ? 2 : 3;
+
+	s_kaios_khz_box.generic.type = MTYPE_SPINCONTROL;
+	s_kaios_khz_box.generic.x = 0;
+	s_kaios_khz_box.generic.y = (y += 10);
+	s_kaios_khz_box.generic.name = "sample rate";
+	s_kaios_khz_box.generic.callback = KaiosKhzFunc;
+	s_kaios_khz_box.itemnames = khz_items;
+	s_kaios_khz_box.curvalue = khz_idx;
+
+	s_kaios_lights_box.generic.type = MTYPE_SPINCONTROL;
+	s_kaios_lights_box.generic.x = 0;
+	s_kaios_lights_box.generic.y = (y += 20);
+	s_kaios_lights_box.generic.name = "dynamic lights";
+	s_kaios_lights_box.generic.callback = KaiosLightsFunc;
+	s_kaios_lights_box.itemnames = onoff_items;
+	s_kaios_lights_box.curvalue = (cl_lights->value != 0);
+
+	s_kaios_particles_box.generic.type = MTYPE_SPINCONTROL;
+	s_kaios_particles_box.generic.x = 0;
+	s_kaios_particles_box.generic.y = (y += 10);
+	s_kaios_particles_box.generic.name = "particles";
+	s_kaios_particles_box.generic.callback = KaiosParticlesFunc;
+	s_kaios_particles_box.itemnames = onoff_items;
+	s_kaios_particles_box.curvalue = (cl_particles->value != 0);
+
+	s_kaios_prewarm_box.generic.type = MTYPE_SPINCONTROL;
+	s_kaios_prewarm_box.generic.x = 0;
+	s_kaios_prewarm_box.generic.y = (y += 10);
+	s_kaios_prewarm_box.generic.name = "preload on map load";
+	s_kaios_prewarm_box.generic.callback = KaiosPrewarmFunc;
+	s_kaios_prewarm_box.itemnames = onoff_items;
+	s_kaios_prewarm_box.curvalue = (kaios_prewarm_cache->value != 0);
+
+	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_distcull_slider);
+	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_crosshair_slider);
+	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_buffer_slider);
+	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_khz_box);
+	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_lights_box);
+	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_particles_box);
+	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_prewarm_box);
+}
+
+static void
+KaiosTuning_MenuDraw(void)
+{
+	M_Banner("m_banner_options");
+	Menu_AdjustCursor(&s_kaios_menu, 1);
+	Menu_Draw(&s_kaios_menu);
+	M_Popup();
+}
+
+static const char *
+KaiosTuning_MenuKey(int key)
+{
+	if (m_popup_string)
+	{
+		m_popup_string = NULL;
+		return NULL;
+	}
+	return Default_MenuKey(&s_kaios_menu, key);
+}
+
+static void
+M_Menu_KaiosTuning_f(void)
+{
+	KaiosTuning_MenuInit();
+	s_kaios_menu.draw = KaiosTuning_MenuDraw;
+	s_kaios_menu.key  = KaiosTuning_MenuKey;
+
+	M_PushMenu(&s_kaios_menu);
+}
+
+static void
+KaiosTuningFunc(void *unused)
+{
+	M_Menu_KaiosTuning_f();
+}
+#endif /* __EMSCRIPTEN__ */
+
 static void
 Options_MenuInit(void)
 {
@@ -2875,6 +3100,14 @@ Options_MenuInit(void)
 	s_options_console_action.generic.name = "go to console";
 	s_options_console_action.generic.callback = ConsoleFunc;
 
+#ifdef __EMSCRIPTEN__
+	s_options_kaios_action.generic.type = MTYPE_ACTION;
+	s_options_kaios_action.generic.x = 0;
+	s_options_kaios_action.generic.y = (y += 10);
+	s_options_kaios_action.generic.name = "kaios tuning";
+	s_options_kaios_action.generic.callback = KaiosTuningFunc;
+#endif
+
 	ControlsSetMenuItemValues();
 
 	Menu_AddItem(&s_options_menu, (void *)&s_options_sfxvolume_slider);
@@ -2898,6 +3131,9 @@ Options_MenuInit(void)
 	Menu_AddItem(&s_options_menu, (void *)&s_options_customize_options_action);
 	Menu_AddItem(&s_options_menu, (void *)&s_options_defaults_action);
 	Menu_AddItem(&s_options_menu, (void *)&s_options_console_action);
+#ifdef __EMSCRIPTEN__
+	Menu_AddItem(&s_options_menu, (void *)&s_options_kaios_action);
+#endif
 }
 
 static void
@@ -6983,6 +7219,9 @@ M_Init(void)
 	Cmd_AddCommand("menu_multiplayer_keys", M_Menu_Multiplayer_Keys_f);
 	Cmd_AddCommand("menu_video", M_Menu_Video_f);
 	Cmd_AddCommand("menu_options", M_Menu_Options_f);
+#ifdef __EMSCRIPTEN__
+	Cmd_AddCommand("menu_kaios", M_Menu_KaiosTuning_f);
+#endif
 	Cmd_AddCommand("menu_keys", M_Menu_Keys_f);
 	Cmd_AddCommand("menu_joy", M_Menu_Joy_f);
 	Cmd_AddCommand("menu_gyro", M_Menu_Gyro_f);

@@ -1534,6 +1534,9 @@ SDL_BackendInit(void)
 	int sndfreq = (Cvar_Get("s_khz", "44", CVAR_ARCHIVE))->value;
 	int sndchans = (Cvar_Get("sndchannels", "2", CVAR_ARCHIVE))->value;
 	cvar_t *s_sdldriver = (Cvar_Get("s_sdldriver", "auto", CVAR_ARCHIVE));
+#ifdef __EMSCRIPTEN__
+	cvar_t *s_kaios_buffer = (Cvar_Get("s_kaios_buffer", "2048", CVAR_ARCHIVE));
+#endif
 
 	if (strcmp(s_sdldriver->string, "auto") != 0)
 	{
@@ -1645,8 +1648,38 @@ SDL_BackendInit(void)
 	 * callback at all, there's nothing running to mute. A bigger buffer
 	 * only gives the browser more already-mixed audio to keep playing
 	 * from before it needs a fresh callback; past a certain size the
-	 * cost of producing that buffer outweighs the slack it buys. */
-	spec.samples = 2048;
+	 * cost of producing that buffer outweighs the slack it buys.
+	 *
+	 * s_kaios_buffer (CVAR_ARCHIVE) exposes this as a live-tunable
+	 * setting (see the "KaiOS Tuning" options submenu, menu.c) instead
+	 * of a value only a rebuild can change. ScriptProcessorNode
+	 * requires an exact power of two in [256, 16384] -- snap whatever
+	 * the cvar holds to the nearest one and write the snapped value
+	 * back, so the menu slider always reflects the buffer size that's
+	 * actually in effect rather than an arbitrary in-between number. */
+	{
+		int requested = (int)s_kaios_buffer->value;
+		int snapped = 256;
+
+		while (snapped < 16384 && snapped * 2 <= requested)
+		{
+			snapped *= 2;
+		}
+
+		/* round up to the next power of two if closer than the one
+		 * just walked to above */
+		if (snapped < 16384 && (requested - snapped) > (snapped * 2 - requested))
+		{
+			snapped *= 2;
+		}
+
+		spec.samples = snapped;
+
+		if (snapped != requested)
+		{
+			Cvar_SetValue("s_kaios_buffer", (float)snapped);
+		}
+	}
 #endif
 
 	spec.channels = sndchans;

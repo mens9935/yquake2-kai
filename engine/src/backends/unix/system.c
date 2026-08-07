@@ -48,6 +48,10 @@
 #include "../../common/header/common.h"
 #include "../../common/header/glob.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 // Pointer to game library
 static void *game_library;
 
@@ -102,6 +106,30 @@ Sys_Error(const char *error, ...)
 void
 Sys_Quit(void)
 {
+#ifdef __EMSCRIPTEN__
+	/* Without this, "quit" (menu Quit, or the console command) just
+	 * falls all the way through to the exit(0) below -- which, with
+	 * this build's -s EXIT_RUNTIME=0, unwinds the C call stack far
+	 * enough to stop the game loop but never tells the browser/KaiOS
+	 * shell anything happened. The tab stays open showing whatever the
+	 * canvas last had on it (reported as the screen going dark rather
+	 * than the app actually closing) instead of returning to the
+	 * KaiOS home screen. window.close() is the documented way for a
+	 * privileged packaged B2G/KaiOS app to close itself -- unlike a
+	 * plain browser tab (where it's normally refused unless the window
+	 * was script-opened), the KaiOS window manager honors it from the
+	 * app's own top-level document. Fired first, before any of the
+	 * shutdown work below, so it's requested even if CL_Shutdown() or
+	 * Qcommon_Shutdown() hit trouble on the way out. */
+	EM_ASM({
+		try {
+			window.close();
+		} catch (e) {
+			console.log('[kaios] window.close() failed: ' + e);
+		}
+	});
+#endif
+
 #ifndef DEDICATED_ONLY
 	CL_Shutdown();
 #endif

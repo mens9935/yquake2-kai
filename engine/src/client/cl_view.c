@@ -748,7 +748,19 @@ V_Init(void)
 	Cmd_AddCommand("viewpos", V_Viewpos_f);
 
 	crosshair = Cvar_Get("crosshair", "0", CVAR_ARCHIVE);
+#ifdef __EMSCRIPTEN__
+	/* -1 (auto) lands at the same shrink-to-fit scale as the rest of
+	 * the UI on this narrow screen -- a source crosshair pic scaled
+	 * down that far reads as a blurry smear rather than an aimable
+	 * mark. Ship a concrete, bigger default instead; SCR_ClampScale's
+	 * is_crosshair path (cl_screen.c) allows this cvar to go well past
+	 * the ~0.75x ceiling everything else on this screen is held to,
+	 * since the crosshair is a single centered icon with no
+	 * neighboring layout to collide with. */
+	crosshair_scale = Cvar_Get("crosshair_scale", "2", CVAR_ARCHIVE);
+#else
 	crosshair_scale = Cvar_Get("crosshair_scale", "-1", CVAR_ARCHIVE);
+#endif
 	crosshair_color_r = Cvar_Get("crosshair_color_r", "1", CVAR_ARCHIVE);
 	crosshair_color_g = Cvar_Get("crosshair_color_g", "1", CVAR_ARCHIVE);
 	crosshair_color_b = Cvar_Get("crosshair_color_b", "1", CVAR_ARCHIVE);

@@ -1963,7 +1963,7 @@ SCR_UpdateScreen(void)
 }
 
 static float
-SCR_ClampScale(float scale)
+SCR_ClampScale(float scale, qboolean is_crosshair)
 {
 	float f;
 
@@ -1971,19 +1971,41 @@ SCR_ClampScale(float scale)
 	/* Every other yquake2 platform's screen is at least the 320x240
 	 * this scale system references, where flooring at 1x below is
 	 * correct and intentional (never render UI smaller than native
-	 * pixels). This KaiOS port's render buffer (176x220, see
-	 * autoexec.cfg) is narrower AND shorter than that reference, so
-	 * flooring at 1x the same way means menus/HUD/console text is
-	 * stamped at full 320-reference size onto a physically smaller
-	 * buffer and runs off the edges. Shrink below 1x here instead,
-	 * same "compress to fit, only when narrower/shorter than
-	 * reference" carve-out SCR_LayoutXV/YV already use for the HUD
-	 * status bar's element positions -- this is the matching fix for
-	 * element/text *size*. RE_Draw_CharScaled (sw_draw.c) is what
-	 * actually has to draw at a fractional scale for this to do
-	 * anything. */
+	 * pixels). This KaiOS port's render buffer (240x320, see
+	 * autoexec.cfg) is narrower than that reference, so flooring at 1x
+	 * the same way means menus/HUD/console text is stamped at full
+	 * 320-reference size onto a physically narrower buffer and runs
+	 * off the edges. Shrink below 1x here instead, same "compress to
+	 * fit, only when narrower/shorter than reference" carve-out
+	 * SCR_LayoutXV/YV already use for the HUD status bar's element
+	 * positions -- this is the matching fix for element/text *size*.
+	 * RE_Draw_CharScaled (sw_draw.c) is what actually has to draw at a
+	 * fractional scale for this to do anything. */
 	if (viddef.width < 320 || viddef.height < 240)
 	{
+		/* The crosshair is a single small icon centered on its own,
+		 * with no neighboring status-bar elements it could collide
+		 * with or run off the edge of -- unlike HUD/console/menu text,
+		 * it doesn't need the shrink-to-fit ceiling below at all.
+		 * Reported hard to see/aim with at the same ~0.75x everything
+		 * else on this screen is capped to (a 16-24px source pic
+		 * scaled down to 12-18px is genuinely blurry on a 240-wide
+		 * panel) -- give it a much higher ceiling instead, independent
+		 * of whatever r_hudscale/r_menuscale/r_consolescale are set
+		 * to. */
+		if (is_crosshair)
+		{
+			if (scale > 3.0f)
+			{
+				scale = 3.0f;
+			}
+			if (scale < 0.1f)
+			{
+				scale = 0.1f;
+			}
+			return scale;
+		}
+
 		f = viddef.width / 320.0f;
 		if (scale > f)
 		{
@@ -2043,6 +2065,13 @@ SCR_GetDefaultScale(void)
 		float g = viddef.height / 240.0f;
 		float scale = (f < g) ? f : g;
 
+		/* Requested bump: the auto-computed size (0.75x at this port's
+		 * native 240x320) read as noticeably too small on a real
+		 * device. 8% puts it within the requested 5-10% range without
+		 * being large enough to start clipping the HUD/menu layout
+		 * that SCR_LayoutXV/YV positions against this same reference. */
+		scale *= 1.08f;
+
 		if (scale < 0.1f)
 		{
 			scale = 0.1f;
@@ -2094,7 +2123,7 @@ SCR_DrawCrosshair(void)
 	}
 	else
 	{
-		scale = SCR_ClampScale(crosshair_scale->value);
+		scale = SCR_ClampScale(crosshair_scale->value, true);
 	}
 
 	float color[3];
@@ -2126,7 +2155,7 @@ SCR_GetHUDScale(void)
 	}
 	else
 	{
-		scale = SCR_ClampScale(r_hudscale->value);
+		scale = SCR_ClampScale(r_hudscale->value, false);
 	}
 
 	return scale;
@@ -2147,7 +2176,7 @@ SCR_GetConsoleScale(void)
 	}
 	else
 	{
-		scale = SCR_ClampScale(r_consolescale->value);
+		scale = SCR_ClampScale(r_consolescale->value, false);
 	}
 
 	return scale;
@@ -2168,7 +2197,7 @@ SCR_GetMenuScale(void)
 	}
 	else
 	{
-		scale = SCR_ClampScale(r_menuscale->value);
+		scale = SCR_ClampScale(r_menuscale->value, false);
 	}
 
 	return scale;

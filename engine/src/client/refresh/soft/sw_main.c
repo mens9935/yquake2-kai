@@ -464,7 +464,26 @@ R_RegisterVariables (void)
 	 * software renderer's large outdoor levels where the polygon count
 	 * from far-away, barely-visible geometry is a real per-frame cost
 	 * on a CPU this slow. */
+#ifdef __EMSCRIPTEN__
+	/* 1200 shipped as a hardcoded "set r_distcull_dist 1200" in
+	 * platform/kaios/autoexec.cfg for a while, tuned against demo1.dm2
+	 * on a real device (2048 did nothing on these indoor maps, 400 was
+	 * confirmed working but too aggressive -- see the KaiOS Tuning menu
+	 * comment, menu.c, for the fuller history). Moved here instead of
+	 * staying a forced `set`: this cvar is now also exposed as a
+	 * slider in the options menu (KaiOS Tuning), and autoexec.cfg execs
+	 * *after* config.cfg on every boot (Qcommon_ExecConfigs, frame.c)
+	 * -- a forced `set` there would silently stomp back over any value
+	 * the player picked from that slider on their very next launch.
+	 * Belongs in the cvar's own default instead, exactly like every
+	 * other CVAR_ARCHIVE setting: applies out of the box, then
+	 * config.cfg (written by CL_WriteConfiguration, synced to
+	 * IndexedDB by platform/kaios/app.js) remembers whatever the
+	 * player changed it to from then on. */
+	r_distcull_dist = ri.Cvar_Get("r_distcull_dist", "1200", CVAR_ARCHIVE);
+#else
 	r_distcull_dist = ri.Cvar_Get("r_distcull_dist", "0", CVAR_ARCHIVE);
+#endif
 
 	vid_fullscreen = ri.Cvar_Get( "vid_fullscreen", "0", CVAR_ARCHIVE );
 	vid_gamma = ri.Cvar_Get( "vid_gamma", "1.0", CVAR_ARCHIVE );

@@ -1,8 +1,6 @@
 # quake2-kaios.js / .js.mem are intentionally committed (see build.sh) so
 # the app is sideloadable straight from the repo without a toolchain.
 #
-# autoexec.cfg.js stays generated/ignored: it's a trivial JSON-escaped
-# copy of autoexec.cfg produced on every build, committing it would just
-# be a second source of truth that can drift from the .cfg it's derived
-# from.
-/autoexec.cfg.js
+# autoexec.cfg.js used to be generated here from autoexec.cfg at build
+# time; app.js now fetches autoexec.cfg itself at runtime instead (see
+# writeAutoexec() there), so nothing generates that file anymore.
