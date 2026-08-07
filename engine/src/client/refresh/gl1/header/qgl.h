@@ -80,6 +80,41 @@ extern void emscripten_glTexEnvi(GLenum target, GLenum pname, GLint param);
 extern void emscripten_glPointSize(GLfloat size);
 #undef glPointSize
 #define glPointSize emscripten_glPointSize
+
+/* Same gap, same fix, for glFrustumf/glOrthof: local.h's
+ * glFrustum(...)/glOrtho(...) macros (under YQ2_GL1_GLES) redirect to
+ * these two, since real GLES1 has no double-precision glFrustum/
+ * glOrtho at all. But RETURN_GL_EMU_FN (gl.c) only lists the bare
+ * glFrustum/glOrtho names, not the "f"-suffixed ones this code
+ * actually calls, so glad_glFrustumf/glad_glOrthof also silently load
+ * as NULL -- confirmed on a real device: the cube test's before/after
+ * trace showed "before glFrustum(...)" print and then nothing at all,
+ * the exact same silent invalid-function-table-call signature as
+ * glTexEnvi/glPointSize. Unlike those two, there is no emscripten_
+ * C-callable wrapper for these in gl.c at all (glFrustumf/glOrthof
+ * are pure JS: library_glemu.js implements them directly as GLImmediate
+ * matrix-stack operations, glFrustumf is simply a JS-level alias of
+ * glFrustum) -- reach the real linked JS function directly via GCC's
+ * asm-label declarator instead, which names the actual object/import
+ * symbol rather than the C identifier glad.h has already redefined to
+ * its own (NULL) function pointer. */
+extern void kaios_real_glFrustum(GLdouble left, GLdouble right, GLdouble bottom,
+	GLdouble top, GLdouble zNear, GLdouble zFar) __asm__("glFrustum");
+extern void kaios_real_glOrtho(GLdouble left, GLdouble right, GLdouble bottom,
+	GLdouble top, GLdouble zNear, GLdouble zFar) __asm__("glOrtho");
+#undef glFrustumf
+#define glFrustumf kaios_real_glFrustum
+#undef glOrthof
+#define glOrthof kaios_real_glOrtho
+
+/* glDepthRangef has the same gap but, like glTexEnvi/glPointSize
+ * (and unlike glFrustumf/glOrthof above), gl.c does declare a proper
+ * C-callable emscripten_glDepthRangef() wrapper -- use that directly,
+ * no asm-label trick needed. local.h's glDepthRange(...) macro
+ * redirects here the same way it redirects glFrustum/glOrtho. */
+extern void emscripten_glDepthRangef(GLclampf n, GLclampf f);
+#undef glDepthRangef
+#define glDepthRangef emscripten_glDepthRangef
 #endif
 
 #ifndef APIENTRY
