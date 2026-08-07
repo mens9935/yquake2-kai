@@ -1816,6 +1816,27 @@ SCR_UpdateScreen(void)
 	float separation[2] = {0, 0};
 	float scale = SCR_GetMenuScale();
 
+#ifdef __EMSCRIPTEN__
+	/* Unconditional (not time/frame gated like KAIOS_SCR_TRACE below)
+	 * entry counter -- every prior trace attempt in this investigation
+	 * showed real work happening (sound loads) with zero inner
+	 * KAIOS_SCR_TRACE output, meaning either this function is being
+	 * entered more than once per traced CL_Frame call (reentrancy --
+	 * cl_keyboard.c and cl_view.c both have their own direct
+	 * SCR_UpdateScreen() call sites, separate from CL_Frame's), or it
+	 * is hitting the disable_screen/scr_initialized early-return every
+	 * single time despite real work happening elsewhere. This print
+	 * fires on literally every entry, gated only to the gl1 diagnostic
+	 * build, so the next log settles which one it is. */
+	if (strcmp(vid_renderer->string, "gl1") == 0)
+	{
+		static int kaios_scr_entry_count = 0;
+		kaios_scr_entry_count++;
+		Com_Printf("KAIOS_SCR_ENTRY: #%d disable_screen=%d scr_initialized=%d con.initialized=%d\n",
+			kaios_scr_entry_count, cls.disable_screen, scr_initialized, con.initialized);
+	}
+#endif
+
 	/* if the screen is disabled (loading plaque is
 	   up, or vid mode changing) do nothing at all */
 	if (cls.disable_screen)
