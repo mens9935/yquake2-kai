@@ -166,38 +166,53 @@ R_Strings(void)
 	Com_Printf("GL_EXTENSIONS: %s\n", gl_config.extensions_string);
 }
 
+#ifdef __EMSCRIPTEN__
+/* Chasing a real-device crash ("TypeError: ... is not a function", an
+ * invalid function-pointer-table call) confirmed to land somewhere in
+ * this function, right after glShadeModel's own "TODO: glShadeModel"
+ * stub warning prints and returns fine -- so it's one of the calls
+ * below that. Trace each individually rather than guess further;
+ * GLAD-loaded pointers Emscripten's LEGACY_GL_EMULATION never actually
+ * backed with a real implementation on this browser are the leading
+ * suspect (see the RI_Init()-level bracketing this same session, which
+ * narrowed it down to inside this function specifically). */
+#define KAIOS_GL1_TRACE(x) do { Com_Printf("KAIOS_GL1_TRACE: before " #x "\n"); x; Com_Printf("KAIOS_GL1_TRACE: after " #x "\n"); } while (0)
+#else
+#define KAIOS_GL1_TRACE(x) x
+#endif
+
 void
 R_SetDefaultState(void)
 {
-	glDisable(GL_MULTISAMPLE);
-	glCullFace(GL_FRONT);
-	glEnable(GL_TEXTURE_2D);
+	KAIOS_GL1_TRACE(glDisable(GL_MULTISAMPLE));
+	KAIOS_GL1_TRACE(glCullFace(GL_FRONT));
+	KAIOS_GL1_TRACE(glEnable(GL_TEXTURE_2D));
 
-	glEnable(GL_ALPHA_TEST);
-	glAlphaFunc(GL_GREATER, 0.666);
+	KAIOS_GL1_TRACE(glEnable(GL_ALPHA_TEST));
+	KAIOS_GL1_TRACE(glAlphaFunc(GL_GREATER, 0.666));
 
-	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_CULL_FACE);
-	glDisable(GL_BLEND);
+	KAIOS_GL1_TRACE(glDisable(GL_DEPTH_TEST));
+	KAIOS_GL1_TRACE(glDisable(GL_CULL_FACE));
+	KAIOS_GL1_TRACE(glDisable(GL_BLEND));
 
-	glColor4f(1, 1, 1, 1);
+	KAIOS_GL1_TRACE(glColor4f(1, 1, 1, 1));
 
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	glShadeModel(GL_FLAT);
+	KAIOS_GL1_TRACE(glPolygonMode(GL_FRONT_AND_BACK, GL_FILL));
+	KAIOS_GL1_TRACE(glShadeModel(GL_FLAT));
 
-	R_TextureMode(gl_texturemode->string);
-	R_TextureAlphaMode(gl1_texturealphamode->string);
-	R_TextureSolidMode(gl1_texturesolidmode->string);
+	KAIOS_GL1_TRACE(R_TextureMode(gl_texturemode->string));
+	KAIOS_GL1_TRACE(R_TextureAlphaMode(gl1_texturealphamode->string));
+	KAIOS_GL1_TRACE(R_TextureSolidMode(gl1_texturesolidmode->string));
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_min);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
+	KAIOS_GL1_TRACE(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_min));
+	KAIOS_GL1_TRACE(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max));
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	KAIOS_GL1_TRACE(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
+	KAIOS_GL1_TRACE(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
 
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	KAIOS_GL1_TRACE(glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA));
 
-	R_TexEnv(GL_REPLACE);
+	KAIOS_GL1_TRACE(R_TexEnv(GL_REPLACE));
 
 	if (gl_config.pointparameters)
 	{
@@ -237,3 +252,5 @@ R_SetDefaultState(void)
 		glHint(GL_MULTISAMPLE_FILTER_HINT_NV, GL_NICEST);
 	}
 }
+
+#undef KAIOS_GL1_TRACE
