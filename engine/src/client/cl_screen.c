@@ -1832,8 +1832,13 @@ SCR_UpdateScreen(void)
 	{
 		static int kaios_scr_entry_count = 0;
 		kaios_scr_entry_count++;
-		Com_Printf("KAIOS_SCR_ENTRY: #%d disable_screen=%d scr_initialized=%d con.initialized=%d\n",
-			kaios_scr_entry_count, cls.disable_screen, scr_initialized, con.initialized);
+		/* cls.disable_screen is a float (client.h), not an int -- an
+		 * earlier version of this print used %d for it, which is a
+		 * variadic type mismatch that also misaligns every argument
+		 * after it, so scr_initialized/con.initialized were reading
+		 * garbage, not their real values. */
+		Com_Printf("KAIOS_SCR_ENTRY: #%d disable_screen=%.0f scr_initialized=%d con.initialized=%d\n",
+			kaios_scr_entry_count, cls.disable_screen, (int)scr_initialized, (int)con.initialized);
 	}
 #endif
 

@@ -123,6 +123,21 @@ int		r_visframecount;
 int		r_polycount;
 int		r_drawnpolycount;
 
+#ifdef __EMSCRIPTEN__
+/* Always-off stub matching gl1_main.c's real kaios_cube_test_active/
+ * RI_KaiosCubeTestFrame() -- frame.c (shared by both renderers)
+ * references these unconditionally, so the shipped soft build needs
+ * them defined too, just inert. See frame.c's extern declaration
+ * comment and gl1_main.c for the real (RENDERER=gl1 diagnostic build
+ * only) implementation. */
+qboolean kaios_cube_test_active = false;
+
+void
+RI_KaiosCubeTestFrame(void)
+{
+}
+#endif
+
 int		*pfrustum_indexes[4];
 int			r_viewcluster, r_oldviewcluster;
 

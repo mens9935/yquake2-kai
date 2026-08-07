@@ -54,6 +54,136 @@ int c_brush_polys, c_alias_polys;
  * gl1's own poly counters are c_brush_polys/c_alias_polys above, this
  * stays 0 and unused otherwise. */
 int r_polycount;
+
+/* Spinning-cube-plus-frame-counter sanity check, drawn directly with
+ * this exact GL1 context right after it's created and fully
+ * initialized (RI_Init() below has already completed by the time
+ * this ever runs -- see Qcommon_EmscriptenTick(), frame.c), before
+ * any real game content (demomap/menu/console) is allowed to load.
+ * The whole gl1/GLES1-on-WebGL1 investigation kept finding real
+ * content silently failing to show up for reasons buried deep in game
+ * code (glTexEnvi/glPointSize missing from Emscripten's own proc-
+ * address allow-list, SCR_UpdateScreen early-returning, etc.) -- this
+ * answers a much simpler, prior question first: can this context
+ * actually present a moving frame to the screen at all, with nothing
+ * else (menu, console, textures, sound) in the way. keydown[]/K_ENTER
+ * reach across into client code the same way r_polycount does above
+ * (single static binary, no dlopen boundary) rather than pulling in
+ * client.h wholesale, which the renderer is deliberately decoupled
+ * from everywhere else in this file. */
+qboolean kaios_cube_test_active = true;
+extern qboolean keydown[];
+#define KAIOS_K_ENTER 13
+#define KAIOS_K_KP_ENTER 158
+
+void
+RI_KaiosCubeTestFrame(void)
+{
+	static float angle = 0.0f;
+	static int frame_counter = 0;
+	int bar_count, i;
+	GLdouble aspect;
+
+	frame_counter++;
+	angle += 2.0f;
+
+	if (angle > 360.0f)
+	{
+		angle -= 360.0f;
+	}
+
+	glViewport(0, 0, vid.width, vid.height);
+	glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glDisable(GL_TEXTURE_2D);
+	glDisable(GL_BLEND);
+	glDisable(GL_ALPHA_TEST);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+
+	aspect = (GLdouble)vid.width / (GLdouble)vid.height;
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glFrustum(-aspect * 0.5, aspect * 0.5, -0.5, 0.5, 1.0, 20.0);
+
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glTranslatef(0.0f, 0.0f, -4.0f);
+	glRotatef(angle, 1.0f, 1.0f, 0.0f);
+
+	/* GLES1 has no glBegin/glEnd/glVertex3f/GL_QUADS at all -- that's
+	 * desktop GL1.x-only, not part of the GLES1 header this renderer
+	 * actually builds against (confirmed by the compiler rejecting
+	 * them outright, not just at runtime). Vertex arrays + glDrawArrays
+	 * is what the rest of this renderer already uses (R_DrawParticles
+	 * above, for one) and what real GLES1 supports -- one glColor4f +
+	 * glDrawArrays(GL_TRIANGLE_FAN, ...) call per cube face instead of
+	 * a single immediate-mode block. */
+	{
+		static const GLfloat faces[6][12] = {
+			{-1,-1, 1,  1,-1, 1,  1, 1, 1, -1, 1, 1}, /* +Z */
+			{-1,-1,-1, -1, 1,-1,  1, 1,-1,  1,-1,-1}, /* -Z */
+			{ 1,-1,-1,  1, 1,-1,  1, 1, 1,  1,-1, 1}, /* +X */
+			{-1,-1,-1, -1,-1, 1, -1, 1, 1, -1, 1,-1}, /* -X */
+			{-1, 1,-1, -1, 1, 1,  1, 1, 1,  1, 1,-1}, /* +Y */
+			{-1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1}, /* -Y */
+		};
+		static const GLfloat colors[6][3] = {
+			{1,0,0}, {0,1,0}, {0,0,1}, {1,1,0}, {1,0,1}, {0,1,1},
+		};
+
+		glEnableClientState(GL_VERTEX_ARRAY);
+
+		for (i = 0; i < 6; i++)
+		{
+			glColor4f(colors[i][0], colors[i][1], colors[i][2], 1.0f);
+			glVertexPointer(3, GL_FLOAT, 0, faces[i]);
+			glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+		}
+
+		glDisableClientState(GL_VERTEX_ARRAY);
+	}
+
+	/* 2D overlay: a bar that fills up and resets every 20 frames, the
+	 * simplest possible "is this actually updating" indicator without
+	 * needing the game's own font/pic system (Draw_InitLocal has not
+	 * run against any real content yet -- this deliberately runs
+	 * before all of that). Same vertex-array approach as the cube
+	 * above, one small GL_TRIANGLE_FAN draw per bar. */
+	glDisable(GL_DEPTH_TEST);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glOrtho(0, vid.width, vid.height, 0, -1, 1);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
+	bar_count = frame_counter % 20;
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	glEnableClientState(GL_VERTEX_ARRAY);
+
+	for (i = 0; i < bar_count; i++)
+	{
+		float x = 4 + i * 10;
+		GLfloat quad[8] = { x, 4, x + 8, 4, x + 8, 12, x, 12 };
+
+		glVertexPointer(2, GL_FLOAT, 0, quad);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+	}
+
+	glDisableClientState(GL_VERTEX_ARRAY);
+
+	if (frame_counter == 1 || (frame_counter % 60) == 0)
+	{
+		Com_Printf("KAIOS_CUBE_TEST: frame %d, press OK to continue loading\n", frame_counter);
+	}
+
+	if (keydown[KAIOS_K_ENTER] || keydown[KAIOS_K_KP_ENTER])
+	{
+		kaios_cube_test_active = false;
+		Com_Printf("KAIOS_CUBE_TEST: OK pressed after %d frames, continuing to load\n", frame_counter);
+	}
+}
 #endif
 
 float v_blend[4]; /* final blending color */

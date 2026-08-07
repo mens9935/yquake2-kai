@@ -29,6 +29,19 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+
+#ifndef DEDICATED_ONLY
+/* Real definition lives in gl1_main.c (RENDERER=gl1 diagnostic build
+ * only), an always-false/no-op stub lives in sw_main.c (the shipped
+ * renderer) -- same direct-extern-reach-across pattern already used
+ * for r_polycount, safe only because this KaiOS build statically
+ * links exactly one renderer into the one binary, no dlopen boundary
+ * to cross. See kaios_startcmd's own comment below and
+ * Qcommon_EmscriptenTick() for how these gate the spinning-cube
+ * sanity check before any real game loading is attempted. */
+extern qboolean kaios_cube_test_active;
+extern void RI_KaiosCubeTestFrame(void);
+#endif
 #endif
 
 cvar_t *developer;
@@ -186,6 +199,25 @@ Qcommon_EmscriptenTick(void *arg)
 	long long newtime = Sys_Microseconds();
 
 	curtime = (int)(newtime / 1000ll);
+
+#ifndef DEDICATED_ONLY
+	/* Spinning-cube sanity check first, using the exact same GL1
+	 * context RI_InitContext() already created -- see the comment by
+	 * kaios_cube_test_active's extern declaration above. Draws
+	 * directly and polls input itself, entirely independent of
+	 * Qcommon_Frame()/the normal client frame loop, so it can run
+	 * before any game/menu/console state exists at all. Once it
+	 * clears (OK pressed), this falls through to normal ticking on
+	 * every later frame -- including the one where kaios_startcmd
+	 * finally gets to fire, from the (!kaios_cube_test_active) branch
+	 * inside Qcommon_Init() above. */
+	if (kaios_cube_test_active)
+	{
+		RI_KaiosCubeTestFrame();
+		oldtime = newtime;
+		return;
+	}
+#endif
 
 	Qcommon_Frame(newtime - oldtime);
 	oldtime = newtime;
@@ -457,7 +489,19 @@ Qcommon_Init(int argc, char **argv)
 		 * log: "Unknown command demomap"). Cvar_Set() has no such
 		 * ordering dependency, so autoexec.cfg sets kaios_startcmd
 		 * instead, and it's queued here, now that SV_Init()/CL_Init()
-		 * above have actually run and registered map/demomap/etc. */
+		 * above have actually run and registered map/demomap/etc.
+		 *
+		 * kaios_cube_test_active (real definition in gl1_main.c,
+		 * always-false stub in sw_main.c -- same reach-across pattern
+		 * as r_polycount) gates this specific to the gl1 diagnostic
+		 * build: skip firing kaios_startcmd here and let
+		 * Qcommon_EmscriptenTick() fire it later, once the spinning-
+		 * cube sanity check (drawn with the exact same GL1 context
+		 * already created above) has proven the renderer can actually
+		 * present a frame and the player presses OK -- so a real demo/
+		 * menu/console load is never attempted against a renderer that
+		 * hasn't been visually confirmed to draw anything yet. */
+		if (!kaios_cube_test_active)
 		{
 			cvar_t *kaios_startcmd = Cvar_Get("kaios_startcmd", "", 0);
 
