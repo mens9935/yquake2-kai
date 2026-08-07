@@ -49,10 +49,11 @@ int c_brush_polys, c_alias_polys;
 /* cl_screen.c's KAIOS_STATS diagnostic (SCR_DrawKaiosStats) references
  * r_polycount directly (extern int r_polycount;) -- that global only
  * really exists in the software renderer (sw_main.c), which is the one
- * KaiOS build this diagnostic was written for. Stubbed here purely so a
- * one-off gl1 test build (RENDERER=gl1, see build.sh) links at all;
- * gl1's own poly counters are c_brush_polys/c_alias_polys above, this
- * stays 0 and unused otherwise. */
+ * KaiOS build this diagnostic was originally written for. Declared here
+ * so a gl1 build (RENDERER=gl1, see build.sh) links at all, and kept
+ * up to date every frame (RE_RenderFrame below, after R_Flash()) from
+ * gl1's own poly counters, c_brush_polys/c_alias_polys above, so
+ * KAIOS_STATS shows real numbers here too instead of always 0. */
 int r_polycount;
 
 /* Spinning-cube-plus-frame-counter sanity check, drawn directly with
@@ -1409,6 +1410,16 @@ R_RenderView(refdef_t *fd)
 	R_DrawAlphaSurfaces();
 
 	R_Flash();
+
+#ifdef __EMSCRIPTEN__
+	/* r_polycount (declared above, stubbed to 0 purely so cl_screen.c's
+	 * KAIOS_STATS diagnostic links against a gl1 build too) reflects
+	 * this frame's real total here, unconditionally -- not gated on
+	 * r_speeds like the console print below, so KAIOS_STATS shows a
+	 * real number every second the same way it already does on the
+	 * software renderer, whether or not r_speeds is ever turned on. */
+	r_polycount = c_brush_polys + c_alias_polys;
+#endif
 
 	if (r_speeds->value)
 	{

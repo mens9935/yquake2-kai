@@ -53,6 +53,32 @@ R_ApplyGLBuffer(void)
 	// Properties of batched draws here
 	GLint vtx_size;
 	qboolean texture, mtex, alpha, color, alias, texenv_set;
+#ifdef __EMSCRIPTEN__
+	/* This is the real path every bit of 2D UI (fonts, pics, HUD) and
+	 * world geometry actually draws through -- glDrawElements()
+	 * (indexed drawing) specifically, never exercised by the cube
+	 * test's own glDrawArrays()-only calls. Real device testing shows
+	 * the cube (untextured AND textured via glDrawArrays) renders
+	 * fine, but real game content still doesn't -- trace the first
+	 * real (non-empty) call only, so this doesn't flood the log on
+	 * every one of the many calls per frame afterward. */
+	static qboolean kaios_buf_traced = false;
+	qboolean kaios_trace = (!kaios_buf_traced && vtx_ptr != 0 && idx_ptr != 0) ? true : false;
+#define KAIOS_BUF_TRACE(x) \
+	do { \
+		if (kaios_trace) { Com_Printf("KAIOS_BUF_TRACE: before " #x "\n"); } \
+		x; \
+		if (kaios_trace) { Com_Printf("KAIOS_BUF_TRACE: after " #x "\n"); } \
+	} while (0)
+	if (kaios_trace)
+	{
+		kaios_buf_traced = true;
+		Com_Printf("KAIOS_BUF_TRACE: first real R_ApplyGLBuffer, type=%d vtx_ptr=%d idx_ptr=%d tex0=%d\n",
+			gl_buf.type, vtx_ptr, idx_ptr, gl_buf.texture[0]);
+	}
+#else
+#define KAIOS_BUF_TRACE(x) x
+#endif
 
 	if (vtx_ptr == 0 || idx_ptr == 0)
 	{
@@ -175,8 +201,8 @@ R_ApplyGLBuffer(void)
 		}
 	}
 
-	glEnableClientState( GL_VERTEX_ARRAY );
-	glVertexPointer (vtx_size, GL_FLOAT, 0, gl_buf.vtx);
+	KAIOS_BUF_TRACE(glEnableClientState( GL_VERTEX_ARRAY ));
+	KAIOS_BUF_TRACE(glVertexPointer (vtx_size, GL_FLOAT, 0, gl_buf.vtx));
 
 	if (texture)
 	{
@@ -189,7 +215,7 @@ R_ApplyGLBuffer(void)
 				// Bind appropiate lightmap copy for this frame
 				lmtexture += MAX_LIGHTMAPS * cur_lm_copy;
 			}
-			R_MBind(GL_TEXTURE1, lmtexture);
+			KAIOS_BUF_TRACE(R_MBind(GL_TEXTURE1, lmtexture));
 
 			if (gl1_overbrightbits->value)
 			{
@@ -197,29 +223,33 @@ R_ApplyGLBuffer(void)
 				glTexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE, gl1_overbrightbits->value);
 			}
 
-			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-			glTexCoordPointer(2, GL_FLOAT, 0, gl_buf.tex[1]);
+			KAIOS_BUF_TRACE(glEnableClientState(GL_TEXTURE_COORD_ARRAY));
+			KAIOS_BUF_TRACE(glTexCoordPointer(2, GL_FLOAT, 0, gl_buf.tex[1]));
 
 			// TMU 0: Color texture
-			R_MBind(GL_TEXTURE0, gl_buf.texture[0]);
+			KAIOS_BUF_TRACE(R_MBind(GL_TEXTURE0, gl_buf.texture[0]));
 		}
 		else
 		{
-			R_Bind(gl_buf.texture[0]);
+			KAIOS_BUF_TRACE(R_Bind(gl_buf.texture[0]));
 		}
 
-		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-		glTexCoordPointer(2, GL_FLOAT, 0, gl_buf.tex[0]);
+		KAIOS_BUF_TRACE(glEnableClientState(GL_TEXTURE_COORD_ARRAY));
+		KAIOS_BUF_TRACE(glTexCoordPointer(2, GL_FLOAT, 0, gl_buf.tex[0]));
 	}
 
 	if (color)
 	{
-		glEnableClientState(GL_COLOR_ARRAY);
-		glColorPointer(4, GL_UNSIGNED_BYTE, 0, gl_buf.clr);
+		KAIOS_BUF_TRACE(glEnableClientState(GL_COLOR_ARRAY));
+		KAIOS_BUF_TRACE(glColorPointer(4, GL_UNSIGNED_BYTE, 0, gl_buf.clr));
 	}
 
 	// All set, we can finally draw
-	glDrawElements(GL_TRIANGLES, idx_ptr, GL_UNSIGNED_SHORT, gl_buf.idx);
+	KAIOS_BUF_TRACE(glDrawElements(GL_TRIANGLES, idx_ptr, GL_UNSIGNED_SHORT, gl_buf.idx));
+	if (kaios_trace)
+	{
+		Com_Printf("KAIOS_BUF_TRACE: glGetError after glDrawElements: 0x%x\n", glGetError());
+	}
 	// ... and now, turn back everything as it was
 
 	if (color)
@@ -273,6 +303,7 @@ R_ApplyGLBuffer(void)
 	}
 
 	GLBUFFER_RESET
+#undef KAIOS_BUF_TRACE
 }
 
 /*
