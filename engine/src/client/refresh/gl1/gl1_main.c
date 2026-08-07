@@ -92,6 +92,18 @@ qboolean kaios_cube_test_active = true;
 extern qboolean keydown[];
 extern image_t *draw_chars;
 extern void RI_KaiosResetBufTrace(void);
+
+/* sky_images[6]/RI_SetSky (gl1_warp.c) are the exact same real-content
+ * texture-loading path RI_SetSky() (part of the refexport_t interface,
+ * called for every real map load) uses -- reusing it here means a
+ * successful load proves the production sky codepath works, not a
+ * synthetic stand-in for it. There's no map loaded yet at this point
+ * (the cube test deliberately runs before kaios_startcmd), so there's
+ * no worldspawn "sky" key to read -- try a short list of well-known
+ * baseq2 skybox basenames until one actually resolves (sky_images[0]
+ * staying r_notexture means GetSkyImage() couldn't find that name). */
+extern image_t *sky_images[6];
+extern void RI_SetSky(const char *name, float rotate, vec3_t axis);
 #define KAIOS_K_ENTER 13
 #define KAIOS_K_KP_ENTER 158
 
@@ -103,6 +115,7 @@ RI_KaiosCubeTestFrame(void)
 	int bar_count, i;
 	GLdouble aspect;
 	qboolean kaios_trace;
+	qboolean kaios_cube_sky_loaded;
 
 	frame_counter++;
 	angle += 2.0f;
@@ -131,22 +144,54 @@ RI_KaiosCubeTestFrame(void)
 	KAIOS_CUBE_TRACE(glClearColor(0.1f, 0.1f, 0.15f, 1.0f));
 	KAIOS_CUBE_TRACE(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
-	/* A synthetic random texture already proved upload+sampling works
-	 * in general on this context. Bind the REAL, already-loaded
-	 * conchars font texture instead now -- same texnum the console
-	 * itself binds via R_Bind(draw_chars->texnum) (gl1_draw.c) -- to
-	 * see whether real, non-synthetic, mip-mapped texture data
-	 * specifically is the problem, as opposed to a code path (the
-	 * buffered 2D draw call below) never being reached at all. */
-	if (kaios_trace)
+	/* One-time attempt to load a real skybox (6 distinct face textures,
+	 * one per cube face -- a much better test than conchars: skies are
+	 * full solid photographic images, not a mostly-transparent glyph
+	 * atlas, so if texturing genuinely works this must be unmissable,
+	 * no texcoord zooming required). Falls back to the conchars zoomed
+	 * on all 6 faces if none of the candidate names resolve (e.g. this
+	 * pak doesn't have them) or if draw_chars is somehow NULL. */
 	{
-		Com_Printf("KAIOS_CUBE_TEST: draw_chars=%p texnum=%d\n",
-			(void *)draw_chars, draw_chars ? draw_chars->texnum : -1);
+		static qboolean sky_tried = false;
+		static qboolean sky_loaded = false;
+
+		if (!sky_tried)
+		{
+			static const char *sky_candidates[] = {
+				"unit1_", "unit2_", "unit3_", "stad1_", "space1_", "warehou1_",
+			};
+			vec3_t axis = {0, 0, 1};
+			int ci;
+
+			sky_tried = true;
+
+			for (ci = 0; ci < (int)(sizeof(sky_candidates) / sizeof(sky_candidates[0])); ci++)
+			{
+				RI_SetSky(sky_candidates[ci], 0, axis);
+
+				if (sky_images[0] != r_notexture)
+				{
+					sky_loaded = true;
+					Com_Printf("KAIOS_CUBE_TEST: sky '%s' loaded, texnum=%d\n",
+						sky_candidates[ci], sky_images[0]->texnum);
+					break;
+				}
+			}
+
+			if (!sky_loaded)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: no sky candidate resolved, "
+					"falling back to conchars on cube faces\n");
+			}
+		}
+
+		kaios_cube_sky_loaded = sky_loaded;
 	}
 
-	if (draw_chars)
+	if (kaios_trace)
 	{
-		KAIOS_CUBE_TRACE(glBindTexture(GL_TEXTURE_2D, draw_chars->texnum));
+		Com_Printf("KAIOS_CUBE_TEST: sky_loaded=%d draw_chars=%p texnum=%d\n",
+			kaios_cube_sky_loaded, (void *)draw_chars, draw_chars ? draw_chars->texnum : -1);
 	}
 
 	KAIOS_CUBE_TRACE(glEnable(GL_TEXTURE_2D));
@@ -197,18 +242,19 @@ RI_KaiosCubeTestFrame(void)
 		 * would still be visible as the old rainbow cube instead of
 		 * going invisible entirely.
 		 *
-		 * conchars.pcx is a 256x256 16x16 grid of 8x8 glyph cells,
-		 * each mostly transparent/background padding around a small
-		 * actual glyph -- mapping the WHOLE [0,1]x[0,1] sheet (as
-		 * before) onto a single face samples predominantly empty
-		 * space, so a real render and a totally-broken texture unit
-		 * would look almost identical (near-black). Zoom into one
-		 * specific, known-opaque cell instead: digit '0' is ASCII
-		 * 48, row = 48>>4 = 3, col = 48&15 = 0, so its cell covers
-		 * u=[0, 0.0625], v=[0.1875, 0.25] -- if this shows a visible
-		 * glyph shape, texturing works; if it's still flat black,
-		 * the bug is upstream of texcoord choice. */
-		static const GLfloat texcoords[12] = {
+		 * Sky face images are full solid photos, so the whole
+		 * [0,1]x[0,1] sheet is meaningful -- unlike conchars.pcx (a
+		 * 256x256 16x16 grid of 8x8 glyph cells, mostly transparent
+		 * background around each tiny glyph), where mapping the WHOLE
+		 * sheet onto one face samples predominantly empty space and
+		 * would look near-black even with texturing fully working. So
+		 * the conchars fallback zooms into one specific known-opaque
+		 * cell instead: digit '0' is ASCII 48, row = 48>>4 = 3,
+		 * col = 48&15 = 0, cell covers u=[0,0.0625] v=[0.1875,0.25]. */
+		static const GLfloat texcoords_full[12] = {
+			0,0, 1,0, 1,1,  0,0, 1,1, 0,1,
+		};
+		static const GLfloat texcoords_zoomed[12] = {
 			0.0f,    0.1875f,
 			0.0625f, 0.1875f,
 			0.0625f, 0.25f,
@@ -229,10 +275,24 @@ RI_KaiosCubeTestFrame(void)
 		{
 			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glColor4f\n", i); }
 			glColor4f(colors[i][0], colors[i][1], colors[i][2], 1.0f);
+
+			/* One real sky face texture per cube face when a sky
+			 * loaded (6 faces, 6 sky images -- a natural 1:1 match),
+			 * otherwise conchars zoomed into the '0' glyph on every
+			 * face as before. */
+			if (kaios_cube_sky_loaded)
+			{
+				glBindTexture(GL_TEXTURE_2D, sky_images[i]->texnum);
+			}
+			else if (draw_chars)
+			{
+				glBindTexture(GL_TEXTURE_2D, draw_chars->texnum);
+			}
+
 			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glVertexPointer\n", i); }
 			glVertexPointer(3, GL_FLOAT, 0, faces[i]);
 			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glTexCoordPointer\n", i); }
-			glTexCoordPointer(2, GL_FLOAT, 0, texcoords);
+			glTexCoordPointer(2, GL_FLOAT, 0, kaios_cube_sky_loaded ? texcoords_full : texcoords_zoomed);
 			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glDrawArrays\n", i); }
 			glDrawArrays(GL_TRIANGLES, 0, 6);
 			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: after face %d glDrawArrays\n", i); }
@@ -248,6 +308,45 @@ RI_KaiosCubeTestFrame(void)
 	}
 
 	KAIOS_CUBE_TRACE(glDisable(GL_TEXTURE_2D));
+
+	/* Wireframe outline pass: GLES1 has no glPolygonMode(GL_LINE) at all
+	 * (local.h's glPolygonMode(...) macro is a no-op under YQ2_GL1_GLES),
+	 * so draw each face's 4-corner outline explicitly as GL_LINE_LOOP,
+	 * textureless, bright yellow, depth test off so it's guaranteed
+	 * visible regardless of the solid pass -- this answers a strictly
+	 * simpler question than "why is texturing black": are the cube's
+	 * polygons being transformed/rasterized at all. If the wireframe
+	 * shows a proper cube outline, geometry+matrices are fine and the
+	 * bug is isolated to texture sampling; if even this is invisible,
+	 * the bug is upstream (transform/clipping/rasterization). */
+	{
+		static const GLfloat wire_faces[6][12] = {
+			{-1,-1, 1,  1,-1, 1,  1, 1, 1, -1, 1, 1}, /* +Z */
+			{-1,-1,-1,  1,-1,-1,  1, 1,-1, -1, 1,-1}, /* -Z */
+			{ 1,-1,-1,  1, 1,-1,  1, 1, 1,  1,-1, 1}, /* +X */
+			{-1,-1,-1, -1,-1, 1, -1, 1, 1, -1, 1,-1}, /* -X */
+			{-1, 1,-1, -1, 1, 1,  1, 1, 1,  1, 1,-1}, /* +Y */
+			{-1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1}, /* -Y */
+		};
+
+		KAIOS_CUBE_TRACE(glDisable(GL_DEPTH_TEST));
+		KAIOS_CUBE_TRACE(glColor4f(1.0f, 1.0f, 0.0f, 1.0f));
+		KAIOS_CUBE_TRACE(glEnableClientState(GL_VERTEX_ARRAY));
+
+		for (i = 0; i < 6; i++)
+		{
+			glVertexPointer(3, GL_FLOAT, 0, wire_faces[i]);
+			glDrawArrays(GL_LINE_LOOP, 0, 4);
+		}
+
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: glGetError after wireframe glDrawArrays: 0x%x\n", glGetError());
+		}
+
+		KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
+		KAIOS_CUBE_TRACE(glEnable(GL_DEPTH_TEST));
+	}
 
 	/* 2D overlay: a bar that fills up and resets every 20 frames, the
 	 * simplest possible "is this actually updating" indicator without
@@ -307,9 +406,19 @@ RI_KaiosCubeTestFrame(void)
 			Com_Printf("KAIOS_CUBE_TEST: before RDraw_CharScaled loop\n");
 		}
 
+		/* Cycle through a sliding window of the real printable ASCII
+		 * range (33..126, the full glyph set conchars.pcx actually
+		 * has drawable content for, skipping 32=space which
+		 * RDraw_CharScaled itself no-ops on) instead of just
+		 * repeating '0'-'9' -- shows far more of the real font atlas,
+		 * shifting to a new window every ~30 frames (~1s). */
 		for (ch = 0; ch < 16; ch++)
 		{
-			RDraw_CharScaled(4 + ch * 10, vid.height - 20, '0' + (ch % 10), 1.0f);
+			int range = 126 - 33;
+			int base = 33 + ((frame_counter / 30) * 16) % range;
+			int c = 33 + ((base - 33 + ch) % range);
+
+			RDraw_CharScaled(4 + ch * 10, vid.height - 20, c, 1.0f);
 		}
 
 		if (kaios_trace)
