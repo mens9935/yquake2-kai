@@ -73,15 +73,24 @@ int r_polycount;
  * client.h wholesale, which the renderer is deliberately decoupled
  * from everywhere else in this file.
  *
- * Defaulted off now: it already answered its question (real device
- * testing confirmed both untextured and textured geometry render
- * correctly through this context), and demo2.dm2 should load right
- * away for faster iteration on the remaining real-content issue.
- * Flip back to true here to bring the cube test back for another
- * one-off sanity check if this context ever needs re-validating from
- * scratch again. */
-qboolean kaios_cube_test_active = false;
+ * Back on: a synthetic random texture proved upload+sampling works in
+ * general, but real game content (fonts, pics, world) still doesn't
+ * show up and R_ApplyGLBuffer's own trace (gl1_buffer.c) never once
+ * fired -- meaning the real 2D buffered draw path (glDrawElements,
+ * used for every character/pic/HUD element) may never even be
+ * reached with real content, or real (non-synthetic, mip-mapped)
+ * texture data specifically may be the problem. Test both directly,
+ * in this same proven-working context: bind the real already-loaded
+ * conchars texture (draw_chars, gl1_draw.c -- guaranteed non-NULL by
+ * now, Draw_InitLocal() would have fatally errored out otherwise, and
+ * the engine clearly reached "Initialized") onto the cube instead of
+ * synthetic noise, and directly call the real buffered 2D pipeline
+ * (R_UpdateGLBuffer/R_Buffer2DQuad/R_ApplyGLBuffer, gl1_buffer.c) to
+ * draw actual HUD-style content as a 2D overlay, the same functions
+ * Draw_CharScaled/Draw_Pic use for real console/menu/HUD text. */
+qboolean kaios_cube_test_active = true;
 extern qboolean keydown[];
+extern image_t *draw_chars;
 #define KAIOS_K_ENTER 13
 #define KAIOS_K_KP_ENTER 158
 
@@ -121,72 +130,22 @@ RI_KaiosCubeTestFrame(void)
 	KAIOS_CUBE_TRACE(glClearColor(0.1f, 0.1f, 0.15f, 1.0f));
 	KAIOS_CUBE_TRACE(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
-	/* Real content (fonts, world surfaces) never showed up -- only
-	 * occasional 1-2s flashes of small squares -- while this cube
-	 * test's plain colored (untextured) geometry rendered fine.
-	 * Everything real the game draws is textured; this cube test
-	 * never has been. Isolate that one variable: apply a fresh random
-	 * texture to the cube roughly once a second (this renderer's own
-	 * default texenv mode from R_SetDefaultState, GL_REPLACE, makes
-	 * the texture entirely determine the pixel color) to see whether
-	 * upload+sampling works at all with the exact same context that
-	 * already draws untextured geometry successfully. */
+	/* A synthetic random texture already proved upload+sampling works
+	 * in general on this context. Bind the REAL, already-loaded
+	 * conchars font texture instead now -- same texnum the console
+	 * itself binds via R_Bind(draw_chars->texnum) (gl1_draw.c) -- to
+	 * see whether real, non-synthetic, mip-mapped texture data
+	 * specifically is the problem, as opposed to a code path (the
+	 * buffered 2D draw call below) never being reached at all. */
+	if (kaios_trace)
 	{
-		static GLuint kaios_tex_id = 0;
-		static qboolean kaios_tex_created = false;
-		qboolean do_tex_update = false;
+		Com_Printf("KAIOS_CUBE_TEST: draw_chars=%p texnum=%d\n",
+			(void *)draw_chars, draw_chars ? draw_chars->texnum : -1);
+	}
 
-		if (!kaios_tex_created)
-		{
-			KAIOS_CUBE_TRACE(glGenTextures(1, &kaios_tex_id));
-			kaios_tex_created = true;
-			do_tex_update = true;
-		}
-		else if ((frame_counter % 60) == 0)
-		{
-			do_tex_update = true;
-		}
-
-		KAIOS_CUBE_TRACE(glBindTexture(GL_TEXTURE_2D, kaios_tex_id));
-
-		if (do_tex_update)
-		{
-			byte pixels[8 * 8 * 4];
-			int p;
-			static unsigned int seed = 12345;
-
-			for (p = 0; p < 8 * 8 * 4; p += 4)
-			{
-				/* Small xorshift-style PRNG -- no rand()/srand()
-				 * dependency, just needs to look visually random. */
-				seed ^= seed << 13;
-				seed ^= seed >> 17;
-				seed ^= seed << 5;
-
-				pixels[p + 0] = (byte)(seed & 0xFF);
-				pixels[p + 1] = (byte)((seed >> 8) & 0xFF);
-				pixels[p + 2] = (byte)((seed >> 16) & 0xFF);
-				pixels[p + 3] = 255;
-			}
-
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-			if (kaios_trace || frame_counter == 61)
-			{
-				Com_Printf("KAIOS_CUBE_TEST: before glTexImage2D (frame %d)\n", frame_counter);
-			}
-
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 8, 8, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-
-			if (kaios_trace || frame_counter == 61)
-			{
-				Com_Printf("KAIOS_CUBE_TEST: after glTexImage2D, glGetError=0x%x (frame %d)\n",
-					glGetError(), frame_counter);
-			}
-		}
+	if (draw_chars)
+	{
+		KAIOS_CUBE_TRACE(glBindTexture(GL_TEXTURE_2D, draw_chars->texnum));
 	}
 
 	KAIOS_CUBE_TRACE(glEnable(GL_TEXTURE_2D));
@@ -308,6 +267,46 @@ RI_KaiosCubeTestFrame(void)
 	}
 
 	KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
+
+	/* Draw actual HUD-style text through the REAL buffered 2D pipeline
+	 * -- RDraw_CharScaled (gl1_draw.c) is the exact function
+	 * SCR_DrawConsole()/M_Draw() call per on-screen character, which
+	 * internally does R_UpdateGLBuffer()+R_Buffer2DQuad() to queue
+	 * into gl_buf, then R_ApplyGLBuffer() (called here explicitly,
+	 * since this test loop bypasses RI_EndFrame()'s own call to it)
+	 * actually flushes and draws it via glDrawElements(). Real device
+	 * testing showed R_ApplyGLBuffer's own trace never firing at all
+	 * during real gameplay -- this calls the exact same functions
+	 * directly, in this already-proven-working context, to see
+	 * whether the buffered pipeline itself works when it does get
+	 * reached. */
+	if (draw_chars)
+	{
+		int ch;
+
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: before RDraw_CharScaled loop\n");
+		}
+
+		for (ch = 0; ch < 16; ch++)
+		{
+			RDraw_CharScaled(4 + ch * 10, vid.height - 20, '0' + (ch % 10), 1.0f);
+		}
+
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: before R_ApplyGLBuffer (HUD text)\n");
+		}
+
+		R_ApplyGLBuffer();
+
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: after R_ApplyGLBuffer (HUD text), glGetError=0x%x\n",
+				glGetError());
+		}
+	}
 #undef KAIOS_CUBE_TRACE
 
 	if (frame_counter == 1 || (frame_counter % 60) == 0)
