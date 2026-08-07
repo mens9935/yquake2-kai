@@ -1847,6 +1847,37 @@ SCR_UpdateScreen(void)
 		numframes = 1;
 	}
 
+#ifdef __EMSCRIPTEN__
+	/* Real-device gl1 testing shows the engine reaching "==== Yamagi
+	 * Quake II Initialized ====" and rendering (at least) one frame
+	 * cleanly (a KAIOS_FRAMESPIKE for the expected cold-cache first
+	 * frame), then getting silently kicked back to the console a few
+	 * idle frames later -- before kaios_mapcycle's first interval even
+	 * elapses, so this isn't map/gameplay-specific, it's happening
+	 * during plain idle-at-disconnected-state frames. No JS stack
+	 * trace has survived being copied off the device to say which call
+	 * is responsible. Same technique that found the glTexEnvi/
+	 * glPointSize gaps: bracket every top-level call in this function
+	 * with a before/after print, so whichever one never gets its
+	 * "after" print is the one that silently threw. Gated to the
+	 * first few frames only (via a static counter) -- this function
+	 * runs every frame, an unconditional trace here would flood the
+	 * console instead of pinpointing anything. */
+	static int kaios_scr_trace_frames = 8;
+	/* Only for the gl1 diagnostic build -- vid_renderer stays "soft"
+	 * for the shipped app, so this trace never fires there at all. */
+	qboolean kaios_do_trace = (kaios_scr_trace_frames > 0) &&
+		(strcmp(vid_renderer->string, "gl1") == 0);
+#define KAIOS_SCR_TRACE(x) \
+	do { \
+		if (kaios_do_trace) { Com_Printf("KAIOS_SCR_TRACE: before " #x "\n"); } \
+		x; \
+		if (kaios_do_trace) { Com_Printf("KAIOS_SCR_TRACE: after " #x "\n"); } \
+	} while (0)
+#else
+#define KAIOS_SCR_TRACE(x) x
+#endif
+
 	for (i = 0; i < numframes; i++)
 	{
 		R_BeginFrame(separation[i]);
@@ -1911,31 +1942,31 @@ SCR_UpdateScreen(void)
 			}
 
 			/* do 3D refresh drawing, and then update the screen */
-			SCR_CalcVrect();
+			KAIOS_SCR_TRACE(SCR_CalcVrect());
 
 			/* clear any dirty part of the background */
-			SCR_TileClear();
+			KAIOS_SCR_TRACE(SCR_TileClear());
 
-			V_RenderView(separation[i]);
+			KAIOS_SCR_TRACE(V_RenderView(separation[i]));
 
-			SCR_DrawStats();
-			SCR_DrawSpeed();
+			KAIOS_SCR_TRACE(SCR_DrawStats());
+			KAIOS_SCR_TRACE(SCR_DrawSpeed());
 #ifdef __EMSCRIPTEN__
-			SCR_DrawKaiosStats();
+			KAIOS_SCR_TRACE(SCR_DrawKaiosStats());
 #endif
 
 			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 1)
 			{
-				SCR_DrawLayout();
+				KAIOS_SCR_TRACE(SCR_DrawLayout());
 			}
 
 			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 2)
 			{
-				CL_DrawInventory();
+				KAIOS_SCR_TRACE(CL_DrawInventory());
 			}
 
-			SCR_DrawNet();
-			SCR_CheckDrawCenterString();
+			KAIOS_SCR_TRACE(SCR_DrawNet());
+			KAIOS_SCR_TRACE(SCR_CheckDrawCenterString());
 
 			if (scr_timegraph->value)
 			{
@@ -1948,18 +1979,27 @@ SCR_UpdateScreen(void)
 				SCR_DrawDebugGraph();
 			}
 
-			SCR_DrawPause();
+			KAIOS_SCR_TRACE(SCR_DrawPause());
 
-			SCR_DrawConsole();
+			KAIOS_SCR_TRACE(SCR_DrawConsole());
 
-			M_Draw();
+			KAIOS_SCR_TRACE(M_Draw());
 
-			SCR_DrawLoading();
+			KAIOS_SCR_TRACE(SCR_DrawLoading());
 		}
 	}
 
 	SCR_Framecounter();
-	R_EndFrame();
+	KAIOS_SCR_TRACE(R_EndFrame());
+
+#ifdef __EMSCRIPTEN__
+	if (kaios_scr_trace_frames > 0)
+	{
+		kaios_scr_trace_frames--;
+	}
+#endif
+
+#undef KAIOS_SCR_TRACE
 }
 
 static float
