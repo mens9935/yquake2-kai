@@ -513,6 +513,88 @@ int RI_InitContext(void* win)
 	gl_config.minor_version = GLVersion.minor;
 	Com_Printf("Initialized OpenGL ES version %d.%d context\n", gl_config.major_version, gl_config.minor_version);
 
+#ifdef __EMSCRIPTEN__
+	/* glTexEnvi turned out to be silently NULL after GLAD's runtime
+	 * lookup -- present in the underlying Emscripten runtime, just
+	 * missing from emscripten_legacy_gl_emulation_GetProcAddress()'s
+	 * (gl.c) hand-written allow-list of which legacy GL1.x names it
+	 * exposes -- and calling through it crashed the first time it was
+	 * ever used, deep inside a real frame, with no indication of which
+	 * function pointer was the problem beyond an opaque "not a
+	 * function" JS TypeError. Rather than keep finding these one
+	 * real-device crash at a time, check every GL function this
+	 * renderer actually calls (grepped from every gl1_*.c source file)
+	 * right here, right after GLAD finishes loading -- logs the full
+	 * list of gaps in one shot instead of one per round-trip. Does not
+	 * fix anything by itself (this renderer still can't run without
+	 * whatever this turns up), just turns silent, one-at-a-time,
+	 * deep-in-a-frame crashes into a single upfront, complete report. */
+	if (!glAlphaFunc) { Com_Printf("KAIOS_GL1_MISSING: glAlphaFunc\n"); }
+	if (!glBindTexture) { Com_Printf("KAIOS_GL1_MISSING: glBindTexture\n"); }
+	if (!glBlendFunc) { Com_Printf("KAIOS_GL1_MISSING: glBlendFunc\n"); }
+	if (!glClear) { Com_Printf("KAIOS_GL1_MISSING: glClear\n"); }
+	if (!glClearColor) { Com_Printf("KAIOS_GL1_MISSING: glClearColor\n"); }
+	if (!glClearStencil) { Com_Printf("KAIOS_GL1_MISSING: glClearStencil\n"); }
+	if (!glColor4f) { Com_Printf("KAIOS_GL1_MISSING: glColor4f\n"); }
+	if (!glColor4ub) { Com_Printf("KAIOS_GL1_MISSING: glColor4ub\n"); }
+	if (!glColorMask) { Com_Printf("KAIOS_GL1_MISSING: glColorMask\n"); }
+	if (!glColorPointer) { Com_Printf("KAIOS_GL1_MISSING: glColorPointer\n"); }
+	if (!glCullFace) { Com_Printf("KAIOS_GL1_MISSING: glCullFace\n"); }
+	if (!glDeleteTextures) { Com_Printf("KAIOS_GL1_MISSING: glDeleteTextures\n"); }
+	if (!glDepthFunc) { Com_Printf("KAIOS_GL1_MISSING: glDepthFunc\n"); }
+	if (!glDepthMask) { Com_Printf("KAIOS_GL1_MISSING: glDepthMask\n"); }
+	/* glDepthRange is also a compile-time macro under YQ2_GL1_GLES
+	 * (redirected to glDepthRangef, local.h) -- same reasoning as
+	 * glFrustum/glOrtho/glPolygonMode above. */
+	if (!glDisable) { Com_Printf("KAIOS_GL1_MISSING: glDisable\n"); }
+	if (!glDisableClientState) { Com_Printf("KAIOS_GL1_MISSING: glDisableClientState\n"); }
+	if (!glDrawArrays) { Com_Printf("KAIOS_GL1_MISSING: glDrawArrays\n"); }
+	/* glDrawBuffer's only call sites (gl1_main.c) are wrapped in
+	 * #ifndef YQ2_GL1_GLES entirely -- it's genuinely never called
+	 * under GLES1 and has no GLES1 declaration at all, so it can't be
+	 * referenced here either. */
+	if (!glDrawElements) { Com_Printf("KAIOS_GL1_MISSING: glDrawElements\n"); }
+	if (!glEnable) { Com_Printf("KAIOS_GL1_MISSING: glEnable\n"); }
+	if (!glEnableClientState) { Com_Printf("KAIOS_GL1_MISSING: glEnableClientState\n"); }
+	if (!glFinish) { Com_Printf("KAIOS_GL1_MISSING: glFinish\n"); }
+	/* glFrustum/glOrtho/glPolygonMode are compile-time macros in
+	 * local.h (redirected to the real glFrustumf/glOrthof GLES1 calls,
+	 * or discarded to nothing for glPolygonMode, which has no GLES1
+	 * equivalent at all) -- not runtime function pointers, can't be
+	 * null-checked here, and already confirmed harmless by the
+	 * before/after trace in R_SetDefaultState() (they print and
+	 * return, no crash). */
+	if (!glGetError) { Com_Printf("KAIOS_GL1_MISSING: glGetError\n"); }
+	if (!glGetFloatv) { Com_Printf("KAIOS_GL1_MISSING: glGetFloatv\n"); }
+	if (!glGetString) { Com_Printf("KAIOS_GL1_MISSING: glGetString\n"); }
+	if (!glHint) { Com_Printf("KAIOS_GL1_MISSING: glHint\n"); }
+	if (!glLoadIdentity) { Com_Printf("KAIOS_GL1_MISSING: glLoadIdentity\n"); }
+	if (!glLoadMatrixf) { Com_Printf("KAIOS_GL1_MISSING: glLoadMatrixf\n"); }
+	if (!glMatrixMode) { Com_Printf("KAIOS_GL1_MISSING: glMatrixMode\n"); }
+	if (!glPixelStorei) { Com_Printf("KAIOS_GL1_MISSING: glPixelStorei\n"); }
+	if (!glPointSize) { Com_Printf("KAIOS_GL1_MISSING: glPointSize\n"); }
+	if (!glPolygonOffset) { Com_Printf("KAIOS_GL1_MISSING: glPolygonOffset\n"); }
+	if (!glPopMatrix) { Com_Printf("KAIOS_GL1_MISSING: glPopMatrix\n"); }
+	if (!glPushMatrix) { Com_Printf("KAIOS_GL1_MISSING: glPushMatrix\n"); }
+	if (!glReadPixels) { Com_Printf("KAIOS_GL1_MISSING: glReadPixels\n"); }
+	if (!glRotatef) { Com_Printf("KAIOS_GL1_MISSING: glRotatef\n"); }
+	if (!glScalef) { Com_Printf("KAIOS_GL1_MISSING: glScalef\n"); }
+	if (!glScissor) { Com_Printf("KAIOS_GL1_MISSING: glScissor\n"); }
+	if (!glShadeModel) { Com_Printf("KAIOS_GL1_MISSING: glShadeModel\n"); }
+	if (!glStencilFunc) { Com_Printf("KAIOS_GL1_MISSING: glStencilFunc\n"); }
+	if (!glStencilMask) { Com_Printf("KAIOS_GL1_MISSING: glStencilMask\n"); }
+	if (!glStencilOp) { Com_Printf("KAIOS_GL1_MISSING: glStencilOp\n"); }
+	if (!glTexCoordPointer) { Com_Printf("KAIOS_GL1_MISSING: glTexCoordPointer\n"); }
+	if (!glTexEnvi) { Com_Printf("KAIOS_GL1_MISSING: glTexEnvi\n"); }
+	if (!glTexImage2D) { Com_Printf("KAIOS_GL1_MISSING: glTexImage2D\n"); }
+	if (!glTexParameteri) { Com_Printf("KAIOS_GL1_MISSING: glTexParameteri\n"); }
+	if (!glTexSubImage2D) { Com_Printf("KAIOS_GL1_MISSING: glTexSubImage2D\n"); }
+	if (!glTranslatef) { Com_Printf("KAIOS_GL1_MISSING: glTranslatef\n"); }
+	if (!glVertexPointer) { Com_Printf("KAIOS_GL1_MISSING: glVertexPointer\n"); }
+	if (!glViewport) { Com_Printf("KAIOS_GL1_MISSING: glViewport\n"); }
+	Com_Printf("KAIOS_GL1_MISSING: scan complete\n");
+#endif
+
 #else
 
 	// Check if it's really OpenGL 1.4.
