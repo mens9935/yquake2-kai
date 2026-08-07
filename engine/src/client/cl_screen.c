@@ -1851,23 +1851,34 @@ SCR_UpdateScreen(void)
 	/* Real-device gl1 testing shows the engine reaching "==== Yamagi
 	 * Quake II Initialized ====" and rendering (at least) one frame
 	 * cleanly (a KAIOS_FRAMESPIKE for the expected cold-cache first
-	 * frame), then getting silently kicked back to the console a few
-	 * idle frames later -- before kaios_mapcycle's first interval even
-	 * elapses, so this isn't map/gameplay-specific, it's happening
-	 * during plain idle-at-disconnected-state frames. No JS stack
-	 * trace has survived being copied off the device to say which call
-	 * is responsible. Same technique that found the glTexEnvi/
+	 * frame). A first attempt at this trace gated on a fixed 8-call
+	 * counter produced zero output on a real device despite the crash
+	 * still happening -- an earlier real-device run (no tracing yet)
+	 * had shown the menu staying up and interactive for a real stretch
+	 * of time (loading menu navigation sounds in response to actual
+	 * key presses) before eventually getting kicked back to the
+	 * console, so 8 calls was very likely spent entirely on
+	 * uninteresting early frames, well before whatever the real
+	 * culprit frame is. Gate on wall-clock time instead (cls.realtime)
+	 * so the trace window covers a real stretch of actual play instead
+	 * of an arbitrary small number of frames. No JS stack trace has
+	 * survived being copied off the device to say which call is
+	 * responsible. Same technique that found the glTexEnvi/
 	 * glPointSize gaps: bracket every top-level call in this function
 	 * with a before/after print, so whichever one never gets its
-	 * "after" print is the one that silently threw. Gated to the
-	 * first few frames only (via a static counter) -- this function
-	 * runs every frame, an unconditional trace here would flood the
-	 * console instead of pinpointing anything. */
-	static int kaios_scr_trace_frames = 8;
+	 * "after" print is the one that silently threw. */
+	static int kaios_scr_trace_until = 0;
 	/* Only for the gl1 diagnostic build -- vid_renderer stays "soft"
 	 * for the shipped app, so this trace never fires there at all. */
-	qboolean kaios_do_trace = (kaios_scr_trace_frames > 0) &&
-		(strcmp(vid_renderer->string, "gl1") == 0);
+	qboolean kaios_scr_trace_enabled = (strcmp(vid_renderer->string, "gl1") == 0);
+	if (kaios_scr_trace_enabled && kaios_scr_trace_until == 0)
+	{
+		/* First real (non-disable_screen-gated) frame -- start a
+		 * 60 real-second window from here. */
+		kaios_scr_trace_until = cls.realtime + 60000;
+	}
+	qboolean kaios_do_trace = kaios_scr_trace_enabled &&
+		(cls.realtime < kaios_scr_trace_until);
 #define KAIOS_SCR_TRACE(x) \
 	do { \
 		if (kaios_do_trace) { Com_Printf("KAIOS_SCR_TRACE: before " #x "\n"); } \
@@ -1991,13 +2002,6 @@ SCR_UpdateScreen(void)
 
 	SCR_Framecounter();
 	KAIOS_SCR_TRACE(R_EndFrame());
-
-#ifdef __EMSCRIPTEN__
-	if (kaios_scr_trace_frames > 0)
-	{
-		kaios_scr_trace_frames--;
-	}
-#endif
 
 #undef KAIOS_SCR_TRACE
 }
