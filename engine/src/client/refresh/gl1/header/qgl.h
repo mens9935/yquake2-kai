@@ -68,6 +68,18 @@
 extern void emscripten_glTexEnvi(GLenum target, GLenum pname, GLint param);
 #undef glTexEnvi
 #define glTexEnvi emscripten_glTexEnvi
+
+/* Same gap, same fix, for glPointSize: gl.c declares
+ * emscripten_glPointSize() but never lists it in RETURN_GL_EMU_FN
+ * either, so glad_glPointSize also silently loads as NULL. Currently
+ * unreached on this device (R_DrawParticles's glPointSize call is
+ * gated on gl_config.pointparameters, which this device's extension
+ * probe reports as false -- "Point parameters: Failed" -- so the
+ * gate never opens), but it's the identical allow-list gap and the
+ * scan in gl1_sdl.c would otherwise keep flagging it every run. */
+extern void emscripten_glPointSize(GLfloat size);
+#undef glPointSize
+#define glPointSize emscripten_glPointSize
 #endif
 
 #ifndef APIENTRY
