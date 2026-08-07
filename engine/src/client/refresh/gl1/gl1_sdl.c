@@ -402,35 +402,58 @@ int RI_InitContext(void* win)
 		 * A genuine retry would need a *fresh* canvas element, not a
 		 * second call on this one -- not attempted here. */
 
-		/* Read-only diagnostic, no getContext() call anywhere in here
-		 * -- can't poison anything. "#canvas" as a target string is
-		 * NOT resolved via document.querySelector/getElementById by
-		 * Emscripten's own findEventTarget() (library_html5.js): for
-		 * the literal special-case string "#canvas" it returns
-		 * Module['canvas'] directly instead, wherever that currently
-		 * points. module-init.js sets Module.canvas = document.
-		 * getElementById('canvas') once, at page load -- if SDL2's own
-		 * window/canvas setup (SDL_CreateWindow, RI_PrepareForWindow
-		 * above, or Emscripten's SDL2 port internals) ever replaces or
-		 * re-wraps that DOM element instead of mutating it in place,
-		 * Module.canvas would still point at the original, now-detached
-		 * element while the live, visible canvas is a different object
-		 * -- exactly the kind of mismatch that would make
-		 * emscripten_webgl_create_context("#canvas", ...) silently
-		 * resolve to nothing and bail before ever calling
-		 * canvas.getContext() at all (matches the observed failure:
-		 * no WebGL-level error, immediate return). */
+		/* Module.canvas theory ruled out by a real-device test: it was
+		 * set, and was the exact same object as a fresh
+		 * getElementById('canvas') lookup. Emscripten's internal call
+		 * still failed anyway, immediately, canvas correctly resolved.
+		 *
+		 * New theory: the object emscripten_webgl_do_create_context()
+		 * (library_html5_webgl.js) actually passes to
+		 * canvas.getContext() is NOT just the 6 properties this file
+		 * sets on `attribs` -- emscripten_webgl_init_context_attributes()
+		 * fills in a full ~14-property dictionary (alpha, depth,
+		 * stencil, antialias, premultipliedAlpha, preserveDrawingBuffer,
+		 * powerPreference: 'default', failIfMajorPerformanceCaveat,
+		 * majorVersion, minorVersion, enableExtensionsByDefault,
+		 * explicitSwapControl, proxyContextToMainThread,
+		 * renderViaOffscreenBackBuffer), several of which are newer
+		 * WebGL spec additions (powerPreference in particular) that
+		 * predate this device's Gecko-48-class engine and this file's
+		 * own C code has no way to omit from that call -- they're
+		 * unconditionally included by Emscripten's own JS glue.
+		 * Every previous raw-JS probe in this file only ever sent the
+		 * 6 properties actually needed (alpha/depth/stencil/antialias/
+		 * majorVersion/minorVersion), and once (before the probe-
+		 * poisoning bug was found) succeeded with exactly those 6.
+		 * This probe instead sends the *same full ~14-property object*
+		 * Emscripten's own internal call would send, as the only thing
+		 * touching the canvas this run, to test whether the extra,
+		 * newer properties are themselves what this browser rejects --
+		 * independent of anything else about how the C call marshals
+		 * or invokes it. */
 		EM_ASM({
-			var live = document.getElementById('canvas');
-			console.log('[kaios] Module.canvas set: ' + (typeof Module.canvas !== 'undefined' && Module.canvas !== null));
-			console.log('[kaios] Module.canvas === live #canvas element: ' + (Module.canvas === live));
-			if (Module.canvas) {
-				console.log('[kaios] Module.canvas.tagName=' + Module.canvas.tagName +
-					' id=' + Module.canvas.id +
-					' isConnected=' + Module.canvas.isConnected);
-			}
-			if (live) {
-				console.log('[kaios] live #canvas .isConnected=' + live.isConnected);
+			try {
+				var c = document.getElementById('canvas');
+				var attrs = {};
+				attrs.alpha = false;
+				attrs.depth = true;
+				attrs.stencil = false;
+				attrs.antialias = false;
+				attrs.premultipliedAlpha = true;
+				attrs.preserveDrawingBuffer = false;
+				attrs.powerPreference = 'default';
+				attrs.failIfMajorPerformanceCaveat = false;
+				attrs.majorVersion = 1;
+				attrs.minorVersion = 0;
+				attrs.enableExtensionsByDefault = true;
+				attrs.explicitSwapControl = false;
+				attrs.proxyContextToMainThread = 0;
+				attrs.renderViaOffscreenBackBuffer = 0;
+				var gl = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
+				console.log('[kaios] GL probe (full emscripten-style attrs): ' +
+					(gl ? 'context created OK' : 'getContext returned null'));
+			} catch (e) {
+				console.log('[kaios] GL probe (full attrs) threw: ' + e);
 			}
 		});
 
