@@ -455,17 +455,25 @@ int RI_InitContext(void* win)
 		 * (library_browser.js) -- a step our manual, minimal
 		 * getContext()+registerContext() bypass above has no equivalent
 		 * of, since it never goes through Browser.createContext() at
-		 * all. Fire those callbacks ourselves now that a context is
-		 * current, so GLImmediate.init() (and anything else normally
-		 * wired to "a WebGL context just became active") actually runs. */
+		 * all. Fired those callbacks manually and GLImmediate.init()
+		 * DID run (confirmed: its own "WARNING: using emscripten GL
+		 * immediate mode emulation" log line printed) -- but
+		 * s_texUnits was *still* null right after, because
+		 * GLImmediate.init() itself opens with
+		 * "if (!Module.useWebGL) return;", and Module.useWebGL is
+		 * ANOTHER thing only Browser.createContext() ever sets
+		 * (`Module.useWebGL = useWebGL;`) -- also skipped by bypassing
+		 * that function. Set it ourselves too, for the same reason,
+		 * before firing the callbacks. */
 		EM_ASM({
 			try {
+				Module.useWebGL = true;
 				if (typeof Browser !== 'undefined' && Browser.moduleContextCreatedCallbacks) {
 					Browser.moduleContextCreatedCallbacks.forEach(function (callback) {
 						callback();
 					});
 					console.log('[kaios] fired ' + Browser.moduleContextCreatedCallbacks.length +
-						' moduleContextCreatedCallbacks manually');
+						' moduleContextCreatedCallbacks manually (Module.useWebGL=' + Module.useWebGL + ')');
 				} else {
 					console.log('[kaios] Browser.moduleContextCreatedCallbacks not available to fire manually');
 				}
