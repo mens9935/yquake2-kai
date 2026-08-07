@@ -969,12 +969,39 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 
 	if (renderframe)
 	{
-		VID_CheckChanges();
-		CL_PredictMovement();
+#ifdef __EMSCRIPTEN__
+		/* The KAIOS_FRAMESPIKE print above is misleading on the very
+		 * first frame -- renderdelta is frame.c's own accumulator,
+		 * seeded to 1000000 (1000ms) as its static initializer, and
+		 * printed unconditionally before any real rendering has
+		 * happened at all. Real-device gl1 testing shows the engine
+		 * getting silently kicked back to the console sometime after
+		 * that print and before any SCR_UpdateScreen tracing ever
+		 * fires (see cl_screen.c's own KAIOS_SCR_TRACE comment) --
+		 * meaning the crash is actually somewhere between here and
+		 * the SCR_UpdateScreen() call below. CL_PrepRefresh() is the
+		 * likely spot: it is what registers/uploads a freshly loaded
+		 * level's images the first time cl.refresh_prepped is false,
+		 * exactly the case right after a demomap/map spawns. Same
+		 * before/after bracket technique as elsewhere in this
+		 * investigation, gated to the gl1 diagnostic build only. */
+		qboolean kaios_do_trace = (strcmp(vid_renderer->string, "gl1") == 0);
+#define KAIOS_CLFRAME_TRACE(x) \
+		do { \
+			if (kaios_do_trace) { Com_Printf("KAIOS_CLFRAME_TRACE: before " #x "\n"); } \
+			x; \
+			if (kaios_do_trace) { Com_Printf("KAIOS_CLFRAME_TRACE: after " #x "\n"); } \
+		} while (0)
+#else
+#define KAIOS_CLFRAME_TRACE(x) x
+#endif
+
+		KAIOS_CLFRAME_TRACE(VID_CheckChanges());
+		KAIOS_CLFRAME_TRACE(CL_PredictMovement());
 
 		if (!cl.refresh_prepped && (cls.state == ca_active))
 		{
-			CL_PrepRefresh();
+			KAIOS_CLFRAME_TRACE(CL_PrepRefresh());
 		}
 
 		/* update the screen */
@@ -990,7 +1017,8 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 		}
 #endif
 
-		SCR_UpdateScreen();
+		KAIOS_CLFRAME_TRACE(SCR_UpdateScreen());
+#undef KAIOS_CLFRAME_TRACE
 
 #ifdef __EMSCRIPTEN__
 		time_after_ref = Sys_Milliseconds();
