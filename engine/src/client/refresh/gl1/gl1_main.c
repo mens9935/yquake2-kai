@@ -1773,15 +1773,31 @@ RI_Init(void)
 
 	// ----
 
-	R_ResetClearColor();
-	R_SetDefaultState();
+#ifdef __EMSCRIPTEN__
+	/* Chasing a real-device crash ("TypeError: ... is not a function",
+	 * an invalid function-pointer-table call) somewhere in this
+	 * sequence -- one of these is calling through a GLAD-loaded
+	 * function pointer that Emscripten's LEGACY_GL_EMULATION never
+	 * actually backed with a real implementation on this browser (it
+	 * warns outright on startup that it's "a collection of limited
+	 * workarounds, do not expect it to work"). Bracket each step so
+	 * the next real-device log pinpoints exactly which one it is. */
+#define KAIOS_GL1_STEP(x) do { Com_Printf("KAIOS_GL1_INIT: before " #x "\n"); x; Com_Printf("KAIOS_GL1_INIT: after " #x "\n"); } while (0)
+#else
+#define KAIOS_GL1_STEP(x) x
+#endif
 
-	Scrap_Init();
-	R_InitImages();
-	Mod_Init();
-	R_InitParticleTexture();
-	Draw_InitLocal();
-	R_ResetGLBuffer();
+	KAIOS_GL1_STEP(R_ResetClearColor());
+	KAIOS_GL1_STEP(R_SetDefaultState());
+
+	KAIOS_GL1_STEP(Scrap_Init());
+	KAIOS_GL1_STEP(R_InitImages());
+	KAIOS_GL1_STEP(Mod_Init());
+	KAIOS_GL1_STEP(R_InitParticleTexture());
+	KAIOS_GL1_STEP(Draw_InitLocal());
+	KAIOS_GL1_STEP(R_ResetGLBuffer());
+
+#undef KAIOS_GL1_STEP
 
 	return true;
 }
