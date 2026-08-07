@@ -83,6 +83,7 @@ RI_KaiosCubeTestFrame(void)
 	static int frame_counter = 0;
 	int bar_count, i;
 	GLdouble aspect;
+	qboolean kaios_trace;
 
 	frame_counter++;
 	angle += 2.0f;
@@ -92,25 +93,40 @@ RI_KaiosCubeTestFrame(void)
 		angle -= 360.0f;
 	}
 
-	glViewport(0, 0, vid.width, vid.height);
-	glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	/* The real-device log stopped dead right at tick #1 entering this
+	 * function -- not even the glGetError() prints after the vertex-
+	 * array setup made it out, meaning whatever throws does so before
+	 * that point. Same before/after bracket technique that found
+	 * glTexEnvi/glPointSize, applied to literally every call in this
+	 * function, gated to frame 1 only so it doesn't spam every tick
+	 * once this is past the culprit. */
+	kaios_trace = (frame_counter == 1) ? true : false;
+#define KAIOS_CUBE_TRACE(x) \
+	do { \
+		if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before " #x "\n"); } \
+		x; \
+		if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: after " #x "\n"); } \
+	} while (0)
 
-	glDisable(GL_TEXTURE_2D);
-	glDisable(GL_BLEND);
-	glDisable(GL_ALPHA_TEST);
-	glEnable(GL_DEPTH_TEST);
-	glDepthMask(GL_TRUE);
+	KAIOS_CUBE_TRACE(glViewport(0, 0, vid.width, vid.height));
+	KAIOS_CUBE_TRACE(glClearColor(0.1f, 0.1f, 0.15f, 1.0f));
+	KAIOS_CUBE_TRACE(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
+
+	KAIOS_CUBE_TRACE(glDisable(GL_TEXTURE_2D));
+	KAIOS_CUBE_TRACE(glDisable(GL_BLEND));
+	KAIOS_CUBE_TRACE(glDisable(GL_ALPHA_TEST));
+	KAIOS_CUBE_TRACE(glEnable(GL_DEPTH_TEST));
+	KAIOS_CUBE_TRACE(glDepthMask(GL_TRUE));
 
 	aspect = (GLdouble)vid.width / (GLdouble)vid.height;
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	glFrustum(-aspect * 0.5, aspect * 0.5, -0.5, 0.5, 1.0, 20.0);
+	KAIOS_CUBE_TRACE(glMatrixMode(GL_PROJECTION));
+	KAIOS_CUBE_TRACE(glLoadIdentity());
+	KAIOS_CUBE_TRACE(glFrustum(-aspect * 0.5, aspect * 0.5, -0.5, 0.5, 1.0, 20.0));
 
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	glTranslatef(0.0f, 0.0f, -4.0f);
-	glRotatef(angle, 1.0f, 1.0f, 0.0f);
+	KAIOS_CUBE_TRACE(glMatrixMode(GL_MODELVIEW));
+	KAIOS_CUBE_TRACE(glLoadIdentity());
+	KAIOS_CUBE_TRACE(glTranslatef(0.0f, 0.0f, -4.0f));
+	KAIOS_CUBE_TRACE(glRotatef(angle, 1.0f, 1.0f, 0.0f));
 
 	/* GLES1 has no glBegin/glEnd/glVertex3f/GL_QUADS at all -- that's
 	 * desktop GL1.x-only, not part of the GLES1 header this renderer
@@ -138,26 +154,30 @@ RI_KaiosCubeTestFrame(void)
 			{1,0,0}, {0,1,0}, {0,0,1}, {1,1,0}, {1,0,1}, {0,1,1},
 		};
 
-		glEnableClientState(GL_VERTEX_ARRAY);
+		KAIOS_CUBE_TRACE(glEnableClientState(GL_VERTEX_ARRAY));
 
-		if (frame_counter == 1)
+		if (kaios_trace)
 		{
-			Com_Printf("KAIOS_CUBE_TEST: glGetError after glEnableClientState: 0x%x\n", glGetError());
+			Com_Printf("KAIOS_CUBE_TRACE: glGetError after glEnableClientState: 0x%x\n", glGetError());
 		}
 
 		for (i = 0; i < 6; i++)
 		{
+			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glColor4f\n", i); }
 			glColor4f(colors[i][0], colors[i][1], colors[i][2], 1.0f);
+			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glVertexPointer\n", i); }
 			glVertexPointer(3, GL_FLOAT, 0, faces[i]);
+			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glDrawArrays\n", i); }
 			glDrawArrays(GL_TRIANGLES, 0, 6);
+			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: after face %d glDrawArrays\n", i); }
 		}
 
-		if (frame_counter == 1)
+		if (kaios_trace)
 		{
 			Com_Printf("KAIOS_CUBE_TEST: glGetError after cube glDrawArrays: 0x%x\n", glGetError());
 		}
 
-		glDisableClientState(GL_VERTEX_ARRAY);
+		KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
 	}
 
 	/* 2D overlay: a bar that fills up and resets every 20 frames, the
@@ -167,16 +187,16 @@ RI_KaiosCubeTestFrame(void)
 	 * before all of that). Same vertex-array approach as the cube
 	 * above, GL_TRIANGLES (2 tris, 6 verts) per bar, not
 	 * GL_TRIANGLE_FAN, for the same reason as the cube faces above. */
-	glDisable(GL_DEPTH_TEST);
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	glOrtho(0, vid.width, vid.height, 0, -1, 1);
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
+	KAIOS_CUBE_TRACE(glDisable(GL_DEPTH_TEST));
+	KAIOS_CUBE_TRACE(glMatrixMode(GL_PROJECTION));
+	KAIOS_CUBE_TRACE(glLoadIdentity());
+	KAIOS_CUBE_TRACE(glOrtho(0, vid.width, vid.height, 0, -1, 1));
+	KAIOS_CUBE_TRACE(glMatrixMode(GL_MODELVIEW));
+	KAIOS_CUBE_TRACE(glLoadIdentity());
 
 	bar_count = frame_counter % 20;
-	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-	glEnableClientState(GL_VERTEX_ARRAY);
+	KAIOS_CUBE_TRACE(glColor4f(1.0f, 1.0f, 1.0f, 1.0f));
+	KAIOS_CUBE_TRACE(glEnableClientState(GL_VERTEX_ARRAY));
 
 	for (i = 0; i < bar_count; i++)
 	{
@@ -190,12 +210,13 @@ RI_KaiosCubeTestFrame(void)
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 	}
 
-	if (frame_counter == 1)
+	if (kaios_trace)
 	{
 		Com_Printf("KAIOS_CUBE_TEST: glGetError after bar glDrawArrays: 0x%x\n", glGetError());
 	}
 
-	glDisableClientState(GL_VERTEX_ARRAY);
+	KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
+#undef KAIOS_CUBE_TRACE
 
 	if (frame_counter == 1 || (frame_counter % 60) == 0)
 	{
