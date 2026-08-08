@@ -144,6 +144,21 @@ RI_KaiosCubeTestFrame(void)
 	KAIOS_CUBE_TRACE(glClearColor(0.1f, 0.1f, 0.15f, 1.0f));
 	KAIOS_CUBE_TRACE(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
+	/* glFinish() between draws did NOT stop the magenta A/B quad's
+	 * color from bleeding onto the already-drawn white bars -- rules
+	 * out "draws are batched, need an explicit flush point". The other
+	 * candidate: this function's own R_ApplyGLBuffer() call at the end
+	 * of the PREVIOUS frame (the real HUD-text test below) leaves
+	 * GL_COLOR_ARRAY enabled if it doesn't get disabled on every
+	 * return path, and once GL_COLOR_ARRAY is enabled, glColor4f()
+	 * (the single-value uniform) is ignored entirely in favor of
+	 * whatever stale per-vertex color array pointer/data is still
+	 * bound -- which would explain a fixed, wrong color showing up
+	 * across unrelated draw calls that all correctly called glColor4f.
+	 * Defensively disable it at the very start of every frame here,
+	 * before anything else runs. */
+	KAIOS_CUBE_TRACE(glDisableClientState(GL_COLOR_ARRAY));
+
 	/* One-time attempt to load a real skybox (6 distinct face textures,
 	 * one per cube face -- a much better test than conchars: skies are
 	 * full solid photographic images, not a mostly-transparent glyph
