@@ -34,6 +34,20 @@
 glbuffer_t gl_buf;	// our drawing buffer, used globally
 int cur_lm_copy;	// which lightmap copy to use (when lightmapcopies=on)
 
+#ifdef __EMSCRIPTEN__
+/* How many times this actually flushed (issued a real glDrawElements)
+ * this frame -- reset in gl1_main.c alongside c_brush_polys, reported
+ * via KAIOS_OCCL. Real-device testing found a hard FPS cliff above
+ * ~700 polys even with occlusion culling actively cutting geometry,
+ * which smells like draw-call/state-change count rather than raw
+ * triangle count -- this settles whether R_UpdateGLBuffer's batching
+ * (only flushes on a texture/lightmap/flags/alpha change) is actually
+ * merging many surfaces per draw call, or effectively flushing on
+ * nearly every single one because the lightmap atlas position differs
+ * surface to surface even on a shared wall texture. */
+int r_buf_flushes;
+#endif
+
 static GLushort vtx_ptr, idx_ptr;	// pointers for array positions in gl_buf
 
 extern void R_SetPerspective(GLdouble fovy);
@@ -99,6 +113,10 @@ R_ApplyGLBuffer(void)
 	{
 		return;
 	}
+
+#ifdef __EMSCRIPTEN__
+	r_buf_flushes++;
+#endif
 
 	// defaults for drawing (mostly buf_singletex features)
 	vtx_size = 3;

@@ -473,6 +473,28 @@ R_DrawAliasModel(entity_t *currententity, const model_t *currentmodel)
 		{
 			return;
 		}
+
+		/* R_CullAliasModel above is a pure frustum test -- entities have
+		 * no distance or occlusion cull at all otherwise, unlike world
+		 * geometry (see r_distcull_dist's registration comment,
+		 * gl1_main.c). Real-device r_speeds output showed epoly (alias
+		 * model triangle count) spiking into the thousands on open maps
+		 * with several monsters simultaneously in frustum -- far bigger
+		 * than wpoly, and the actual driver of this device's worst FPS
+		 * drops. Same cheap cutoff, same cvar, reused here. */
+		if (r_distcull_dist->value > 0)
+		{
+			vec3_t delta;
+			float distsq;
+
+			VectorSubtract(currententity->origin, r_origin, delta);
+			distsq = DotProduct(delta, delta);
+
+			if (distsq > r_distcull_dist->value * r_distcull_dist->value)
+			{
+				return;
+			}
+		}
 	}
 
 	if (currententity->flags & RF_WEAPONMODEL)

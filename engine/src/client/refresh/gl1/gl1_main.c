@@ -1895,6 +1895,12 @@ R_RenderView(refdef_t *fd)
 	{
 		c_brush_polys = 0;
 		c_alias_polys = 0;
+#ifdef __EMSCRIPTEN__
+		{
+			extern int r_buf_flushes;
+			r_buf_flushes = 0;
+		}
+#endif
 	}
 
 	R_PushDlights();
@@ -1939,15 +1945,17 @@ R_RenderView(refdef_t *fd)
 	{
 		extern int r_occl_nodes_tested, r_occl_nodes_culled;
 		extern int r_occl_cells_marked, r_occl_surfs_projected, r_occl_surfs_skipped;
+		extern int r_buf_flushes;
 		static int kaios_occl_frame;
 
 		if ((kaios_occl_frame++ % 60) == 0)
 		{
 			Com_Printf("KAIOS_OCCL: active=%d nodes_tested=%d nodes_culled=%d "
-				"cells_marked=%d surfs_projected=%d surfs_skipped=%d wpoly=%d\n",
+				"cells_marked=%d surfs_projected=%d surfs_skipped=%d wpoly=%d "
+				"buf_flushes=%d\n",
 				(int)r_occlusion_cull->value, r_occl_nodes_tested, r_occl_nodes_culled,
 				r_occl_cells_marked, r_occl_surfs_projected, r_occl_surfs_skipped,
-				c_brush_polys);
+				c_brush_polys, r_buf_flushes);
 		}
 	}
 #endif
