@@ -104,6 +104,7 @@ extern void RI_KaiosResetBufTrace(void);
  * staying r_notexture means GetSkyImage() couldn't find that name). */
 extern image_t *sky_images[6];
 extern void RI_SetSky(const char *name, float rotate, vec3_t axis);
+extern unsigned d_8to24table[256];
 #define KAIOS_K_ENTER 13
 #define KAIOS_K_KP_ENTER 158
 
@@ -158,6 +159,26 @@ RI_KaiosCubeTestFrame(void)
 	 * Defensively disable it at the very start of every frame here,
 	 * before anything else runs. */
 	KAIOS_CUBE_TRACE(glDisableClientState(GL_COLOR_ARRAY));
+
+	/* The manually-built checkerboard mip-chain test (below) rendered
+	 * correctly, proving mipmapped texturing works fine on this device
+	 * in general -- but every REAL asset (conchars, sky) still comes
+	 * back solid black regardless of filter/mipmap config. conchars is
+	 * decoded from 8-bit indices through d_8to24table (populated by
+	 * GetPCXPalette() from pics/colormap.pcx's embedded palette, early
+	 * in RI_Init(), before Draw_InitLocal() loads conchars) -- if that
+	 * table is actually all-zero/garbage at runtime on this device (a
+	 * genuinely different failure than anything GL-related), decoding
+	 * would silently produce uniformly black RGBA data that uploads
+	 * and samples PERFECTLY FINE, matching every single black-texture
+	 * observation so far without needing any GL bug at all. Print a
+	 * few real entries directly to check. */
+	if ((frame_counter % 60) == 1)
+	{
+		Com_Printf("KAIOS_CUBE_TEST: d_8to24table[0]=0x%08x [15]=0x%08x [32]=0x%08x [96]=0x%08x [255]=0x%08x\n",
+			d_8to24table[0], d_8to24table[15], d_8to24table[32],
+			d_8to24table[96], d_8to24table[255]);
+	}
 
 	/* One-time attempt to load a real skybox (6 distinct face textures,
 	 * one per cube face -- a much better test than conchars: skies are
