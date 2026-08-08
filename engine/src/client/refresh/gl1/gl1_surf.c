@@ -999,6 +999,39 @@ R_DrawBrushModel(entity_t *currententity, const model_t *currentmodel)
 	}
 }
 
+/*
+ * Squared distance from r_origin (the viewer) to the closest point on an
+ * axis-aligned box -- 0 if the viewer is inside or touching the box.
+ * Used by r_distcull_dist below: comparing squared distances avoids a
+ * sqrt() on a call that can run thousands of times per frame walking a
+ * big outdoor map's BSP tree. Same helper as the software renderer's
+ * R_BoxDistSqFromOrigin (sw_bsp.c).
+ */
+static float
+R_BoxDistSqFromOrigin(const vec3_t mins, const vec3_t maxs)
+{
+	float distsq = 0;
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		float v = r_origin[i];
+
+		if (v < mins[i])
+		{
+			float d = mins[i] - v;
+			distsq += d * d;
+		}
+		else if (v > maxs[i])
+		{
+			float d = v - maxs[i];
+			distsq += d * d;
+		}
+	}
+
+	return distsq;
+}
+
 static void
 R_RecursiveWorldNode(entity_t *currententity, mnode_t *node)
 {
@@ -1022,6 +1055,20 @@ R_RecursiveWorldNode(entity_t *currententity, mnode_t *node)
 	if (r_cull->value && R_CullBox(node->minmaxs, node->minmaxs + 3, frustum))
 	{
 		return;
+	}
+
+	/* Cheap draw-distance cutoff, same trick and same cvar as the
+	 * software renderer (see gl1_main.c's r_distcull_dist registration
+	 * comment) -- skip whole BSP nodes farther than this from the
+	 * viewer before any of their surfaces reach the draw calls below. */
+	if (r_distcull_dist->value > 0)
+	{
+		float cutoff = r_distcull_dist->value;
+
+		if (R_BoxDistSqFromOrigin(node->minmaxs, node->minmaxs + 3) > cutoff * cutoff)
+		{
+			return;
+		}
 	}
 
 	/* if a leaf node, draw stuff */

@@ -916,6 +916,7 @@ cvar_t *gl_zfix;
 cvar_t *gl_finish;
 cvar_t *r_clear;
 cvar_t *r_cull;
+cvar_t *r_distcull_dist;
 cvar_t *gl_polyblend;
 cvar_t *gl1_flashblend;
 cvar_t *gl1_saturatelighting;
@@ -2069,6 +2070,22 @@ R_Register(void)
 	gl_finish = ri.Cvar_Get("gl_finish", "0", CVAR_ARCHIVE);
 	r_clear = ri.Cvar_Get("r_clear", "0", 0);
 	r_cull = ri.Cvar_Get("r_cull", "1", 0);
+
+	/* Same cheap draw-distance cutoff as the software renderer
+	 * (r_distcull_dist, see sw_main.c's registration comment for the
+	 * fuller rationale and on-device tuning history) -- this renderer
+	 * has no equivalent at all by default, so on the same map it walks
+	 * and draws every PVS-visible surface regardless of distance,
+	 * which is the real-device-confirmed reason gl1's polycount reads
+	 * much higher than soft's on identical maps. Sharing the exact
+	 * same cvar name means the existing KaiOS Tuning menu slider
+	 * (menu.c, s_kaios_distcull_slider) works for this renderer too
+	 * with no menu changes needed. */
+#ifdef __EMSCRIPTEN__
+	r_distcull_dist = ri.Cvar_Get("r_distcull_dist", "1200", CVAR_ARCHIVE);
+#else
+	r_distcull_dist = ri.Cvar_Get("r_distcull_dist", "0", CVAR_ARCHIVE);
+#endif
 	gl_polyblend = ri.Cvar_Get("gl_polyblend", "1", 0);
 	gl1_flashblend = ri.Cvar_Get("gl1_flashblend", "0", 0);
 	r_fixsurfsky = ri.Cvar_Get("r_fixsurfsky", "0", CVAR_ARCHIVE);

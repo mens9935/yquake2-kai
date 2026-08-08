@@ -232,6 +232,7 @@ extern cvar_t *gl1_ztrick;
 extern cvar_t *gl_zfix;
 extern cvar_t *r_clear;
 extern cvar_t *r_cull;
+extern cvar_t *r_distcull_dist;
 extern cvar_t *gl1_polyblend;
 extern cvar_t *gl1_flashblend;
 extern cvar_t *r_modulate;
