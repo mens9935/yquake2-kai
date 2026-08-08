@@ -26,6 +26,35 @@
 
 #include "header/local.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+/*
+ * This renderer numbers its own texture objects (image->texnum =
+ * TEXNUM_IMAGES + index, see header/local.h) and hands that bare integer
+ * straight to glBindTexture, relying on classic desktop GL's "binding an
+ * unused name creates a new texture object with that name" behavior.
+ * Emscripten's WebGL glBindTexture instead looks the id up in its own
+ * GL.textures[] table, which is populated only by glGenTextures -- an id
+ * that was never glGenTextures'd resolves to undefined, and the WebGL
+ * binding coerces that to null, silently unbinding GL_TEXTURE_2D instead
+ * of creating/binding our texture object. Every following glTexImage2D /
+ * glTexParameteri / draw call then operates on "no texture bound to this
+ * target", which samples as solid black with no GL error raised -- this
+ * was the root cause behind the black cube / black conchars font found
+ * via the diagnostic cube test (confirmed: glTexParameteri on such an id
+ * throws GL_INVALID_OPERATION, exactly what WebGL raises when no texture
+ * is bound; a texture id obtained via a real glGenTextures always worked).
+ * Fix: before every bind, register a real WebGLTexture at that id in
+ * GL.textures[] if one isn't already there.
+ */
+EM_JS(void, KAIOS_EnsureGLTextureId, (int texnum), {
+	if (texnum && !GL.textures[texnum]) {
+		GL.textures[texnum] = GLctx.createTexture();
+	}
+});
+#endif
+
 image_t gltextures[MAX_GLTEXTURES];
 int numgltextures;
 static int image_max = 0;
@@ -212,6 +241,9 @@ R_Bind(int texnum)
 	}
 
 	gl_state.currenttextures[gl_state.currenttmu] = texnum;
+#ifdef __EMSCRIPTEN__
+	KAIOS_EnsureGLTextureId(texnum);
+#endif
 	glBindTexture(GL_TEXTURE_2D, texnum);
 	return true;
 }

@@ -258,6 +258,10 @@ extern float r_world_matrix[16];
 
 extern unsigned char gammatable[256];
 
+#ifdef __EMSCRIPTEN__
+void KAIOS_EnsureGLTextureId(int texnum);
+#endif
+
 qboolean R_Bind(int texnum);
 
 void R_TexEnv(GLenum value);
