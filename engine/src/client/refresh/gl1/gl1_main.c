@@ -559,6 +559,98 @@ RI_KaiosCubeTestFrame(void)
 		glDisable(GL_TEXTURE_2D);
 	}
 
+	/* Earlier this session (before the glFrustum fix), a cube face
+	 * textured with SYNTHETIC random noise -- freshly uploaded right
+	 * here at runtime, single level, no mipmaps -- rendered visibly
+	 * correctly. Every REAL asset (conchars, sky images) has rendered
+	 * solid black ever since, in every configuration tried (whole
+	 * sheet, zoomed, forced NEAREST). Build a small, deliberately
+	 * COMPLETE mipmap chain (8x8 down to 1x1, a red/white checkerboard
+	 * so it's visually unambiguous) entirely ourselves, with the
+	 * DEFAULT (non-forced) GL_LINEAR_MIPMAP_NEAREST filter gl_filter_min
+	 * normally uses -- unlike the isolated quad above, which forces
+	 * NEAREST. If this renders the checkerboard fine, mipmapped
+	 * texturing itself works on this device and the bug is specific to
+	 * how gl1_image.c's R_Upload32Soft() builds real assets' mip chains
+	 * (or their pixel data); if this ALSO comes back black, the bug is
+	 * in this device's mipmap sampling generally, regardless of data
+	 * source. */
+	{
+		static GLuint synth_tex = 0;
+		static qboolean synth_tex_ready = false;
+
+		if (!synth_tex_ready)
+		{
+			int lvl, size;
+
+			synth_tex_ready = true;
+			glGenTextures(1, &synth_tex);
+			glBindTexture(GL_TEXTURE_2D, synth_tex);
+
+			for (lvl = 0, size = 8; size >= 1; lvl++, size /= 2)
+			{
+				GLubyte pixels[8 * 8 * 4];
+				int x, y;
+
+				for (y = 0; y < size; y++)
+				{
+					for (x = 0; x < size; x++)
+					{
+						int idx = (y * size + x) * 4;
+						qboolean white = ((x + y) & 1) ? true : false;
+
+						pixels[idx + 0] = 255;
+						pixels[idx + 1] = white ? 255 : 0;
+						pixels[idx + 2] = white ? 255 : 0;
+						pixels[idx + 3] = 255;
+					}
+				}
+
+				glTexImage2D(GL_TEXTURE_2D, lvl, GL_RGBA, size, size, 0,
+					GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+			}
+
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+			if (kaios_trace)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: synth mip chain built, texid=%u glGetError=0x%x\n",
+					synth_tex, glGetError());
+			}
+		}
+
+		{
+			GLfloat synth_quad[8] = {
+				120, 4,  136, 4,  136, 20,  120, 20,
+			};
+			static const GLfloat synth_uv[8] = {
+				0,0, 1,0, 1,1, 0,1,
+			};
+
+			glEnable(GL_TEXTURE_2D);
+			glBindTexture(GL_TEXTURE_2D, synth_tex);
+			glEnableClientState(GL_VERTEX_ARRAY);
+			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+			glVertexPointer(2, GL_FLOAT, 0, synth_quad);
+			glTexCoordPointer(2, GL_FLOAT, 0, synth_uv);
+			glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+			{
+				qboolean synth_trace = ((frame_counter % 60) == 1) ? true : false;
+				GLenum err = glGetError();
+
+				if (synth_trace)
+				{
+					Com_Printf("KAIOS_CUBE_TEST: glGetError after synth mip quad: 0x%x\n", err);
+				}
+			}
+
+			glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+			glDisable(GL_TEXTURE_2D);
+		}
+	}
+
 	KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
 
 	/* Draw actual HUD-style text through the REAL buffered 2D pipeline
