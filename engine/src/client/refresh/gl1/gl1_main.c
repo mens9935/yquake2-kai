@@ -328,12 +328,25 @@ RI_KaiosCubeTestFrame(void)
 			 * the next face's bind can change it. */
 			glFinish();
 
-			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: after face %d glDrawArrays+glFinish, glGetError=0x%x\n", i, glGetError()); }
+			/* Unconditional drain -- glGetError() empties a QUEUE, not
+			 * just "how did the last call go". Gating the call itself
+			 * behind kaios_trace (frame 1 only) meant frames 2+ never
+			 * drained here at all, so any real error from this loop
+			 * would sit unread until whatever unrelated code happened
+			 * to check glGetError() next (e.g. R_ApplyGLBuffer's own
+			 * per-frame trace) -- misattributing it entirely. */
+			{
+				GLenum err = glGetError();
+				if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: after face %d glDrawArrays+glFinish, glGetError=0x%x\n", i, err); }
+			}
 		}
 
-		if (kaios_trace)
 		{
-			Com_Printf("KAIOS_CUBE_TEST: glGetError after cube glDrawArrays: 0x%x\n", glGetError());
+			GLenum err = glGetError();
+			if (kaios_trace)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: glGetError after cube glDrawArrays: 0x%x\n", err);
+			}
 		}
 
 		KAIOS_CUBE_TRACE(glDisableClientState(GL_TEXTURE_COORD_ARRAY));
@@ -372,9 +385,12 @@ RI_KaiosCubeTestFrame(void)
 			glDrawArrays(GL_LINE_LOOP, 0, 4);
 		}
 
-		if (kaios_trace)
 		{
-			Com_Printf("KAIOS_CUBE_TEST: glGetError after wireframe glDrawArrays: 0x%x\n", glGetError());
+			GLenum err = glGetError();
+			if (kaios_trace)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: glGetError after wireframe glDrawArrays: 0x%x\n", err);
+			}
 		}
 
 		KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
@@ -411,9 +427,12 @@ RI_KaiosCubeTestFrame(void)
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 	}
 
-	if (kaios_trace)
 	{
-		Com_Printf("KAIOS_CUBE_TEST: glGetError after bar glDrawArrays: 0x%x\n", glGetError());
+		GLenum err = glGetError();
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: glGetError after bar glDrawArrays: 0x%x\n", err);
+		}
 	}
 
 	/* Force the white bars above to actually flush before the magenta
@@ -423,9 +442,12 @@ RI_KaiosCubeTestFrame(void)
 	 * captured per-draw. glFinish() is the direct test of that. */
 	glFinish();
 
-	if (kaios_trace)
 	{
-		Com_Printf("KAIOS_CUBE_TEST: glGetError after bar glFinish: 0x%x\n", glGetError());
+		GLenum err = glGetError();
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: glGetError after bar glFinish: 0x%x\n", err);
+		}
 	}
 
 	/* glDrawArrays vs glDrawElements A/B test: an identical-shaped
@@ -449,9 +471,12 @@ RI_KaiosCubeTestFrame(void)
 		glVertexPointer(2, GL_FLOAT, 0, idx_quad);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx_indices);
 
-		if (kaios_trace)
 		{
-			Com_Printf("KAIOS_CUBE_TEST: glGetError after glDrawElements A/B quad: 0x%x\n", glGetError());
+			GLenum err = glGetError();
+			if (kaios_trace)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: glGetError after glDrawElements A/B quad: 0x%x\n", err);
+			}
 		}
 	}
 
@@ -490,9 +515,27 @@ RI_KaiosCubeTestFrame(void)
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-		if (kaios_trace)
+		/* glGetError() drains a QUEUE, not just "how did the last call
+		 * go" -- if this isolated quad's own calls generate an error
+		 * here and nothing reads it until some totally unrelated LATER
+		 * call checks glGetError() (e.g. R_ApplyGLBuffer's own trace),
+		 * that later, innocent call gets blamed for an error it never
+		 * caused. Real-device testing showed exactly this after this
+		 * NEAREST change landed: R_ApplyGLBuffer's glDrawElements
+		 * trace, previously always 0x0, started reading 0x502 (
+		 * GL_INVALID_OPERATION) on every single call -- almost
+		 * certainly this block's own unconsumed error leaking forward,
+		 * not a new problem in R_ApplyGLBuffer. Drain unconditionally,
+		 * every frame, so no error from here can contaminate later
+		 * checks; only print every ~60 frames to avoid flooding. */
 		{
-			Com_Printf("KAIOS_CUBE_TEST: glGetError after forced NEAREST glTexParameteri: 0x%x\n", glGetError());
+			qboolean isolated_quad_trace = ((frame_counter % 60) == 1) ? true : false;
+			GLenum err = glGetError();
+
+			if (isolated_quad_trace)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: glGetError after forced NEAREST glTexParameteri: 0x%x\n", err);
+			}
 		}
 
 		glEnableClientState(GL_VERTEX_ARRAY);
@@ -501,9 +544,15 @@ RI_KaiosCubeTestFrame(void)
 		glTexCoordPointer(2, GL_FLOAT, 0, tex_quad_uv);
 		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-		if (kaios_trace)
+		/* Drain again after the draw, same reasoning. */
 		{
-			Com_Printf("KAIOS_CUBE_TEST: glGetError after isolated textured quad: 0x%x\n", glGetError());
+			qboolean isolated_quad_trace = ((frame_counter % 60) == 1) ? true : false;
+			GLenum err = glGetError();
+
+			if (isolated_quad_trace)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: glGetError after isolated textured quad glDrawArrays: 0x%x\n", err);
+			}
 		}
 
 		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
