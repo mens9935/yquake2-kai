@@ -917,6 +917,7 @@ cvar_t *gl_finish;
 cvar_t *r_clear;
 cvar_t *r_cull;
 cvar_t *r_distcull_dist;
+cvar_t *r_occlusion_cull;
 cvar_t *gl_polyblend;
 cvar_t *gl1_flashblend;
 cvar_t *gl1_saturatelighting;
@@ -1912,6 +1913,8 @@ R_RenderView(refdef_t *fd)
 
 	R_MarkLeaves(); /* done here so we know if we're in water */
 
+	R_OcclusionGridClear();
+
 	R_DrawWorld();
 
 	R_DrawEntitiesOnList();
@@ -2085,6 +2088,30 @@ R_Register(void)
 	r_distcull_dist = ri.Cvar_Get("r_distcull_dist", "1200", CVAR_ARCHIVE);
 #else
 	r_distcull_dist = ri.Cvar_Get("r_distcull_dist", "0", CVAR_ARCHIVE);
+#endif
+
+	/* Coarse CPU-side screen-space occlusion cull (gl1_surf.c): this
+	 * renderer has no GPU occlusion query extension available on this
+	 * device's WebGL1 context and, unlike the software renderer, no
+	 * built-in scanline occlusion either, so on the same map it submits
+	 * far more geometry per frame than soft does -- confirmed on a real
+	 * device (6x+ the poly count at the same viewpoint, with FPS
+	 * sometimes worse than soft as a direct result on this slow WebGL
+	 * emulation layer, where every extra draw carries real overhead).
+	 * Marks a small grid of already-covered screen cells from opaque
+	 * surfaces as the world BSP is walked front-to-back, and skips
+	 * whole nodes once their projected screen rect is provably behind
+	 * already-drawn geometry. Deliberately conservative (see
+	 * R_BoxToScreenRect/R_WorldPointToScreen in gl1_surf.c): anything
+	 * it can't safely project just doesn't get culled, so a wrong
+	 * result costs performance, never correctness/visible holes. New
+	 * and unproven on real hardware -- CVAR_ARCHIVE and console/menu
+	 * toggleable with no rebuild needed if it ever needs to be turned
+	 * off. */
+#ifdef __EMSCRIPTEN__
+	r_occlusion_cull = ri.Cvar_Get("r_occlusion_cull", "1", CVAR_ARCHIVE);
+#else
+	r_occlusion_cull = ri.Cvar_Get("r_occlusion_cull", "0", CVAR_ARCHIVE);
 #endif
 	gl_polyblend = ri.Cvar_Get("gl_polyblend", "1", 0);
 	gl1_flashblend = ri.Cvar_Get("gl1_flashblend", "0", 0);

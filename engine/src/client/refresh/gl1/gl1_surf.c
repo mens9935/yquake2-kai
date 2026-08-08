@@ -43,6 +43,273 @@ extern int cur_lm_copy;
 
 void LM_InitBlock(void);
 void LM_UploadBlock(qboolean dynamic);
+
+/*
+ * ==============================================================
+ *
+ * Coarse CPU-side screen-space occlusion cull (r_occlusion_cull).
+ *
+ * This renderer has no GPU occlusion query available and, unlike the
+ * software renderer, no scanline occlusion built into how it draws --
+ * see r_occlusion_cull's registration comment in gl1_main.c for the
+ * real-device numbers that motivated this. The world BSP is walked
+ * front-to-back (R_RecursiveWorldNode recurses the near child, then
+ * this node's own surfaces, then the far child), so a small grid of
+ * screen cells can be marked "covered" from opaque surfaces as they're
+ * found visible, and later (farther) nodes whose whole projected
+ * screen rect already falls inside covered cells can be skipped
+ * outright -- same idea as the software renderer's front-to-back
+ * scanline occlusion, just coarse and CPU-only instead of per-pixel.
+ *
+ * Deliberately conservative in both directions: a screen rect this
+ * can't confidently compute (e.g. a box straddling the near plane)
+ * is never used to cull and never used to mark coverage. Getting this
+ * wrong can only cost performance (an occluded node drawn anyway),
+ * never correctness (nothing gets skipped without being provably
+ * behind already-drawn opaque geometry).
+ *
+ * ==============================================================
+ */
+
+#define R_OCCL_GRID_W 16
+#define R_OCCL_GRID_H 12
+
+static qboolean r_occl_grid[R_OCCL_GRID_W * R_OCCL_GRID_H];
+static qboolean r_occl_grid_active;
+static float r_occl_tanx, r_occl_tany;
+
+void
+R_OcclusionGridClear(void)
+{
+	memset(r_occl_grid, 0, sizeof(r_occl_grid));
+
+	r_occl_grid_active = false;
+
+	if (!r_occlusion_cull->value)
+	{
+		return;
+	}
+
+	if (r_newrefdef.fov_x <= 1.0f || r_newrefdef.fov_x >= 179.0f ||
+		r_newrefdef.fov_y <= 1.0f || r_newrefdef.fov_y >= 179.0f ||
+		viddef.width <= 0 || viddef.height <= 0)
+	{
+		return; /* degenerate fov/viewport this frame, don't trust it */
+	}
+
+	r_occl_tanx = (float)tan((r_newrefdef.fov_x * M_PI / 180.0) * 0.5);
+	r_occl_tany = (float)tan((r_newrefdef.fov_y * M_PI / 180.0) * 0.5);
+
+	if (r_occl_tanx < 0.001f || r_occl_tany < 0.001f)
+	{
+		return;
+	}
+
+	r_occl_grid_active = true;
+}
+
+/*
+ * Projects a world point to screen pixel coordinates. Returns false
+ * (leaving the outputs untouched) if the point is behind or right at
+ * the near plane -- the caller must treat that as "can't safely
+ * project this", not as some off-to-one-side result.
+ */
+static qboolean
+R_WorldPointToScreen(const vec3_t point, float *sx, float *sy)
+{
+	vec3_t delta;
+	float fwd, right, up;
+
+	VectorSubtract(point, r_origin, delta);
+	fwd = DotProduct(delta, vpn);
+
+	if (fwd < 1.0f)
+	{
+		return false;
+	}
+
+	right = DotProduct(delta, vright);
+	up = DotProduct(delta, vup);
+
+	*sx = (0.5f + 0.5f * (right / fwd) / r_occl_tanx) * viddef.width;
+	*sy = (0.5f - 0.5f * (up / fwd) / r_occl_tany) * viddef.height;
+
+	return true;
+}
+
+static void
+R_OcclusionGridCellRange(float rx0, float ry0, float rx1, float ry1,
+	int *cx0, int *cy0, int *cx1, int *cy1)
+{
+	*cx0 = (int)(rx0 / viddef.width * R_OCCL_GRID_W);
+	*cy0 = (int)(ry0 / viddef.height * R_OCCL_GRID_H);
+	*cx1 = (int)ceil(rx1 / viddef.width * R_OCCL_GRID_W);
+	*cy1 = (int)ceil(ry1 / viddef.height * R_OCCL_GRID_H);
+
+	if (*cx0 < 0) { *cx0 = 0; }
+	if (*cy0 < 0) { *cy0 = 0; }
+	if (*cx1 > R_OCCL_GRID_W) { *cx1 = R_OCCL_GRID_W; }
+	if (*cy1 > R_OCCL_GRID_H) { *cy1 = R_OCCL_GRID_H; }
+}
+
+static void
+R_OcclusionMarkCovered(float rx0, float ry0, float rx1, float ry1)
+{
+	int cx0, cy0, cx1, cy1, x, y;
+
+	R_OcclusionGridCellRange(rx0, ry0, rx1, ry1, &cx0, &cy0, &cx1, &cy1);
+
+	for (y = cy0; y < cy1; y++)
+	{
+		for (x = cx0; x < cx1; x++)
+		{
+			r_occl_grid[y * R_OCCL_GRID_W + x] = true;
+		}
+	}
+}
+
+/*
+ * True only if every grid cell touched by this rect is already marked
+ * covered. Any uncovered cell -- including a degenerate/empty cell
+ * range -- means "not sure", which must count as NOT occluded.
+ */
+static qboolean
+R_OcclusionRectCovered(float rx0, float ry0, float rx1, float ry1)
+{
+	int cx0, cy0, cx1, cy1, x, y;
+
+	R_OcclusionGridCellRange(rx0, ry0, rx1, ry1, &cx0, &cy0, &cx1, &cy1);
+
+	if (cx1 <= cx0 || cy1 <= cy0)
+	{
+		return false;
+	}
+
+	for (y = cy0; y < cy1; y++)
+	{
+		for (x = cx0; x < cx1; x++)
+		{
+			if (!r_occl_grid[y * R_OCCL_GRID_W + x])
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+/*
+ * Projects an axis-aligned world bounding box to a screen-space pixel
+ * rect. Returns false if any of the 8 corners can't be projected --
+ * a box straddling the near plane (e.g. a BSP node containing the
+ * viewer) is exactly the case where a naive screen rect would be
+ * wrong, so it's safer to just not occlusion-test it at all.
+ */
+static qboolean
+R_BoxToScreenRect(const vec3_t mins, const vec3_t maxs,
+	float *rx0, float *ry0, float *rx1, float *ry1)
+{
+	int i;
+	float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+
+	for (i = 0; i < 8; i++)
+	{
+		vec3_t corner;
+		float sx, sy;
+
+		corner[0] = (i & 1) ? maxs[0] : mins[0];
+		corner[1] = (i & 2) ? maxs[1] : mins[1];
+		corner[2] = (i & 4) ? maxs[2] : mins[2];
+
+		if (!R_WorldPointToScreen(corner, &sx, &sy))
+		{
+			return false;
+		}
+
+		if (i == 0)
+		{
+			x0 = x1 = sx;
+			y0 = y1 = sy;
+		}
+		else
+		{
+			if (sx < x0) { x0 = sx; }
+			if (sx > x1) { x1 = sx; }
+			if (sy < y0) { y0 = sy; }
+			if (sy > y1) { y1 = sy; }
+		}
+	}
+
+	if (x0 < 0) { x0 = 0; }
+	if (y0 < 0) { y0 = 0; }
+	if (x1 > viddef.width) { x1 = viddef.width; }
+	if (y1 > viddef.height) { y1 = viddef.height; }
+
+	*rx0 = x0; *ry0 = y0; *rx1 = x1; *ry1 = y1;
+
+	return (x1 > x0 && y1 > y0);
+}
+
+/*
+ * Marks the screen-space footprint of an opaque surface's own polygon
+ * (not its parent leaf/node's much looser bounding box) as covered.
+ * Vertices that fail to project (behind the near plane) are simply
+ * left out of the min/max -- that can only shrink the marked rect,
+ * never grow it, so it stays safe (under-marking costs performance,
+ * over-marking would risk culling something still visible).
+ */
+static void
+R_OcclusionMarkSurface(const msurface_t *surf)
+{
+	const glpoly_t *p;
+	qboolean any = false;
+	float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+
+	for (p = surf->polys; p; p = p->chain)
+	{
+		int vi;
+
+		for (vi = 0; vi < p->numverts; vi++)
+		{
+			float sx, sy;
+
+			if (!R_WorldPointToScreen(p->verts[vi], &sx, &sy))
+			{
+				continue;
+			}
+
+			if (!any)
+			{
+				x0 = x1 = sx;
+				y0 = y1 = sy;
+				any = true;
+			}
+			else
+			{
+				if (sx < x0) { x0 = sx; }
+				if (sx > x1) { x1 = sx; }
+				if (sy < y0) { y0 = sy; }
+				if (sy > y1) { y1 = sy; }
+			}
+		}
+	}
+
+	if (!any)
+	{
+		return;
+	}
+
+	if (x0 < 0) { x0 = 0; }
+	if (y0 < 0) { y0 = 0; }
+	if (x1 > viddef.width) { x1 = viddef.width; }
+	if (y1 > viddef.height) { y1 = viddef.height; }
+
+	if (x1 > x0 && y1 > y0)
+	{
+		R_OcclusionMarkCovered(x0, y0, x1, y1);
+	}
+}
 qboolean LM_AllocBlock(int w, int h, int *x, int *y);
 
 void R_SetCacheState(msurface_t *surf);
@@ -1071,6 +1338,17 @@ R_RecursiveWorldNode(entity_t *currententity, mnode_t *node)
 		}
 	}
 
+	if (r_occl_grid_active)
+	{
+		float rx0, ry0, rx1, ry1;
+
+		if (R_BoxToScreenRect(node->minmaxs, node->minmaxs + 3, &rx0, &ry0, &rx1, &ry1) &&
+			R_OcclusionRectCovered(rx0, ry0, rx1, ry1))
+		{
+			return;
+		}
+	}
+
 	/* if a leaf node, draw stuff */
 	if (node->contents != CONTENTS_NODE)
 	{
@@ -1168,6 +1446,15 @@ R_RecursiveWorldNode(entity_t *currententity, mnode_t *node)
 			{
 				surf->lightmapchain = gl_lms.lightmap_surfaces[surf->lightmaptexturenum];
 				gl_lms.lightmap_surfaces[surf->lightmaptexturenum] = surf;
+			}
+
+			/* This surface is opaque and confirmed visible -- mark its
+			 * own screen footprint covered so farther nodes later in
+			 * this same front-to-back walk can be occlusion-culled
+			 * against it (see R_OcclusionGridClear's comment). */
+			if (r_occl_grid_active)
+			{
+				R_OcclusionMarkSurface(surf);
 			}
 		}
 	}

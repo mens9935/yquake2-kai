@@ -233,6 +233,7 @@ extern cvar_t *gl_zfix;
 extern cvar_t *r_clear;
 extern cvar_t *r_cull;
 extern cvar_t *r_distcull_dist;
+extern cvar_t *r_occlusion_cull;
 extern cvar_t *gl1_polyblend;
 extern cvar_t *gl1_flashblend;
 extern cvar_t *r_modulate;
@@ -290,6 +291,7 @@ void Draw_InitLocal(void);
 void R_SubdivideSurface(model_t *loadmodel, msurface_t *fa);
 void R_RotateForEntity(entity_t *e);
 void R_MarkLeaves(void);
+void R_OcclusionGridClear(void);
 
 extern int r_dlightframecount;
 void R_EmitWaterPolys(msurface_t *fa);
