@@ -2101,19 +2101,22 @@ R_Register(void)
 	 * Marks a small grid of already-covered screen cells from opaque
 	 * surfaces as the world BSP is walked front-to-back, and skips
 	 * whole nodes once their projected screen rect is provably behind
-	 * already-drawn geometry. Deliberately conservative (see
-	 * R_BoxToScreenRect/R_WorldPointToScreen in gl1_surf.c): anything
-	 * it can't safely project just doesn't get culled, so a wrong
-	 * result costs performance, never correctness/visible holes. New
-	 * and unproven on real hardware -- CVAR_ARCHIVE and console/menu
-	 * toggleable with no rebuild needed if it ever needs to be turned
-	 * off. */
-	/* Real-device testing found holes/missing geometry with this on --
-	 * the "conservative" projection logic in gl1_surf.c has a real bug
-	 * somewhere despite the design intent. Off by default until that's
-	 * actually found and fixed; still console/menu toggleable to turn
-	 * back on for testing without a rebuild. */
-	r_occlusion_cull = ri.Cvar_Get("r_occlusion_cull", "0", CVAR_ARCHIVE);
+	 * already-drawn geometry.
+	 *
+	 * A first version marked coverage by each surface's axis-aligned
+	 * screen bounding box, which is unsafe for diagonal/angled walls
+	 * (their bbox covers real screen area outside the wall itself) and
+	 * caused confirmed holes on a real device. Fixed in gl1_surf.c by
+	 * rasterizing each surface's actual convex polygon into the grid
+	 * instead -- a cell is only marked covered if all 4 of its corners
+	 * land inside the polygon, which is exact (not approximate) since
+	 * BSP faces are always convex. Still conservative on the projection
+	 * side: anything that can't be safely projected (behind the near
+	 * plane) is skipped rather than guessed at, so a wrong result can
+	 * only cost performance, never drop visible geometry. CVAR_ARCHIVE
+	 * and console/menu toggleable with no rebuild if it ever needs to
+	 * be turned off again. */
+	r_occlusion_cull = ri.Cvar_Get("r_occlusion_cull", "1", CVAR_ARCHIVE);
 	gl_polyblend = ri.Cvar_Get("gl_polyblend", "1", 0);
 	gl1_flashblend = ri.Cvar_Get("gl1_flashblend", "0", 0);
 	r_fixsurfsky = ri.Cvar_Get("r_fixsurfsky", "0", CVAR_ARCHIVE);

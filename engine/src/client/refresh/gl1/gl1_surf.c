@@ -252,62 +252,134 @@ R_BoxToScreenRect(const vec3_t mins, const vec3_t maxs,
 }
 
 /*
+ * True if (px, py) is inside (or on the edge of) the convex polygon
+ * given by (sx[i], sy[i]), i in [0, n). Works for either winding
+ * order: the sign of the first nonzero edge cross product sets the
+ * expected sign, and any edge that disagrees means the point is
+ * outside. BSP faces are always convex, so this is exact for them
+ * (unlike a bounding-box test, which isn't).
+ */
+static qboolean
+R_PointInConvexPoly2D(float px, float py, const float *sx, const float *sy, int n)
+{
+	int i;
+	int sign = 0;
+
+	for (i = 0; i < n; i++)
+	{
+		int j = (i + 1) % n;
+		float ex = sx[j] - sx[i];
+		float ey = sy[j] - sy[i];
+		float cross = ex * (py - sy[i]) - ey * (px - sx[i]);
+
+		if (cross != 0.0f)
+		{
+			int s = (cross > 0.0f) ? 1 : -1;
+
+			if (sign == 0)
+			{
+				sign = s;
+			}
+			else if (s != sign)
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+#define R_OCCL_MAX_POLY_VERTS 64
+
+/*
  * Marks the screen-space footprint of an opaque surface's own polygon
- * (not its parent leaf/node's much looser bounding box) as covered.
- * Vertices that fail to project (behind the near plane) are simply
- * left out of the min/max -- that can only shrink the marked rect,
- * never grow it, so it stays safe (under-marking costs performance,
- * over-marking would risk culling something still visible).
+ * (not its parent leaf/node's much looser bounding box) as covered --
+ * exactly, not by bounding box. A diagonal/angled wall's axis-aligned
+ * screen bbox can cover a lot of area outside the wall itself; marking
+ * that whole bbox as covered would wrongly hide anything actually
+ * visible in the leftover corners. Instead, only a grid cell whose
+ * all 4 corners land inside the (convex) polygon gets marked -- since
+ * the polygon is convex, that guarantees the cell's whole rectangle is
+ * inside it too, so this stays exact/safe rather than approximate.
+ *
+ * If any vertex fails to project (behind the near plane) or there are
+ * more than R_OCCL_MAX_POLY_VERTS verts, this poly is skipped for
+ * marking entirely rather than guessed at -- under-marking only costs
+ * performance, never correctness.
  */
 static void
 R_OcclusionMarkSurface(const msurface_t *surf)
 {
 	const glpoly_t *p;
-	qboolean any = false;
-	float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 
 	for (p = surf->polys; p; p = p->chain)
 	{
-		int vi;
+		float sx[R_OCCL_MAX_POLY_VERTS], sy[R_OCCL_MAX_POLY_VERTS];
+		float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+		int vi, cx, cy, cx0, cy0, cx1, cy1;
+
+		if (p->numverts < 3 || p->numverts > R_OCCL_MAX_POLY_VERTS)
+		{
+			continue;
+		}
 
 		for (vi = 0; vi < p->numverts; vi++)
 		{
-			float sx, sy;
-
-			if (!R_WorldPointToScreen(p->verts[vi], &sx, &sy))
+			if (!R_WorldPointToScreen(p->verts[vi], &sx[vi], &sy[vi]))
 			{
-				continue;
+				break;
 			}
 
-			if (!any)
+			if (vi == 0)
 			{
-				x0 = x1 = sx;
-				y0 = y1 = sy;
-				any = true;
+				x0 = x1 = sx[vi];
+				y0 = y1 = sy[vi];
 			}
 			else
 			{
-				if (sx < x0) { x0 = sx; }
-				if (sx > x1) { x1 = sx; }
-				if (sy < y0) { y0 = sy; }
-				if (sy > y1) { y1 = sy; }
+				if (sx[vi] < x0) { x0 = sx[vi]; }
+				if (sx[vi] > x1) { x1 = sx[vi]; }
+				if (sy[vi] < y0) { y0 = sy[vi]; }
+				if (sy[vi] > y1) { y1 = sy[vi]; }
 			}
 		}
-	}
 
-	if (!any)
-	{
-		return;
-	}
+		if (vi != p->numverts)
+		{
+			continue; /* a vertex failed to project -- skip this poly */
+		}
 
-	if (x0 < 0) { x0 = 0; }
-	if (y0 < 0) { y0 = 0; }
-	if (x1 > viddef.width) { x1 = viddef.width; }
-	if (y1 > viddef.height) { y1 = viddef.height; }
+		if (x0 < 0) { x0 = 0; }
+		if (y0 < 0) { y0 = 0; }
+		if (x1 > viddef.width) { x1 = viddef.width; }
+		if (y1 > viddef.height) { y1 = viddef.height; }
 
-	if (x1 > x0 && y1 > y0)
-	{
-		R_OcclusionMarkCovered(x0, y0, x1, y1);
+		if (x1 <= x0 || y1 <= y0)
+		{
+			continue;
+		}
+
+		R_OcclusionGridCellRange(x0, y0, x1, y1, &cx0, &cy0, &cx1, &cy1);
+
+		for (cy = cy0; cy < cy1; cy++)
+		{
+			for (cx = cx0; cx < cx1; cx++)
+			{
+				float px0 = (float)cx / R_OCCL_GRID_W * viddef.width;
+				float py0 = (float)cy / R_OCCL_GRID_H * viddef.height;
+				float px1 = (float)(cx + 1) / R_OCCL_GRID_W * viddef.width;
+				float py1 = (float)(cy + 1) / R_OCCL_GRID_H * viddef.height;
+
+				if (R_PointInConvexPoly2D(px0, py0, sx, sy, p->numverts) &&
+					R_PointInConvexPoly2D(px1, py0, sx, sy, p->numverts) &&
+					R_PointInConvexPoly2D(px0, py1, sx, sy, p->numverts) &&
+					R_PointInConvexPoly2D(px1, py1, sx, sy, p->numverts))
+				{
+					r_occl_grid[cy * R_OCCL_GRID_W + cx] = true;
+				}
+			}
+		}
 	}
 }
 qboolean LM_AllocBlock(int w, int h, int *x, int *y);
