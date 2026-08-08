@@ -2054,12 +2054,30 @@ R_Register(void)
 	r_gunfov = ri.Cvar_Get("r_gunfov", "80", CVAR_ARCHIVE);
 	r_farsee = ri.Cvar_Get("r_farsee", "0", CVAR_LATCH | CVAR_ARCHIVE);
 	r_norefresh = ri.Cvar_Get("r_norefresh", "0", 0);
+	/* Both CVAR_ARCHIVE and defaulted differently on this platform so the
+	 * new KaiOS Tuning toggles below persist across launches like every
+	 * other tuning option there, instead of resetting to upstream's
+	 * defaults every boot. r_fullbright defaults ON here specifically:
+	 * disabling the multitexture lightmap pass is expected to be a real
+	 * win on this device's slow WebGL emulation layer, at the cost of
+	 * flat (unlit) world geometry -- toggle it back off from the menu
+	 * to compare. r_speeds defaults ON too, purely so its per-frame
+	 * wpoly/epoly/tex/lmaps console print is there without having to
+	 * type the command in by hand on this platform's keypad. */
+#ifdef __EMSCRIPTEN__
+	r_fullbright = ri.Cvar_Get("r_fullbright", "1", CVAR_ARCHIVE);
+#else
 	r_fullbright = ri.Cvar_Get("r_fullbright", "0", 0);
+#endif
 	r_drawentities = ri.Cvar_Get("r_drawentities", "1", 0);
 	r_drawworld = ri.Cvar_Get("r_drawworld", "1", 0);
 	r_novis = ri.Cvar_Get("r_novis", "0", 0);
 	r_lerpmodels = ri.Cvar_Get("r_lerpmodels", "1", 0);
+#ifdef __EMSCRIPTEN__
+	r_speeds = ri.Cvar_Get("r_speeds", "1", CVAR_ARCHIVE);
+#else
 	r_speeds = ri.Cvar_Get("r_speeds", "0", 0);
+#endif
 
 	r_lightlevel = ri.Cvar_Get("r_lightlevel", "0", 0);
 	gl1_overbrightbits = ri.Cvar_Get("gl1_overbrightbits", "0", CVAR_ARCHIVE);
