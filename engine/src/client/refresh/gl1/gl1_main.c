@@ -383,6 +383,33 @@ RI_KaiosCubeTestFrame(void)
 		Com_Printf("KAIOS_CUBE_TEST: glGetError after bar glDrawArrays: 0x%x\n", glGetError());
 	}
 
+	/* glDrawArrays vs glDrawElements A/B test: an identical-shaped
+	 * quad, but drawn via glDrawElements(GL_UNSIGNED_SHORT indices)
+	 * instead of glDrawArrays -- the exact draw call R_ApplyGLBuffer
+	 * (gl1_buffer.c) uses for literally every piece of real 2D
+	 * content (fonts, pics, HUD) and world geometry, which has never
+	 * once been visually confirmed to produce a pixel despite
+	 * glGetError() reading 0 on every call. Fixed position (not tied
+	 * to bar_count) and a color used nowhere else so it's unambiguous:
+	 * if the glDrawArrays bars above are visible but this magenta
+	 * square isn't, glDrawElements itself -- not texturing -- is the
+	 * culprit. */
+	{
+		GLfloat idx_quad[8] = {
+			200, 4,  216, 4,  216, 20,  200, 20,
+		};
+		static const GLushort idx_indices[6] = {0, 1, 2, 0, 2, 3};
+
+		glColor4f(1.0f, 0.0f, 1.0f, 1.0f);
+		glVertexPointer(2, GL_FLOAT, 0, idx_quad);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx_indices);
+
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: glGetError after glDrawElements A/B quad: 0x%x\n", glGetError());
+		}
+	}
+
 	KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
 
 	/* Draw actual HUD-style text through the REAL buffered 2D pipeline
