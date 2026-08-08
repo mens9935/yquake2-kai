@@ -88,7 +88,7 @@ int r_polycount;
  * (R_UpdateGLBuffer/R_Buffer2DQuad/R_ApplyGLBuffer, gl1_buffer.c) to
  * draw actual HUD-style content as a 2D overlay, the same functions
  * Draw_CharScaled/Draw_Pic use for real console/menu/HUD text. */
-qboolean kaios_cube_test_active = true;
+qboolean kaios_cube_test_active = false;
 extern qboolean keydown[];
 extern image_t *draw_chars;
 extern void RI_KaiosResetBufTrace(void);

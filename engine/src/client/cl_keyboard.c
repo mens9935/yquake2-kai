@@ -516,23 +516,6 @@ Key_Console(int key)
 
 		if (cls.state == ca_disconnected)
 		{
-#ifdef __EMSCRIPTEN__
-			/* This call site is completely separate from -- and
-			 * untraced by -- the SCR_UpdateScreen() call CL_Frame
-			 * makes every frame (cl_main.c). Real-device gl1 testing
-			 * showed the closing-bracket console echo above printing
-			 * with cls.state already ca_disconnected right as it
-			 * happened, meaning a demomap/map never actually reached
-			 * ca_active -- this is very likely the exact call that
-			 * silently throws. */
-			if (strcmp(vid_renderer->string, "gl1") == 0)
-			{
-				Com_Printf("KAIOS_KEY_TRACE: before SCR_UpdateScreen() from Key_Console (cls.state=%d)\n", cls.state);
-				SCR_UpdateScreen();
-				Com_Printf("KAIOS_KEY_TRACE: after SCR_UpdateScreen() from Key_Console\n");
-			}
-			else
-#endif
 			SCR_UpdateScreen();  /* force an update, because the command
 								   	may take some time */
 		}

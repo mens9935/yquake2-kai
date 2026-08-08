@@ -1816,32 +1816,6 @@ SCR_UpdateScreen(void)
 	float separation[2] = {0, 0};
 	float scale = SCR_GetMenuScale();
 
-#ifdef __EMSCRIPTEN__
-	/* Unconditional (not time/frame gated like KAIOS_SCR_TRACE below)
-	 * entry counter -- every prior trace attempt in this investigation
-	 * showed real work happening (sound loads) with zero inner
-	 * KAIOS_SCR_TRACE output, meaning either this function is being
-	 * entered more than once per traced CL_Frame call (reentrancy --
-	 * cl_keyboard.c and cl_view.c both have their own direct
-	 * SCR_UpdateScreen() call sites, separate from CL_Frame's), or it
-	 * is hitting the disable_screen/scr_initialized early-return every
-	 * single time despite real work happening elsewhere. This print
-	 * fires on literally every entry, gated only to the gl1 diagnostic
-	 * build, so the next log settles which one it is. */
-	if (strcmp(vid_renderer->string, "gl1") == 0)
-	{
-		static int kaios_scr_entry_count = 0;
-		kaios_scr_entry_count++;
-		/* cls.disable_screen is a float (client.h), not an int -- an
-		 * earlier version of this print used %d for it, which is a
-		 * variadic type mismatch that also misaligns every argument
-		 * after it, so scr_initialized/con.initialized were reading
-		 * garbage, not their real values. */
-		Com_Printf("KAIOS_SCR_ENTRY: #%d disable_screen=%.0f scr_initialized=%d con.initialized=%d\n",
-			kaios_scr_entry_count, cls.disable_screen, (int)scr_initialized, (int)con.initialized);
-	}
-#endif
-
 	/* if the screen is disabled (loading plaque is
 	   up, or vid mode changing) do nothing at all */
 	if (cls.disable_screen)
@@ -1872,48 +1846,6 @@ SCR_UpdateScreen(void)
 		separation[1] = 0;
 		numframes = 1;
 	}
-
-#ifdef __EMSCRIPTEN__
-	/* Real-device gl1 testing shows the engine reaching "==== Yamagi
-	 * Quake II Initialized ====" and rendering (at least) one frame
-	 * cleanly (a KAIOS_FRAMESPIKE for the expected cold-cache first
-	 * frame). A first attempt at this trace gated on a fixed 8-call
-	 * counter produced zero output on a real device despite the crash
-	 * still happening -- an earlier real-device run (no tracing yet)
-	 * had shown the menu staying up and interactive for a real stretch
-	 * of time (loading menu navigation sounds in response to actual
-	 * key presses) before eventually getting kicked back to the
-	 * console, so 8 calls was very likely spent entirely on
-	 * uninteresting early frames, well before whatever the real
-	 * culprit frame is. Gate on wall-clock time instead (cls.realtime)
-	 * so the trace window covers a real stretch of actual play instead
-	 * of an arbitrary small number of frames. No JS stack trace has
-	 * survived being copied off the device to say which call is
-	 * responsible. Same technique that found the glTexEnvi/
-	 * glPointSize gaps: bracket every top-level call in this function
-	 * with a before/after print, so whichever one never gets its
-	 * "after" print is the one that silently threw. */
-	static int kaios_scr_trace_until = 0;
-	/* Only for the gl1 diagnostic build -- vid_renderer stays "soft"
-	 * for the shipped app, so this trace never fires there at all. */
-	qboolean kaios_scr_trace_enabled = (strcmp(vid_renderer->string, "gl1") == 0);
-	if (kaios_scr_trace_enabled && kaios_scr_trace_until == 0)
-	{
-		/* First real (non-disable_screen-gated) frame -- start a
-		 * 60 real-second window from here. */
-		kaios_scr_trace_until = cls.realtime + 60000;
-	}
-	qboolean kaios_do_trace = kaios_scr_trace_enabled &&
-		(cls.realtime < kaios_scr_trace_until);
-#define KAIOS_SCR_TRACE(x) \
-	do { \
-		if (kaios_do_trace) { Com_Printf("KAIOS_SCR_TRACE: before " #x "\n"); } \
-		x; \
-		if (kaios_do_trace) { Com_Printf("KAIOS_SCR_TRACE: after " #x "\n"); } \
-	} while (0)
-#else
-#define KAIOS_SCR_TRACE(x) x
-#endif
 
 	for (i = 0; i < numframes; i++)
 	{
@@ -1979,31 +1911,31 @@ SCR_UpdateScreen(void)
 			}
 
 			/* do 3D refresh drawing, and then update the screen */
-			KAIOS_SCR_TRACE(SCR_CalcVrect());
+			SCR_CalcVrect();
 
 			/* clear any dirty part of the background */
-			KAIOS_SCR_TRACE(SCR_TileClear());
+			SCR_TileClear();
 
-			KAIOS_SCR_TRACE(V_RenderView(separation[i]));
+			V_RenderView(separation[i]);
 
-			KAIOS_SCR_TRACE(SCR_DrawStats());
-			KAIOS_SCR_TRACE(SCR_DrawSpeed());
+			SCR_DrawStats();
+			SCR_DrawSpeed();
 #ifdef __EMSCRIPTEN__
-			KAIOS_SCR_TRACE(SCR_DrawKaiosStats());
+			SCR_DrawKaiosStats();
 #endif
 
 			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 1)
 			{
-				KAIOS_SCR_TRACE(SCR_DrawLayout());
+				SCR_DrawLayout();
 			}
 
 			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 2)
 			{
-				KAIOS_SCR_TRACE(CL_DrawInventory());
+				CL_DrawInventory();
 			}
 
-			KAIOS_SCR_TRACE(SCR_DrawNet());
-			KAIOS_SCR_TRACE(SCR_CheckDrawCenterString());
+			SCR_DrawNet();
+			SCR_CheckDrawCenterString();
 
 			if (scr_timegraph->value)
 			{
@@ -2016,20 +1948,18 @@ SCR_UpdateScreen(void)
 				SCR_DrawDebugGraph();
 			}
 
-			KAIOS_SCR_TRACE(SCR_DrawPause());
+			SCR_DrawPause();
 
-			KAIOS_SCR_TRACE(SCR_DrawConsole());
+			SCR_DrawConsole();
 
-			KAIOS_SCR_TRACE(M_Draw());
+			M_Draw();
 
-			KAIOS_SCR_TRACE(SCR_DrawLoading());
+			SCR_DrawLoading();
 		}
 	}
 
 	SCR_Framecounter();
-	KAIOS_SCR_TRACE(R_EndFrame());
-
-#undef KAIOS_SCR_TRACE
+	R_EndFrame();
 }
 
 static float
@@ -2137,10 +2067,15 @@ SCR_GetDefaultScale(void)
 
 		/* Requested bump: the auto-computed size (0.75x at this port's
 		 * native 240x320) read as noticeably too small on a real
-		 * device. 8% puts it within the requested 5-10% range without
-		 * being large enough to start clipping the HUD/menu layout
-		 * that SCR_LayoutXV/YV positions against this same reference. */
-		scale *= 1.08f;
+		 * device, and even the earlier 8% bump (0.81x) still read as
+		 * hard to read now that real texture content finally renders
+		 * (previously masked by the black-texture bug). 25% (0.9375x)
+		 * trades a little of the shrink-to-fit margin SCR_LayoutXV/YV
+		 * relies on for real legibility gains, while staying under 1x
+		 * so elements positioned near the 320-reference right/bottom
+		 * edge still land just inside this port's narrower 240-wide
+		 * buffer instead of clipping outright. */
+		scale *= 1.25f;
 
 		if (scale < 0.1f)
 		{

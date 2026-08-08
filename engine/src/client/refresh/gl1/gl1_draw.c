@@ -271,6 +271,8 @@ RDraw_Fill(int x, int y, int w, int h, int c)
 		unsigned c;
 		byte v[4];
 	} color;
+	GLubyte col[4 * 4];
+	int i;
 
 	if ((unsigned)c > 255)
 	{
@@ -280,8 +282,25 @@ RDraw_Fill(int x, int y, int w, int h, int c)
 	glDisable(GL_TEXTURE_2D);
 
 	color.c = d_8to24table[c];
-	glColor4f(color.v [ 0 ] / 255.0, color.v [ 1 ] / 255.0,
-			   color.v [ 2 ] / 255.0, 1);
+
+	/* A real per-vertex color array instead of the constant glColor4f
+	 * state this used to rely on -- this device's Emscripten WebGL GL1
+	 * emulation has shown a confirmed, reproducible bug where a later
+	 * glColor4f() call can retroactively change the rendered color of
+	 * an earlier, already-issued constant-color draw (found via the
+	 * cube-test diagnostic while chasing the black-texture bug). A
+	 * genuine vertex attribute array sidesteps that bug entirely, since
+	 * the draw no longer depends on ambient glColor4f state at all --
+	 * likely candidate for the menu flicker seen once textures started
+	 * rendering (this is called every frame the menu/pause dim is up,
+	 * right alongside per-item highlight color changes). */
+	for (i = 0; i < 4; i++)
+	{
+		col[i * 4 + 0] = color.v[0];
+		col[i * 4 + 1] = color.v[1];
+		col[i * 4 + 2] = color.v[2];
+		col[i * 4 + 3] = 255;
+	}
 
 	GLfloat vtx[] = {
 		x, y,
@@ -291,10 +310,13 @@ RDraw_Fill(int x, int y, int w, int h, int c)
 	};
 
 	glEnableClientState( GL_VERTEX_ARRAY );
+	glEnableClientState( GL_COLOR_ARRAY );
 
 	glVertexPointer( 2, GL_FLOAT, 0, vtx );
+	glColorPointer( 4, GL_UNSIGNED_BYTE, 0, col );
 	glDrawArrays( GL_TRIANGLE_FAN, 0, 4 );
 
+	glDisableClientState( GL_COLOR_ARRAY );
 	glDisableClientState( GL_VERTEX_ARRAY );
 
 	glColor4f( 1, 1, 1, 1 );
@@ -304,10 +326,22 @@ RDraw_Fill(int x, int y, int w, int h, int c)
 void
 RDraw_FadeScreen(void)
 {
+	GLubyte col[4 * 4];
+	int i;
+
 	R_ApplyGLBuffer();	// draw what needs to be hidden
 	glEnable(GL_BLEND);
 	glDisable(GL_TEXTURE_2D);
-	glColor4f(0, 0, 0, 0.8);
+
+	/* Per-vertex color array instead of constant glColor4f state --
+	 * see RDraw_Fill's comment above for why. */
+	for (i = 0; i < 4; i++)
+	{
+		col[i * 4 + 0] = 0;
+		col[i * 4 + 1] = 0;
+		col[i * 4 + 2] = 0;
+		col[i * 4 + 3] = 204; /* 0.8 * 255 */
+	}
 
 	GLfloat vtx[] = {
 		0, 0,
@@ -317,10 +351,13 @@ RDraw_FadeScreen(void)
 	};
 
 	glEnableClientState( GL_VERTEX_ARRAY );
+	glEnableClientState( GL_COLOR_ARRAY );
 
 	glVertexPointer( 2, GL_FLOAT, 0, vtx );
+	glColorPointer( 4, GL_UNSIGNED_BYTE, 0, col );
 	glDrawArrays( GL_TRIANGLE_FAN, 0, 4 );
 
+	glDisableClientState( GL_COLOR_ARRAY );
 	glDisableClientState( GL_VERTEX_ARRAY );
 
 	glColor4f(1, 1, 1, 1);
