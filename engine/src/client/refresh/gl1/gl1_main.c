@@ -672,6 +672,89 @@ RI_KaiosCubeTestFrame(void)
 		}
 	}
 
+	/* d_8to24table is confirmed correctly populated with real, varied
+	 * color data ([15]=0xffebebeb is white) -- not the unpopulated-
+	 * palette theory. The small (8x8) synthetic mip chain above proved
+	 * mipmapped texturing works, but conchars is NOT mipmapped at all
+	 * (it_pic type, mipmap=false in R_Upload32Soft() -- a single
+	 * glTexImage2D call, no mip levels, gl_filter_max/GL_LINEAR filter).
+	 * The one thing never yet isolated: SIZE. conchars is 256x256;
+	 * every synthetic texture tried so far has been 8x8. Build a
+	 * single-level (no mipmaps -- matching conchars' real config
+	 * exactly), 256x256 synthetic texture with a coarse, unambiguous
+	 * checkerboard, GL_LINEAR filter (matching gl_filter_max), to
+	 * isolate whether large single-level non-mipmapped textures
+	 * specifically are what's broken on this device. */
+	{
+		static GLuint synth_tex_big = 0;
+		static qboolean synth_tex_big_ready = false;
+
+		if (!synth_tex_big_ready)
+		{
+			static GLubyte pixels[256 * 256 * 4];
+			int x, y;
+
+			synth_tex_big_ready = true;
+
+			for (y = 0; y < 256; y++)
+			{
+				for (x = 0; x < 256; x++)
+				{
+					int idx = (y * 256 + x) * 4;
+					qboolean white = (((x >> 4) + (y >> 4)) & 1) ? true : false;
+
+					pixels[idx + 0] = 255;
+					pixels[idx + 1] = white ? 255 : 0;
+					pixels[idx + 2] = white ? 255 : 0;
+					pixels[idx + 3] = 255;
+				}
+			}
+
+			glGenTextures(1, &synth_tex_big);
+			glBindTexture(GL_TEXTURE_2D, synth_tex_big);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 256, 0,
+				GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+			if (kaios_trace)
+			{
+				Com_Printf("KAIOS_CUBE_TEST: 256x256 synth texture built, texid=%u glGetError=0x%x\n",
+					synth_tex_big, glGetError());
+			}
+		}
+
+		{
+			GLfloat quad[8] = {
+				160, 4,  176, 4,  176, 20,  160, 20,
+			};
+			static const GLfloat uv[8] = {
+				0,0, 1,0, 1,1, 0,1,
+			};
+
+			glEnable(GL_TEXTURE_2D);
+			glBindTexture(GL_TEXTURE_2D, synth_tex_big);
+			glEnableClientState(GL_VERTEX_ARRAY);
+			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+			glVertexPointer(2, GL_FLOAT, 0, quad);
+			glTexCoordPointer(2, GL_FLOAT, 0, uv);
+			glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+			{
+				qboolean t = ((frame_counter % 60) == 1) ? true : false;
+				GLenum err = glGetError();
+
+				if (t)
+				{
+					Com_Printf("KAIOS_CUBE_TEST: glGetError after 256x256 synth quad: 0x%x\n", err);
+				}
+			}
+
+			glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+			glDisable(GL_TEXTURE_2D);
+		}
+	}
+
 	KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
 
 	/* Draw actual HUD-style text through the REAL buffered 2D pipeline
