@@ -295,7 +295,25 @@ RI_KaiosCubeTestFrame(void)
 			glTexCoordPointer(2, GL_FLOAT, 0, kaios_cube_sky_loaded ? texcoords_full : texcoords_zoomed);
 			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: before face %d glDrawArrays\n", i); }
 			glDrawArrays(GL_TRIANGLES, 0, 6);
-			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: after face %d glDrawArrays\n", i); }
+
+			/* A LATER glColor4f() call on real hardware retroactively
+			 * changed the color of geometry drawn EARLIER in the same
+			 * frame (white bars from the bar_count loop turned pink
+			 * after the magenta A/B quad's glColor4f ran) -- strong
+			 * evidence Emscripten's LEGACY_GL_EMULATION batches
+			 * sequential state+draw calls and only applies the LAST
+			 * uniform value to the whole batch, rather than each draw
+			 * capturing the state active when IT ran. If that's also
+			 * true of glBindTexture, it would explain the black cube
+			 * faces independent of which texture/texcoords were tried:
+			 * only the LAST bind (face 5's) would ever really apply,
+			 * so faces 0-4 would sample whatever was bound before this
+			 * loop even started (nothing -- hence black). glFinish()
+			 * forces each face's state+draw to actually flush before
+			 * the next face's bind can change it. */
+			glFinish();
+
+			if (kaios_trace) { Com_Printf("KAIOS_CUBE_TRACE: after face %d glDrawArrays+glFinish, glGetError=0x%x\n", i, glGetError()); }
 		}
 
 		if (kaios_trace)
@@ -381,6 +399,18 @@ RI_KaiosCubeTestFrame(void)
 	if (kaios_trace)
 	{
 		Com_Printf("KAIOS_CUBE_TEST: glGetError after bar glDrawArrays: 0x%x\n", glGetError());
+	}
+
+	/* Force the white bars above to actually flush before the magenta
+	 * quad below changes glColor4f -- real-device testing showed the
+	 * later magenta glColor4f() call retroactively turning these
+	 * already-drawn white bars pink, meaning the color uniform wasn't
+	 * captured per-draw. glFinish() is the direct test of that. */
+	glFinish();
+
+	if (kaios_trace)
+	{
+		Com_Printf("KAIOS_CUBE_TEST: glGetError after bar glFinish: 0x%x\n", glGetError());
 	}
 
 	/* glDrawArrays vs glDrawElements A/B test: an identical-shaped
