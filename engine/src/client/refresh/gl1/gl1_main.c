@@ -455,6 +455,42 @@ RI_KaiosCubeTestFrame(void)
 		}
 	}
 
+	/* Minimal isolated single textured quad: one glBindTexture, one
+	 * glDrawArrays, nothing else competing for texture-unit state
+	 * nearby -- unlike the cube's per-face loop (6 rapid sequential
+	 * binds) or the full RDraw_CharScaled/R_ApplyGLBuffer pipeline
+	 * (many layers of indirection). If even this doesn't show the '0'
+	 * glyph, the bug is in this device's glBindTexture/glTexCoordPointer
+	 * handling itself, not in looping or buffering. */
+	if (draw_chars)
+	{
+		GLfloat tex_quad[8] = {
+			60, 4,  76, 4,  76, 20,  60, 20,
+		};
+		static const GLfloat tex_quad_uv[8] = {
+			0.0f,    0.1875f,
+			0.0625f, 0.1875f,
+			0.0625f, 0.25f,
+			0.0f,    0.25f,
+		};
+
+		glEnable(GL_TEXTURE_2D);
+		glBindTexture(GL_TEXTURE_2D, draw_chars->texnum);
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+		glVertexPointer(2, GL_FLOAT, 0, tex_quad);
+		glTexCoordPointer(2, GL_FLOAT, 0, tex_quad_uv);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: glGetError after isolated textured quad: 0x%x\n", glGetError());
+		}
+
+		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		glDisable(GL_TEXTURE_2D);
+	}
+
 	KAIOS_CUBE_TRACE(glDisableClientState(GL_VERTEX_ARRAY));
 
 	/* Draw actual HUD-style text through the REAL buffered 2D pipeline
