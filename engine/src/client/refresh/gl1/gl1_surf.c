@@ -78,10 +78,24 @@ static qboolean r_occl_grid[R_OCCL_GRID_W * R_OCCL_GRID_H];
 static qboolean r_occl_grid_active;
 static float r_occl_tanx, r_occl_tany;
 
+/* Debug counters, reported via KAIOS_OCCL in gl1_main.c -- real-device
+ * testing showed zero change in polycount with this on, which a
+ * working occlusion cull should never do in a normal indoor scene.
+ * These settle whether marking/culling are doing anything at all
+ * instead of guessing at the math again. */
+int r_occl_nodes_tested, r_occl_nodes_culled;
+int r_occl_cells_marked, r_occl_surfs_projected, r_occl_surfs_skipped;
+
 void
 R_OcclusionGridClear(void)
 {
 	memset(r_occl_grid, 0, sizeof(r_occl_grid));
+
+	r_occl_nodes_tested = 0;
+	r_occl_nodes_culled = 0;
+	r_occl_cells_marked = 0;
+	r_occl_surfs_projected = 0;
+	r_occl_surfs_skipped = 0;
 
 	r_occl_grid_active = false;
 
@@ -321,6 +335,7 @@ R_OcclusionMarkSurface(const msurface_t *surf)
 
 		if (p->numverts < 3 || p->numverts > R_OCCL_MAX_POLY_VERTS)
 		{
+			r_occl_surfs_skipped++;
 			continue;
 		}
 
@@ -347,6 +362,7 @@ R_OcclusionMarkSurface(const msurface_t *surf)
 
 		if (vi != p->numverts)
 		{
+			r_occl_surfs_skipped++;
 			continue; /* a vertex failed to project -- skip this poly */
 		}
 
@@ -357,8 +373,11 @@ R_OcclusionMarkSurface(const msurface_t *surf)
 
 		if (x1 <= x0 || y1 <= y0)
 		{
+			r_occl_surfs_skipped++;
 			continue;
 		}
+
+		r_occl_surfs_projected++;
 
 		R_OcclusionGridCellRange(x0, y0, x1, y1, &cx0, &cy0, &cx1, &cy1);
 
@@ -376,6 +395,10 @@ R_OcclusionMarkSurface(const msurface_t *surf)
 					R_PointInConvexPoly2D(px0, py1, sx, sy, p->numverts) &&
 					R_PointInConvexPoly2D(px1, py1, sx, sy, p->numverts))
 				{
+					if (!r_occl_grid[cy * R_OCCL_GRID_W + cx])
+					{
+						r_occl_cells_marked++;
+					}
 					r_occl_grid[cy * R_OCCL_GRID_W + cx] = true;
 				}
 			}
@@ -1414,9 +1437,12 @@ R_RecursiveWorldNode(entity_t *currententity, mnode_t *node)
 	{
 		float rx0, ry0, rx1, ry1;
 
+		r_occl_nodes_tested++;
+
 		if (R_BoxToScreenRect(node->minmaxs, node->minmaxs + 3, &rx0, &ry0, &rx1, &ry1) &&
 			R_OcclusionRectCovered(rx0, ry0, rx1, ry1))
 		{
+			r_occl_nodes_culled++;
 			return;
 		}
 	}

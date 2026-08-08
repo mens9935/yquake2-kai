@@ -1935,6 +1935,21 @@ R_RenderView(refdef_t *fd)
 	 * real number every second the same way it already does on the
 	 * software renderer, whether or not r_speeds is ever turned on. */
 	r_polycount = c_brush_polys + c_alias_polys;
+
+	{
+		extern int r_occl_nodes_tested, r_occl_nodes_culled;
+		extern int r_occl_cells_marked, r_occl_surfs_projected, r_occl_surfs_skipped;
+		static int kaios_occl_frame;
+
+		if ((kaios_occl_frame++ % 60) == 0)
+		{
+			Com_Printf("KAIOS_OCCL: active=%d nodes_tested=%d nodes_culled=%d "
+				"cells_marked=%d surfs_projected=%d surfs_skipped=%d wpoly=%d\n",
+				(int)r_occlusion_cull->value, r_occl_nodes_tested, r_occl_nodes_culled,
+				r_occl_cells_marked, r_occl_surfs_projected, r_occl_surfs_skipped,
+				c_brush_polys);
+		}
+	}
 #endif
 
 	if (r_speeds->value)
