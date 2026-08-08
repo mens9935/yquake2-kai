@@ -476,6 +476,25 @@ RI_KaiosCubeTestFrame(void)
 
 		glEnable(GL_TEXTURE_2D);
 		glBindTexture(GL_TEXTURE_2D, draw_chars->texnum);
+
+		/* Every texture test so far (whole-sheet conchars, zoomed
+		 * conchars, sky candidates, and now this maximally-isolated
+		 * single quad) has come back solid black -- force NEAREST
+		 * filtering explicitly on THIS bind, overriding whatever
+		 * min/mag filter state the texture object actually has, to
+		 * rule out an incomplete-mipmap-chain sampling failure (which
+		 * some GL implementations silently render as black rather
+		 * than erroring) as yet another candidate, independent of
+		 * whatever gl1_image.c's R_Upload32()/R_TextureMode() decided
+		 * at load/boot time. */
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_CUBE_TEST: glGetError after forced NEAREST glTexParameteri: 0x%x\n", glGetError());
+		}
+
 		glEnableClientState(GL_VERTEX_ARRAY);
 		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 		glVertexPointer(2, GL_FLOAT, 0, tex_quad);
