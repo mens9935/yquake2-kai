@@ -52,10 +52,31 @@
 #define TEXNUM_SCRAPS (TEXNUM_LIGHTMAPS + MAX_LIGHTMAPS * MAX_LIGHTMAP_COPIES)
 #define TEXNUM_IMAGES (TEXNUM_SCRAPS + MAX_SCRAPS)
 #define MAX_GLTEXTURES 1024
+/* Bumped from 128 to 256 on this platform: R_UpdateGLBuffer
+ * (gl1_buffer.c) only merges consecutive world surfaces into one draw
+ * call when they share the same diffuse texture AND the same lightmap
+ * atlas page -- a real-device r_speeds/KAIOS_OCCL comparison showed
+ * lots of drops surviving distance/occlusion culling (which cut
+ * triangle count) with buf_flushes (real glDrawElements calls) still
+ * high, pointing at per-draw-call JS/WASM crossing overhead in this
+ * WebGL1 LEGACY_GL_EMULATION path, not raw geometry. A bigger atlas
+ * page means far more same-texture surfaces land on the same
+ * lightmap page before a page rolls over, which should cut the number
+ * of texture-change-triggered flushes for a typical level. SCRAP_WIDTH/
+ * HEIGHT (a separate, unrelated small-pic atlas) are pinned to their
+ * previous effective value below instead of following this constant,
+ * so this doesn't also grow that texture's memory footprint 4x for no
+ * reason.
+ */
+#ifdef __EMSCRIPTEN__
+#define BLOCK_WIDTH 256
+#define BLOCK_HEIGHT 256
+#else
 #define BLOCK_WIDTH 128
 #define BLOCK_HEIGHT 128
-#define SCRAP_WIDTH (BLOCK_WIDTH * 2)
-#define SCRAP_HEIGHT (BLOCK_HEIGHT * 2)
+#endif
+#define SCRAP_WIDTH 256
+#define SCRAP_HEIGHT 256
 #define BACKFACE_EPSILON 0.01
 #define LIGHTMAP_BYTES 4
 #define MAX_TEXTURE_UNITS 2
