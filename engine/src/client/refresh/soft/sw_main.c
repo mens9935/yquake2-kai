@@ -1603,6 +1603,40 @@ RE_RenderFrame(refdef_t *fd)
 		R_PrintDSpeeds();
 	}
 
+#ifdef __EMSCRIPTEN__
+	/* r_outofsurfaces/r_outofedges mean R_RenderFace (sw_rast.c) hit
+	 * this frame's fixed-size surface/edge buffer and silently stopped
+	 * drawing more geometry -- no error, no visual glitch, just fewer
+	 * surfaces than were actually visible, which would make this
+	 * renderer's own r_polycount read artificially low rather than
+	 * reflecting a real culling advantage over gl1. R_ReallocateMapBuffers
+	 * right below grows the buffer for the *next* frame when this
+	 * fires, so it's normally a rare, one-frame, self-healing hiccup --
+	 * printing every occurrence (not rate-limited, since it should be
+	 * rare) settles whether that's actually happening here or not.
+	 * Also print the buffer sizes periodically regardless, since a
+	 * small steady-state r_cnumsurfs is itself a hard ceiling on
+	 * r_polycount even on frames that never technically overflow it. */
+	if (r_outofsurfaces || r_outofedges)
+	{
+		Com_Printf("KAIOS_SWBUF: outofsurfaces=%d outofedges=%d "
+			"cnumsurfs=%d numallocatededges=%d\n",
+			(int)r_outofsurfaces, (int)r_outofedges,
+			r_cnumsurfs, r_numallocatededges);
+	}
+	else
+	{
+		static int kaios_swbuf_frame;
+
+		if ((kaios_swbuf_frame++ % 60) == 0)
+		{
+			Com_Printf("KAIOS_SWBUF: cnumsurfs=%d numallocatededges=%d "
+				"(no overflow this frame)\n",
+				r_cnumsurfs, r_numallocatededges);
+		}
+	}
+#endif
+
 	R_ReallocateMapBuffers();
 }
 

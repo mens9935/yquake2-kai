@@ -2108,11 +2108,12 @@ R_Register(void)
 	 * and unproven on real hardware -- CVAR_ARCHIVE and console/menu
 	 * toggleable with no rebuild needed if it ever needs to be turned
 	 * off. */
-#ifdef __EMSCRIPTEN__
-	r_occlusion_cull = ri.Cvar_Get("r_occlusion_cull", "1", CVAR_ARCHIVE);
-#else
+	/* Real-device testing found holes/missing geometry with this on --
+	 * the "conservative" projection logic in gl1_surf.c has a real bug
+	 * somewhere despite the design intent. Off by default until that's
+	 * actually found and fixed; still console/menu toggleable to turn
+	 * back on for testing without a rebuild. */
 	r_occlusion_cull = ri.Cvar_Get("r_occlusion_cull", "0", CVAR_ARCHIVE);
-#endif
 	gl_polyblend = ri.Cvar_Get("gl_polyblend", "1", 0);
 	gl1_flashblend = ri.Cvar_Get("gl1_flashblend", "0", 0);
 	r_fixsurfsky = ri.Cvar_Get("r_fixsurfsky", "0", CVAR_ARCHIVE);
