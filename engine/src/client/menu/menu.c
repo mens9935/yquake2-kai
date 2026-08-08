@@ -7287,6 +7287,25 @@ M_Init(void)
 			m_cursor_width = w;
 		}
 	}
+
+#ifdef __EMSCRIPTEN__
+	/* menu_in_sound/menu_move_sound/menu_out_sound are not part of any
+	 * level's sound precache list (they're UI-only, never referenced by
+	 * game code), so on this slow device S_RegisterSound's decode +
+	 * upload only ever happened the first time each one was actually
+	 * played via S_StartLocalSound -- i.e. mid-frame, the first time the
+	 * player pressed up/down/enter/esc on a given menu item, at already
+	 * low (8-15fps) framerate. Real-device testing showed this as a
+	 * whole-frame flicker on first visit to each item that stopped once
+	 * every item (and therefore every distinct nav sound) had been
+	 * played once -- a frame-time stall from lazy loading, not a
+	 * rendering bug. Precache all three here instead, during M_Init()
+	 * well before the player can reach a menu, same treatment the
+	 * cursor pics above already get. */
+	S_RegisterSound(menu_in_sound);
+	S_RegisterSound(menu_move_sound);
+	S_RegisterSound(menu_out_sound);
+#endif
 }
 
 void
