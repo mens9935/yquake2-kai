@@ -53,6 +53,11 @@ typedef struct
 	int size;
 	int bufnum;
 #endif
+#ifdef __EMSCRIPTEN__
+	/* index into the JS-side Module.kaiosAudio.buffers array (webaudio.c)
+	 * -- 0 means "no buffer", matching bufnum's role for OpenAL above. */
+	int wa_bufnum;
+#endif
 	int stereo;
 	/* effect length */
 	/* begin<->attack..fade<->end */
@@ -136,6 +141,14 @@ typedef struct
 	float oal_vol;
 	int srcnum;
 #endif
+#ifdef __EMSCRIPTEN__
+	/* same "was this loop channel refreshed this frame" bookkeeping as
+	 * OpenAL's autoframe above, used by webaudio.c's WA_Update -- kept
+	 * as a separate field since a build could have both USE_OPENAL and
+	 * __EMSCRIPTEN__ defined at once (WA_Init is tried first at runtime,
+	 * see S_Init, but both backends' code is compiled in either way). */
+	int wa_autoframe;
+#endif
 } channel_t;
 
 /*
@@ -157,9 +170,10 @@ typedef struct
  */
 typedef enum
 {
-	SS_NOT = 0, /* soundsystem not started */
-	SS_SDL,     /* soundsystem started, using SDL */
-	SS_OAL      /* soundsystem started, using OpenAL */
+	SS_NOT = 0,   /* soundsystem not started */
+	SS_SDL,       /* soundsystem started, using SDL */
+	SS_OAL,       /* soundsystem started, using OpenAL */
+	SS_WEBAUDIO   /* soundsystem started, using the browser's native Web Audio API */
 } sndstarted_t;
 
 /*
@@ -359,4 +373,101 @@ void AL_Underwater();
 void AL_Overwater();
 
 #endif /* USE_OPENAL */
+
+#ifdef __EMSCRIPTEN__
+/*
+ * Web Audio backend for KaiOS/Emscripten. Real-device profiling
+ * (KAIOS_STATS's sndms/spatialize/paint breakdown, cl_screen.c) showed
+ * S_Update() itself costs under 1ms/frame even at full 44100Hz stereo --
+ * so software mixing was never actually the expensive part of "sound
+ * on". Dropping s_khz to the lowest rate available didn't recover any
+ * of the CPU/FPS difference between sound on and off either. That
+ * leaves Emscripten's own SDL2 audio backend: on this single-threaded
+ * asm.js build (no AUDIO_WORKLET -- that needs Wasm workers/threads,
+ * incompatible with this build's whole reason for targeting asm.js in
+ * the first place) it fills its ring buffer via a callback that has to
+ * run on the same main JS thread as the render loop, competing with it
+ * for time between frames in a way our own per-frame timers can't see
+ * at all, because it isn't inside our call graph.
+ *
+ * This backend sidesteps that entirely by handing playback to the
+ * browser's native Web Audio graph instead of software-mixing samples
+ * ourselves: each sfx is decoded once into an AudioBuffer, and each
+ * S_StartSound connects a fresh AudioBufferSourceNode through a
+ * persistent per-channel-slot GainNode (+ StereoPannerNode where
+ * available) to a shared master node. Mixing and playback timing then
+ * happen natively on the browser's own real-time audio thread -- no
+ * continuous main-thread callback of any kind is involved, so there's
+ * nothing left to steal frame time from the renderer.
+ *
+ * Spatialization math is NOT reimplemented here -- SDL_Spatialize()/
+ * SDL_SpatializeOrigin() (sdl.c) are reused as-is (they're pure functions
+ * of listener/entity state, nothing SDL-specific about the math itself)
+ * to get the same tuned leftvol/rightvol behaviour, which this backend
+ * then converts to a gain+pan pair instead of feeding a software mixer.
+ */
+
+/*
+ * Initializes the Web Audio backend. False if the browser has no
+ * AudioContext (very old engines) or something else went wrong --
+ * S_Init() falls back to OpenAL/SDL in that case.
+ */
+qboolean WA_Init(void);
+
+/*
+ * Shuts the Web Audio backend down.
+ */
+void WA_Shutdown(void);
+
+/*
+ * Print information about the Web Audio backend.
+ */
+void WA_SoundInfo(void);
+
+/*
+ * Decodes raw PCM (already parsed out of the .wav by S_LoadSound) into
+ * a native AudioBuffer. Mirrors AL_UploadSfx's signature/contract.
+ */
+sfxcache_t *WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
+						 int begin_length, int end_length,
+						 int attack_length, int fade_length);
+
+/*
+ * Releases the AudioBuffer backing one sfx.
+ */
+void WA_DeleteSfx(sfx_t *s);
+
+/*
+ * Starts playback of a channel (frontend sense) using the slot
+ * (ch - channels) as its persistent GainNode/PannerNode index.
+ */
+void WA_PlayChannel(channel_t *ch);
+
+/*
+ * Stops playback of a channel.
+ */
+void WA_StopChannel(channel_t *ch);
+
+/*
+ * Stops playback of all channels.
+ */
+void WA_StopAllChannels(void);
+
+/*
+ * Per-frame update: expires finished/stale channels, respatializes
+ * (gain+pan only, no audio processing) active ones, and refreshes
+ * looping ambient sounds.
+ */
+void WA_Update(void);
+
+/*
+ * Queues raw PCM for playback (cinematics audio, cl_cin.c), scheduled
+ * back-to-back on the browser's own audio clock instead of through our
+ * own ring buffer.
+ */
+void WA_RawSamples(int samples, int rate, int width,
+		int channels, const byte *data, float volume);
+
+#endif /* __EMSCRIPTEN__ */
+
 #endif /* CL_SOUND_LOCAL_H */

@@ -616,6 +616,15 @@ S_LoadSound(sfx_t *s)
 		info.width, info.channels, sound_volume, &begin_length, &end_length,
 		&attack_length, &fade_length);
 
+#ifdef __EMSCRIPTEN__
+	if (sound_started == SS_WEBAUDIO)
+	{
+		sc = WA_UploadSfx(s, &info, data + info.dataofs, sound_volume,
+						  begin_length, end_length,
+						  attack_length, fade_length);
+	}
+	else
+#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1056,6 +1065,14 @@ S_PickChannel(int entnum, int entchannel)
 
 	ch = &channels[first_to_die];
 
+#ifdef __EMSCRIPTEN__
+	if ((sound_started == SS_WEBAUDIO) && ch->sfx)
+	{
+		/* Make sure the channel is dead */
+		WA_StopChannel(ch);
+	}
+#endif
+
 #if USE_OPENAL
 	if ((sound_started == SS_OAL) && ch->sfx)
 	{
@@ -1171,6 +1188,14 @@ S_IssuePlaysound(playsound_t *ps)
 	VectorCopy(ps->origin, ch->origin);
 	ch->fixed_origin = ps->fixed_origin;
 
+#ifdef __EMSCRIPTEN__
+	if (sound_started == SS_WEBAUDIO)
+	{
+		ch->master_vol = (int)ps->volume;
+		WA_PlayChannel(ch);
+	}
+	else
+#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1372,6 +1397,18 @@ S_StartSound(vec3_t origin, int entnum, int entchannel, sfx_t *sfx,
 	ps->attenuation = attenuation;
 	ps->sfx = sfx;
 
+#ifdef __EMSCRIPTEN__
+	if (sound_started == SS_WEBAUDIO)
+	{
+		/* WA_PlayChannel reuses SDL_Spatialize (sdl.c), which expects
+		 * master_vol on the same 0-255 scale SDL uses -- not OpenAL's
+		 * 0-1 gain. paintedtime is real wall-clock ms here (WA_Update
+		 * sets it from cls.realtime), same as the OpenAL branch. */
+		ps->begin = paintedtime + timeofs * 1000;
+		ps->volume = fvol * 255;
+	}
+	else
+#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1478,6 +1515,13 @@ S_StopAllSounds(void)
 		s_playsounds[i].next->prev = &s_playsounds[i];
 	}
 
+#ifdef __EMSCRIPTEN__
+	if (sound_started == SS_WEBAUDIO)
+	{
+		WA_StopAllChannels();
+	}
+	else
+#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1546,6 +1590,13 @@ S_RawSamples(int samples, int rate, int width,
 		s_rawend = paintedtime;
 	}
 
+#ifdef __EMSCRIPTEN__
+	if (sound_started == SS_WEBAUDIO)
+	{
+		WA_RawSamples(samples, rate, width, channels, data, volume);
+	}
+	else
+#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1585,6 +1636,13 @@ S_Update(vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 	VectorCopy(right, listener_right);
 	VectorCopy(up, listener_up);
 
+#ifdef __EMSCRIPTEN__
+	if (sound_started == SS_WEBAUDIO)
+	{
+		WA_Update();
+	}
+	else
+#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1720,6 +1778,13 @@ S_SoundInfo_f(void)
 		return;
 	}
 
+#ifdef __EMSCRIPTEN__
+	if (sound_started == SS_WEBAUDIO)
+	{
+		WA_SoundInfo();
+	}
+	else
+#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1811,6 +1876,13 @@ S_Init(void)
 	Cmd_AddCommand("soundlist", S_SoundList);
 	Cmd_AddCommand("soundinfo", S_SoundInfo_f);
 
+#ifdef __EMSCRIPTEN__
+	if (WA_Init())
+	{
+		sound_started = SS_WEBAUDIO;
+	}
+	else
+#endif
 #if USE_OPENAL
 	cv = Cvar_Get("s_openal", "1", CVAR_ARCHIVE);
 
@@ -1871,6 +1943,13 @@ S_Shutdown(void)
 			continue;
 		}
 
+#ifdef __EMSCRIPTEN__
+		if (sound_started == SS_WEBAUDIO)
+		{
+			WA_DeleteSfx(sfx);
+		}
+#endif
+
 #if USE_OPENAL
 		if (sound_started == SS_OAL)
 		{
@@ -1892,6 +1971,13 @@ S_Shutdown(void)
 	memset(known_sfx, 0, sizeof(known_sfx));
 	num_sfx = 0;
 
+#ifdef __EMSCRIPTEN__
+	if (sound_started == SS_WEBAUDIO)
+	{
+		WA_Shutdown();
+	}
+	else
+#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{

@@ -39,6 +39,7 @@ CLIENT_SRCS=(
 	"src/client/sound/sdl.c"
 	"src/client/sound/sound.c"
 	"src/client/sound/wave.c"
+	"src/client/sound/webaudio.c"
 	"src/client/vid/vid.c"
 	"src/client/vid/glimp_sdl2.c"
 	"src/common/argproc.c"
