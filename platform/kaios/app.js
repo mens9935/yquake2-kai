@@ -862,6 +862,16 @@ function writeAutoexec() {
 			mkdirTreeFor(writeDir + '/autoexec.cfg');
 			FS.writeFile(writeDir + '/autoexec.cfg', text);
 		} catch (e) { console.log('[kaios] ' + e); }
+
+		// See buildKaiosDefaultsCfg()'s comment -- a standing fail-safe,
+		// independent of whatever the player has picked from the
+		// settings screens, reachable at any time via the in-game
+		// console ("exec kaiosdefaults.cfg").
+		try {
+			var defaults = buildKaiosDefaultsCfg();
+			mkdirTreeFor('/' + GAMEDIR + '/kaiosdefaults.cfg');
+			FS.writeFile('/' + GAMEDIR + '/kaiosdefaults.cfg', defaults);
+		} catch (e) { console.log('[kaios] ' + e); }
 	}, function (err) {
 		// Not fatal -- default.cfg (inside pak0.pak) still gives a
 		// playable, if unconfigured, control scheme. Missing KaiOS
@@ -957,7 +967,16 @@ function bootEngine() {
 // Main menu (shown first, on every launch): find baseq2 / settings.
 // ---------------------------------------------------------------------
 
-var MENU_ITEMS = ['Найти baseq2', 'Настройки'];
+// Set once a baseq2 scan+copy has genuinely succeeded (see proceed()
+// inside startBaseq2Scan()) -- gates both "Играть" showing up on the
+// main menu at all (there's nothing to play until baseq2 has been
+// found at least once) and the boot-time skip timer below, per spec:
+// the timer only makes sense once there's something to skip *to*.
+var BASEQ2_CONFIRMED_KEY = 'kaios_baseq2_confirmed';
+
+function isBaseq2Confirmed() {
+	return localStorage.getItem(BASEQ2_CONFIRMED_KEY) === '1';
+}
 
 function hideAllScreens() {
 	menuEl.style.display = 'none';
@@ -966,14 +985,25 @@ function hideAllScreens() {
 	statusEl.style.display = 'none';
 }
 
+function mainMenuItems() {
+	var items = [];
+	if (isBaseq2Confirmed()) {
+		items.push({ label: 'Играть', action: startBaseq2Scan });
+	}
+	items.push({ label: 'Найти baseq2', action: startBaseq2Scan });
+	items.push({ label: 'Настройки', action: showSettingsGroups });
+	return items;
+}
+
 function showMainMenu() {
+	var items = mainMenuItems();
 	var selected = 0;
 
 	function render() {
 		menuListEl.innerHTML = '';
-		for (var i = 0; i < MENU_ITEMS.length; i++) {
+		for (var i = 0; i < items.length; i++) {
 			var li = document.createElement('li');
-			li.textContent = MENU_ITEMS[i];
+			li.textContent = items[i].label;
 			if (i === selected) {
 				li.className = 'selected';
 			}
@@ -983,18 +1013,14 @@ function showMainMenu() {
 
 	function onKeyDown(ev) {
 		if (ev.key === 'ArrowUp') {
-			selected = (selected - 1 + MENU_ITEMS.length) % MENU_ITEMS.length;
+			selected = (selected - 1 + items.length) % items.length;
 			render();
 		} else if (ev.key === 'ArrowDown') {
-			selected = (selected + 1) % MENU_ITEMS.length;
+			selected = (selected + 1) % items.length;
 			render();
 		} else if (ev.key === 'Enter') {
 			activeMenuKeyHandler = null;
-			if (selected === 0) {
-				startBaseq2Scan();
-			} else {
-				showSettingsScreen();
-			}
+			items[selected].action();
 		}
 	}
 
@@ -1002,6 +1028,64 @@ function showMainMenu() {
 	menuEl.style.display = 'block';
 	render();
 	activeMenuKeyHandler = onKeyDown;
+}
+
+// ---------------------------------------------------------------------
+// Boot-time skip timer: on any launch *after* baseq2 has already been
+// found successfully once, a 3-second "press any key for settings"
+// window is offered before auto-proceeding straight to Играть -- per
+// spec, first launches (or any launch where baseq2 was never
+// successfully found) skip straight to the normal main menu instead,
+// there being nothing yet to fast-path into.
+// ---------------------------------------------------------------------
+
+var BOOT_SKIP_MS = 3000;
+
+function showBootSkipTimer() {
+	var remaining = Math.ceil(BOOT_SKIP_MS / 1000);
+	var deadline = Date.now() + BOOT_SKIP_MS;
+	var intervalId = null;
+
+	function render() {
+		menuListEl.innerHTML = '';
+		var li = document.createElement('li');
+		li.textContent = 'Нажмите любую клавишу для настроек (' + remaining + ')';
+		menuListEl.appendChild(li);
+	}
+
+	function finish(toMenu) {
+		if (intervalId !== null) {
+			clearInterval(intervalId);
+			intervalId = null;
+		}
+		activeMenuKeyHandler = null;
+		if (toMenu) {
+			showMainMenu();
+		} else {
+			startBaseq2Scan();
+		}
+	}
+
+	function onKeyDown() {
+		// Any key at all cancels the fast path -- not just OK/arrows,
+		// so this matches "press any key" literally instead of only
+		// the subset PREVENT_DEFAULT already recognizes.
+		finish(true);
+	}
+
+	hideAllScreens();
+	menuEl.style.display = 'block';
+	render();
+	activeMenuKeyHandler = onKeyDown;
+
+	intervalId = setInterval(function () {
+		remaining = Math.ceil((deadline - Date.now()) / 1000);
+		if (remaining <= 0) {
+			finish(false);
+			return;
+		}
+		render();
+	}, 250);
 }
 
 // Like setStatus(), but for a dead-end (scan/copy failure) that would
@@ -1051,7 +1135,14 @@ function startBaseq2Scan() {
 			}).then(function () {
 				setStatus('Copying baseq2...', 0);
 				return copyBaseq2(files, choice);
-			}).then(bootEngine, function (err) {
+			}).then(function () {
+				// Only marked once a copy has actually completed --
+				// see mainMenuItems()/showBootSkipTimer()'s comment for
+				// why this specifically gates both the "Играть" menu
+				// entry and the boot-time skip timer.
+				localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
+				bootEngine();
+			}, function (err) {
 				showErrorWithBack('Copy failed: ' + describeError(err));
 			});
 		}
@@ -1069,65 +1160,281 @@ function startBaseq2Scan() {
 }
 
 // ---------------------------------------------------------------------
-// Settings screen -- pre-boot cvar toggles, applied via an override
-// appended to autoexec.cfg (see buildLauncherSettingsCfg()/writeAutoexec()).
+// Settings -- pre-boot cvar choices, applied via an override appended
+// to autoexec.cfg (see buildLauncherSettingsCfg()/writeAutoexec()).
 //
-// Mirrors a subset of the in-game KaiOS Tuning options menu (menu.c) --
-// the cvar names and defaults below are kept identical to that menu's
-// (and to the matching Cvar_Get() defaults in cl_main.c/sound.c) on
+// Every item is a "choice" (a toggle is just a 2-choice item, On/Off):
+// {id, label, cvars: [...], choices: [{label, values: [...]}, ...], def}
+// -- `cvars`/`values` are parallel arrays so one item can drive more
+// than one cvar at once (resolution needs r_customwidth+r_customheight,
+// and r_mode to actually switch to a custom size). `def` is the choice
+// *index* shown/applied until the player picks this item from this
+// screen at least once -- see buildLauncherSettingsCfg() for why an
+// untouched item writes nothing at all (so it can't silently fight the
+// in-game KaiOS Tuning options menu, menu.c, over the same cvar).
+// Cvar names/defaults are kept identical to that menu's own (and to
+// the matching Cvar_Get() defaults in cl_main.c/sound.c/vid.c) on
 // purpose, so a value picked here and one picked in-game mean the same
-// thing. `def` here is only the fallback shown/applied when the player
-// has never touched that entry from *this* screen -- see
-// buildLauncherSettingsCfg() for why an untouched entry writes nothing.
+// thing.
 // ---------------------------------------------------------------------
 
-var SETTINGS = [
-	{ cvar: 's_initsound',  label: 'Sound',               def: true },
-	{ cvar: 'r_lerpmodels', label: 'Model interpolation', def: true },
-	{ cvar: 'cl_lights',    label: 'Dynamic lights',      def: false },
-	{ cvar: 'cl_particles', label: 'Particles',           def: false }
+function toggleItem(id, label, cvar, def) {
+	return {
+		id: id,
+		label: label,
+		cvars: [cvar],
+		choices: [
+			{ label: 'Off', values: ['0'] },
+			{ label: 'On', values: ['1'] }
+		],
+		def: def ? 1 : 0
+	};
+}
+
+var VIDEO_ITEMS = [
+	{
+		id: 'resolution',
+		label: 'Resolution',
+		cvars: ['r_customwidth', 'r_customheight', 'r_mode'],
+		choices: [
+			{ label: '640x480', values: ['640', '480', '-1'] },
+			{ label: '240x320', values: ['240', '320', '-1'] },
+			{ label: '176x220', values: ['176', '220', '-1'] },
+			{ label: '128x160', values: ['128', '160', '-1'] }
+		],
+		def: 1
+	},
+	{
+		id: 'renderer',
+		label: 'Renderer',
+		cvars: ['vid_renderer'],
+		choices: [
+			{ label: 'Software', values: ['soft'] },
+			// gl1's WebGL context creation has never succeeded on real
+			// KaiOS hardware in this project (see build.sh's "gl1
+			// shelved for now" comment) -- listed anyway since the
+			// unified binary (RENDERER=unified, build.sh) doesn't even
+			// link gl1 in yet, and vid.c's own runtime fallback
+			// (VID_LoadRenderer, YQ2_KAIOS_UNIFIED_RENDERERS branch)
+			// would silently revert to Software if it were ever picked
+			// regardless -- this label says so up front instead of
+			// letting the player find out the hard way.
+			{ label: 'GL1 (недоступно)', values: ['gl1'] },
+			{ label: 'GLES3', values: ['gles3'] }
+		],
+		def: 0
+	},
+	toggleItem('vsync', 'VSync', 'r_vsync', true),
+	{
+		id: 'brightness',
+		label: 'Brightness',
+		cvars: ['vid_gamma'],
+		choices: [
+			{ label: '0.8', values: ['0.8'] },
+			{ label: '1.0', values: ['1.0'] },
+			{ label: '1.2', values: ['1.2'] },
+			{ label: '1.4', values: ['1.4'] },
+			{ label: '1.6', values: ['1.6'] }
+		],
+		def: 1
+	},
+	toggleItem('lights', 'Dynamic lights', 'cl_lights', false),
+	toggleItem('particles', 'Particles', 'cl_particles', false),
+	toggleItem('lerp', 'Model interpolation', 'r_lerpmodels', true),
+	toggleItem('fullbright', 'Disable lighting', 'r_fullbright', false),
+	toggleItem('dynrelight', 'Dynamic light relighting', 'gl1_dynamic', false)
 ];
 
-function settingStorageKey(cvar) {
-	return 'kaios_setting_' + cvar;
-}
-
-function getSettingValue(entry) {
-	var raw = localStorage.getItem(settingStorageKey(entry.cvar));
-	if (raw === null) {
-		return entry.def;
+var AUDIO_ITEMS = [
+	{
+		id: 'device',
+		label: 'Device',
+		cvars: ['s_backend'],
+		choices: [
+			{ label: 'OpenAL', values: ['openal'] },
+			{ label: 'SDL', values: ['sdl'] },
+			// "Custom" in the engine (s_backend "custom", sound.c) --
+			// this is our own WebAudio backend (webaudio.c), named
+			// plainly here rather than by that internal cvar spelling.
+			{ label: 'Встроенный', values: ['custom'] },
+			{ label: 'Выключено', values: ['none'] }
+		],
+		def: 2
+	},
+	toggleItem('sound', 'Sound', 's_initsound', true),
+	{
+		id: 'volume',
+		label: 'Volume',
+		cvars: ['s_volume'],
+		choices: [
+			{ label: '0%', values: ['0'] },
+			{ label: '25%', values: ['0.25'] },
+			{ label: '50%', values: ['0.5'] },
+			{ label: '75%', values: ['0.75'] },
+			{ label: '100%', values: ['1'] }
+		],
+		def: 3
+	},
+	toggleItem('music', 'Music', 'ogg_enable', true),
+	{
+		id: 'musicvolume',
+		label: 'Music volume',
+		cvars: ['ogg_volume'],
+		choices: [
+			{ label: '0%', values: ['0'] },
+			{ label: '25%', values: ['0.25'] },
+			{ label: '50%', values: ['0.5'] },
+			{ label: '75%', values: ['0.75'] },
+			{ label: '100%', values: ['1'] }
+		],
+		def: 3
+	},
+	{
+		id: 'samplerate',
+		label: 'Sample rate',
+		cvars: ['s_khz'],
+		choices: [
+			{ label: '44100', values: ['44'] },
+			{ label: '22050', values: ['22'] },
+			{ label: '11025', values: ['11'] }
+		],
+		def: 0
+	},
+	{
+		id: 'bitdepth',
+		label: 'Bit depth',
+		cvars: ['s_loadas8bit'],
+		choices: [
+			{ label: '16-bit', values: ['0'] },
+			{ label: '8-bit', values: ['1'] }
+		],
+		def: 0
+	},
+	{
+		id: 'stereo',
+		label: 'Stereo',
+		cvars: ['sndchannels'],
+		choices: [
+			{ label: 'Mono', values: ['1'] },
+			{ label: 'Stereo', values: ['2'] }
+		],
+		def: 1
 	}
-	return raw === '1';
+];
+
+// Everything below is KaiOS-only instrumentation/tuning added over the
+// course of this project, not stock yquake2 behavior -- excluding
+// occlusion (s_occlusion_strength), which stays console/in-game-menu
+// only.
+var DEBUG_ITEMS = [
+	toggleItem('prewarm', 'Preload on map load', 'kaios_prewarm_cache', true),
+	toggleItem('speeds', 'Console poly stats', 'r_speeds', false),
+	toggleItem('demopattern', 'Demo pattern test', 'r_demopattern', false),
+	{
+		id: 'distcull',
+		label: 'Draw distance cull',
+		cvars: ['r_distcull_dist'],
+		choices: [
+			{ label: '400', values: ['400'] },
+			{ label: '1200', values: ['1200'] },
+			{ label: '2048', values: ['2048'] },
+			{ label: 'Off', values: ['99999'] }
+		],
+		def: 1
+	}
+];
+
+var SETTINGS_GROUPS = [
+	{ id: 'video', label: 'Видео', items: VIDEO_ITEMS },
+	{ id: 'audio', label: 'Аудио', items: AUDIO_ITEMS },
+	{ id: 'debug', label: 'Debug', items: DEBUG_ITEMS }
+];
+
+function settingStorageKey(item) {
+	return 'kaios_setting_' + item.id;
 }
 
-function setSettingValue(entry, value) {
-	localStorage.setItem(settingStorageKey(entry.cvar), value ? '1' : '0');
+function getItemIndex(item) {
+	var raw = localStorage.getItem(settingStorageKey(item));
+	if (raw === null) {
+		return item.def;
+	}
+	var idx = parseInt(raw, 10);
+	if (isNaN(idx) || idx < 0 || idx >= item.choices.length) {
+		return item.def;
+	}
+	return idx;
 }
 
-// Only cvars the player actually toggled from this screen are written
-// out -- an entry nobody touched leaves config.cfg (and the engine's
-// own Cvar_Get default) in charge, so this can't silently fight the
-// in-game KaiOS Tuning menu over the same cvar on the next launch.
+function setItemIndex(item, idx) {
+	localStorage.setItem(settingStorageKey(item), String(idx));
+}
+
+// Only items the player actually touched from these screens are
+// written out -- one nobody touched leaves config.cfg (and the
+// engine's own Cvar_Get default) in charge, so this can't silently
+// fight the in-game KaiOS Tuning menu over the same cvar.
 function buildLauncherSettingsCfg() {
 	var lines = [];
-	for (var i = 0; i < SETTINGS.length; i++) {
-		var entry = SETTINGS[i];
-		if (localStorage.getItem(settingStorageKey(entry.cvar)) === null) {
-			continue;
+	for (var g = 0; g < SETTINGS_GROUPS.length; g++) {
+		var items = SETTINGS_GROUPS[g].items;
+		for (var i = 0; i < items.length; i++) {
+			var item = items[i];
+			if (localStorage.getItem(settingStorageKey(item)) === null) {
+				continue;
+			}
+			var choice = item.choices[getItemIndex(item)];
+			for (var c = 0; c < item.cvars.length; c++) {
+				lines.push('set ' + item.cvars[c] + ' ' + choice.values[c]);
+			}
 		}
-		lines.push('set ' + entry.cvar + ' ' + (getSettingValue(entry) ? '1' : '0'));
 	}
 	return lines.join('\n');
 }
 
-function showSettingsScreen() {
+// A standing fail-safe independent of the localStorage-driven reset
+// below: every launcher-configurable cvar's *coded* default (not
+// whatever the player has picked), written to the gamedir every launch
+// so "exec kaiosdefaults.cfg" from the in-game console always gets
+// back to a known-sane state even if config.cfg/autoexec.cfg's saved
+// state is somehow the problem.
+function buildKaiosDefaultsCfg() {
+	var lines = [];
+	for (var g = 0; g < SETTINGS_GROUPS.length; g++) {
+		var items = SETTINGS_GROUPS[g].items;
+		for (var i = 0; i < items.length; i++) {
+			var item = items[i];
+			var choice = item.choices[item.def];
+			for (var c = 0; c < item.cvars.length; c++) {
+				lines.push('set ' + item.cvars[c] + ' ' + choice.values[c]);
+			}
+		}
+	}
+	return lines.join('\n') + '\n';
+}
+
+// Clears every launcher-picked override -- the *next* launch then
+// applies each item's coded default again (same values
+// buildKaiosDefaultsCfg() writes out), same as if the player had never
+// touched any of these screens.
+function resetLauncherSettings() {
+	for (var g = 0; g < SETTINGS_GROUPS.length; g++) {
+		var items = SETTINGS_GROUPS[g].items;
+		for (var i = 0; i < items.length; i++) {
+			localStorage.removeItem(settingStorageKey(items[i]));
+		}
+	}
+}
+
+function showSettingsItemsScreen(group) {
 	var selected = 0;
 
 	function render() {
 		settingsListEl.innerHTML = '';
-		for (var i = 0; i < SETTINGS.length; i++) {
+		for (var i = 0; i < group.items.length; i++) {
+			var item = group.items[i];
 			var li = document.createElement('li');
-			li.textContent = SETTINGS[i].label + ': ' + (getSettingValue(SETTINGS[i]) ? 'On' : 'Off');
+			li.textContent = item.label + ': ' + item.choices[getItemIndex(item)].label;
 			if (i === selected) {
 				li.className = 'selected';
 			}
@@ -1137,14 +1444,65 @@ function showSettingsScreen() {
 
 	function onKeyDown(ev) {
 		if (ev.key === 'ArrowUp') {
-			selected = (selected - 1 + SETTINGS.length) % SETTINGS.length;
+			selected = (selected - 1 + group.items.length) % group.items.length;
 			render();
 		} else if (ev.key === 'ArrowDown') {
-			selected = (selected + 1) % SETTINGS.length;
+			selected = (selected + 1) % group.items.length;
 			render();
 		} else if (ev.key === 'Enter') {
-			setSettingValue(SETTINGS[selected], !getSettingValue(SETTINGS[selected]));
+			var item = group.items[selected];
+			setItemIndex(item, (getItemIndex(item) + 1) % item.choices.length);
 			render();
+		} else if (ev.key === 'SoftRight') {
+			activeMenuKeyHandler = null;
+			showSettingsGroups();
+		}
+	}
+
+	hideAllScreens();
+	settingsEl.style.display = 'block';
+	render();
+	activeMenuKeyHandler = onKeyDown;
+}
+
+function showSettingsGroups() {
+	// One extra row at the end resets every group's picked overrides --
+	// see resetLauncherSettings()'s comment.
+	var rows = SETTINGS_GROUPS.map(function (g) {
+		return { label: g.label, action: function () { showSettingsItemsScreen(g); } };
+	});
+	rows.push({
+		label: 'Сбросить настройки',
+		action: function () {
+			resetLauncherSettings();
+			showSettingsGroups();
+		}
+	});
+
+	var selected = 0;
+
+	function render() {
+		settingsListEl.innerHTML = '';
+		for (var i = 0; i < rows.length; i++) {
+			var li = document.createElement('li');
+			li.textContent = rows[i].label;
+			if (i === selected) {
+				li.className = 'selected';
+			}
+			settingsListEl.appendChild(li);
+		}
+	}
+
+	function onKeyDown(ev) {
+		if (ev.key === 'ArrowUp') {
+			selected = (selected - 1 + rows.length) % rows.length;
+			render();
+		} else if (ev.key === 'ArrowDown') {
+			selected = (selected + 1) % rows.length;
+			render();
+		} else if (ev.key === 'Enter') {
+			activeMenuKeyHandler = null;
+			rows[selected].action();
 		} else if (ev.key === 'SoftRight') {
 			activeMenuKeyHandler = null;
 			showMainMenu();
@@ -1164,7 +1522,11 @@ function start() {
 	installKeyHandlers();
 	installWakeLock();
 
-	showMainMenu();
+	if (isBaseq2Confirmed()) {
+		showBootSkipTimer();
+	} else {
+		showMainMenu();
+	}
 }
 
 // Wait for the full 'load' event, not just DOMContentLoaded/'interactive'.

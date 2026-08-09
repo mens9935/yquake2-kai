@@ -165,7 +165,19 @@ WA_Init(void)
 		 * sound.channels == 1 to skip stereo panning -- a real browser
 		 * AudioContext is always genuinely stereo output. */
 		sound.speed = ok;
-		sound.channels = 2;
+		/* sndchannels is sdl.c's own pre-existing "1 or 2" cvar
+		 * (SDL_BackendInit/SDL2_BackendInit's spec.channels) -- reused
+		 * here instead of a second, webaudio-only cvar meaning the same
+		 * thing, so the launcher's Audio settings screen's Stereo
+		 * toggle has exactly one cvar to set regardless of which
+		 * backend ends up active. sndchannels == 1 collapses to
+		 * sound.channels == 1, which is SDL_Spatialize/
+		 * SDL_SpatializeOrigin's own existing signal (reused as-is
+		 * here) to skip stereo panning -- the AudioContext's actual
+		 * output is still genuine stereo either way (there's no cheap
+		 * way to ask Web Audio for a real mono device), this just
+		 * keeps every sound centered instead of panned. */
+		sound.channels = (Cvar_Get("sndchannels", "2", CVAR_ARCHIVE)->value != 1) ? 2 : 1;
 
 		/* THE bug that caused total, error-free silence: s_numchannels
 		 * gates S_PickChannel's entire scan loop (sound.c) -- SDL and

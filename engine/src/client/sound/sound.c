@@ -103,6 +103,13 @@ static cvar_t* s_ps_sorting;
 static cvar_t* s_feedback_kind;
 #ifdef __EMSCRIPTEN__
 static cvar_t* s_kaios_skip_prefixes;
+/* Forces exactly one backend instead of the old fixed webaudio ->
+ * openal -> sdl try-order -- see S_Init()'s __EMSCRIPTEN__ branch.
+ * "custom" (the WebAudio backend, webaudio.c) is the default: it's the
+ * one that actually offloads mixing to the browser's own audio thread
+ * instead of a main-thread SDL2 callback, see webaudio.c's own doc
+ * comment for the full story on why. */
+cvar_t* s_backend;
 #endif
 
 channel_t channels[MAX_CHANNELS];
@@ -1869,6 +1876,7 @@ S_Init(void)
 	 * categories get cut. */
 	s_kaios_skip_prefixes = Cvar_Get("s_kaios_skip_prefixes",
 		"world/ doors/ plats/ switches/ misc/talk", CVAR_ARCHIVE);
+	s_backend = Cvar_Get("s_backend", "custom", CVAR_ARCHIVE);
 #endif
 
 	Cmd_AddCommand("play", S_Play);
@@ -1877,12 +1885,42 @@ S_Init(void)
 	Cmd_AddCommand("soundinfo", S_SoundInfo_f);
 
 #ifdef __EMSCRIPTEN__
-	if (WA_Init())
+	/* s_backend forces exactly one backend instead of trying each in a
+	 * fixed order and silently falling through to the next on failure
+	 * -- the launcher's Audio settings screen sets this explicitly, and
+	 * a forced choice that then silently fell back to something else
+	 * would defeat the point of forcing it. "custom" (webaudio.c) is
+	 * the default and, unlike the other two, is expected to always
+	 * succeed in any real browser. */
+	if (strcmp(s_backend->string, "none") == 0)
 	{
-		sound_started = SS_WEBAUDIO;
+		sound_started = SS_NOT;
 	}
-	else
+	else if (strcmp(s_backend->string, "openal") == 0)
+	{
+#if USE_OPENAL
+		sound_started = AL_Init() ? SS_OAL : SS_NOT;
+#else
+		Com_Printf("OpenAL isn't built into this binary.\n");
+		sound_started = SS_NOT;
 #endif
+	}
+	else if (strcmp(s_backend->string, "sdl") == 0)
+	{
+		sound_started = SDL_BackendInit() ? SS_SDL : SS_NOT;
+	}
+	else /* "custom" (default), or an unrecognized value */
+	{
+		sound_started = WA_Init() ? SS_WEBAUDIO : SS_NOT;
+	}
+
+	if (sound_started == SS_NOT)
+	{
+		Com_Printf("Sound backend \"%s\" not active.\n", s_backend->string);
+		Com_Printf("------------------------------------\n\n");
+		return;
+	}
+#else
 #if USE_OPENAL
 	cv = Cvar_Get("s_openal", "1", CVAR_ARCHIVE);
 
@@ -1903,6 +1941,7 @@ S_Init(void)
 			return;
 		}
 	}
+#endif /* __EMSCRIPTEN__ */
 
 	num_sfx = 0;
 	paintedtime = 0;

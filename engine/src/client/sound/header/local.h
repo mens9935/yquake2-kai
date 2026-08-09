@@ -192,6 +192,9 @@ extern cvar_t* s_underwater_gain_hf;
 extern cvar_t* s_doppler;
 extern cvar_t* s_occlusion_strength;
 extern cvar_t* s_reverb_preset;
+#ifdef __EMSCRIPTEN__
+extern cvar_t* s_backend;
+#endif
 
 /*
  * Globals
