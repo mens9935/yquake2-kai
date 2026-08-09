@@ -166,6 +166,21 @@ WA_Init(void)
 		 * AudioContext is always genuinely stereo output. */
 		sound.speed = ok;
 		sound.channels = 2;
+
+		/* THE bug that caused total, error-free silence: s_numchannels
+		 * gates S_PickChannel's entire scan loop (sound.c) -- SDL and
+		 * OpenAL both set it themselves (sdl.c: s_numchannels =
+		 * MAX_CHANNELS; openal.c: s_numchannels = i after allocating AL
+		 * sources), but this backend never did. Left at its
+		 * zero-initialized default, S_PickChannel's for-loop over
+		 * s_numchannels never ran even once, so it always fell through
+		 * to "return NULL" -- and S_IssuePlaysound's (!ch) branch drops
+		 * the sound and returns with NO error message at all. Every
+		 * other part of the pipeline (decode, upload, spatialize,
+		 * S_StartSound queuing, WA_IssuePlaysounds draining the pending
+		 * list) genuinely worked the whole time; WA_PlayChannel itself
+		 * was simply never reached. */
+		s_numchannels = MAX_CHANNELS;
 	}
 
 	return wa_inited;
