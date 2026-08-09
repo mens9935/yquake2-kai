@@ -41,7 +41,21 @@
   #define REF_VERSION "Yamagi Quake II OpenGL3 Refresher"
 #endif
 
+#if defined(__EMSCRIPTEN__) && defined(YQ2_KAIOS_UNIFIED_RENDERERS)
+/* RENDERER=unified statically links soft's own `refimport_t ri;`
+ * (sw_main.c) into the same binary as this file's -- ref.h declares
+ * `extern refimport_t ri;` for exactly this reason (client/refresh/
+ * files/ and every renderer's own code all reach it by this one name),
+ * so only one
+ * translation unit may actually define it once both renderers are
+ * linked together, or it's a duplicate-symbol error. GetRefAPI() below
+ * still assigns `ri = imp;` on load same as always -- extern is still
+ * assignable, it just means "the storage lives elsewhere". Standalone
+ * RENDERER=gl3 (soft not linked at all) still needs its own copy. */
+extern refimport_t ri;
+#else
 refimport_t ri;
+#endif
 
 gl3config_t gl3config;
 gl3state_t gl3state;
@@ -70,9 +84,22 @@ int c_brush_polys, c_alias_polys;
  * r_polycount directly (extern int r_polycount;), and frame.c
  * (shared by all renderers) references kaios_cube_test_active/
  * RI_KaiosCubeTestFrame() unconditionally -- see gl1_main.c's matching
- * comment and sw_main.c's always-off stub for the same symbols. gl3
- * never ran the cube test, so this is an inert stub like the soft
- * renderer's; r_polycount is kept up to date for real below. */
+ * comment and sw_main.c's always-off stub for the same symbols.
+ *
+ * RENDERER=unified links soft's copies of all three into the same
+ * binary as this file's -- same "extern to a single shared instance"
+ * treatment as `ri` right above, and for the same reason: whichever
+ * renderer is actually active is the only one whose code runs each
+ * frame, so sharing the storage instead of duplicating it is exactly
+ * equivalent to before, not a behavior change. gl3 never ran the cube
+ * test either way, so soft's always-off stub covers it exactly the
+ * same as gl3 having its own would; r_polycount is kept up to date for
+ * real below regardless of which #branch defined the storage.
+ * Standalone RENDERER=gl3 (soft not linked at all) still needs its own
+ * copies of all three, same as before this existed. */
+#ifdef YQ2_KAIOS_UNIFIED_RENDERERS
+extern int r_polycount;
+#else
 int r_polycount;
 qboolean kaios_cube_test_active = false;
 
@@ -80,6 +107,7 @@ void
 RI_KaiosCubeTestFrame(void)
 {
 }
+#endif
 #endif
 
 static float v_blend[4]; /* final blending color */

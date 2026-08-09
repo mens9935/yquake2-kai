@@ -77,7 +77,28 @@ CLIENT_SRCS=(
 	"src/server/sv_world.c"
 )
 
-REFSOFT_SRCS=(
+# File-format parsing (.bsp surf tables, model loading, pcx/wal/stb image
+# decoding, PVS) shared verbatim by every renderer backend -- not
+# renderer-specific code, just historically compiled once per backend
+# because each backend used to be built as its own fully standalone
+# binary. Pulled out into its own array so the unified multi-renderer
+# build (build.sh, RENDERER=unified) can compile it exactly once and
+# link it into every renderer, instead of getting one colliding copy of
+# every symbol in here per renderer statically linked into the same
+# binary. REFSOFT_SRCS/REFGL1_SRCS/REFGL3_SRCS below still each include
+# it too, for the older one-renderer-per-binary build paths that compile
+# a renderer fully standalone.
+REFFILES_SRCS=(
+	"src/client/refresh/files/surf.c"
+	"src/client/refresh/files/common.c"
+	"src/client/refresh/files/models.c"
+	"src/client/refresh/files/pcx.c"
+	"src/client/refresh/files/stb.c"
+	"src/client/refresh/files/wal.c"
+	"src/client/refresh/files/pvs.c"
+)
+
+REFSOFT_ONLY_SRCS=(
 	"src/client/refresh/soft/sw_aclip.c"
 	"src/client/refresh/soft/sw_alias.c"
 	"src/client/refresh/soft/sw_bsp.c"
@@ -95,14 +116,9 @@ REFSOFT_SRCS=(
 	"src/client/refresh/soft/sw_scan.c"
 	"src/client/refresh/soft/sw_sprite.c"
 	"src/client/refresh/soft/sw_surf.c"
-	"src/client/refresh/files/surf.c"
-	"src/client/refresh/files/common.c"
-	"src/client/refresh/files/models.c"
-	"src/client/refresh/files/pcx.c"
-	"src/client/refresh/files/stb.c"
-	"src/client/refresh/files/wal.c"
-	"src/client/refresh/files/pvs.c"
 )
+
+REFSOFT_SRCS=("${REFSOFT_ONLY_SRCS[@]}" "${REFFILES_SRCS[@]}")
 
 # gl1 renderer built against glad-gles1 (OpenGL ES 1.1 fixed-function
 # bindings), matching upstream's own ref_gles1 target (see
@@ -112,7 +128,7 @@ REFSOFT_SRCS=(
 # unavailable on this device's Gecko-48-class engine, WebGL1 only).
 # Built with -s LEGACY_GL_EMULATION=1 so Emscripten backs those calls
 # with WebGL1.
-REFGL1_SRCS=(
+REFGL1_ONLY_SRCS=(
 	"src/client/refresh/gl1/qgl.c"
 	"src/client/refresh/gl1/gl1_draw.c"
 	"src/client/refresh/gl1/gl1_image.c"
@@ -128,14 +144,9 @@ REFGL1_SRCS=(
 	"src/client/refresh/gl1/gl1_sdl.c"
 	"src/client/refresh/gl1/gl1_buffer.c"
 	"src/client/refresh/gl1/glad-gles1/src/glad.c"
-	"src/client/refresh/files/surf.c"
-	"src/client/refresh/files/common.c"
-	"src/client/refresh/files/models.c"
-	"src/client/refresh/files/pcx.c"
-	"src/client/refresh/files/stb.c"
-	"src/client/refresh/files/wal.c"
-	"src/client/refresh/files/pvs.c"
 )
+
+REFGL1_SRCS=("${REFGL1_ONLY_SRCS[@]}" "${REFFILES_SRCS[@]}")
 
 # gl3 renderer, cut down to target GLES2/WebGL1 instead of its normal
 # GLES3/GLSL-ES-300 baseline (see REFGL1_SRCS's comment for why gl1 was
@@ -146,7 +157,7 @@ REFGL1_SRCS=(
 # shim plus glad-gles1's matching declarations), GLES2 is Emscripten's
 # native/default GL binding -- GLES2/gl2.h ships in its sysroot and the
 # symbols resolve directly, no loader or emulation flag needed.
-REFGL3_SRCS=(
+REFGL3_ONLY_SRCS=(
 	"src/client/refresh/gl3/gl3_draw.c"
 	"src/client/refresh/gl3/gl3_image.c"
 	"src/client/refresh/gl3/gl3_light.c"
@@ -159,14 +170,9 @@ REFGL3_SRCS=(
 	"src/client/refresh/gl3/gl3_shaders.c"
 	"src/client/refresh/gl3/gl3_surf.c"
 	"src/client/refresh/gl3/gl3_warp.c"
-	"src/client/refresh/files/surf.c"
-	"src/client/refresh/files/common.c"
-	"src/client/refresh/files/models.c"
-	"src/client/refresh/files/pcx.c"
-	"src/client/refresh/files/stb.c"
-	"src/client/refresh/files/wal.c"
-	"src/client/refresh/files/pvs.c"
 )
+
+REFGL3_SRCS=("${REFGL3_ONLY_SRCS[@]}" "${REFFILES_SRCS[@]}")
 
 GAME_SRCS=(
 	"src/game/g_ai.c"

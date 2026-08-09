@@ -16,14 +16,25 @@ ENGINE="$ROOT/engine"
 OUT="$HERE/dist"
 OBJDIR="$HERE/obj"
 
-# RENDERER=gl1 builds the (normally shelved) GLES1-via-WebGL1 renderer
-# instead of the shipped software one, for one-off real-device GL context
-# testing -- see the comment by "gl1 shelved for now" below. Defaults to
-# "soft", the one that actually ships. TOTAL_MEMORY_OVERRIDE and OUT_NAME
-# exist for the same reason: testing a smaller heap reservation, or
-# writing the build somewhere other than platform/kaios/ so a diagnostic
-# build never overwrites the working shipped one.
-RENDERER="${RENDERER:-soft}"
+# RENDERER=unified (the default, and what actually ships now) statically
+# links every supported renderer into ONE binary and switches between
+# them at runtime off the vid_renderer cvar (see vid.c's
+# YQ2_KAIOS_UNIFIED_RENDERERS branch) -- the KaiOS launcher's own Video
+# settings screen sets that cvar before Module.callMain() ever runs, so
+# there's no more separate quake2-kaios-soft.js/quake2-kaios-gl3.js pair
+# to ship or pick between; same single output filename as always.
+#
+# RENDERER=soft/gl1/gl3 still build a single renderer completely alone,
+# same as before this existed -- useful for one-off single-variable perf
+# testing (this session's whole demo1.dm2 A/B methodology depends on
+# isolating one renderer at a time) without the unified binary's small
+# extra size/complexity, and gl1 in particular is still just a shelved
+# diagnostic target (see the "gl1 shelved for now" comment below) never
+# linked into the unified build at all yet. TOTAL_MEMORY_OVERRIDE and
+# OUT_NAME exist for the same one-off-testing reason: a smaller heap
+# reservation, or writing the build somewhere other than platform/kaios/
+# so a diagnostic build never overwrites the working shipped one.
+RENDERER="${RENDERER:-unified}"
 TOTAL_MEMORY_OVERRIDE="${TOTAL_MEMORY_OVERRIDE:-100663296}"
 OUT_NAME="${OUT_NAME:-quake2-kaios}"
 KAIOS_DIR="${KAIOS_DIR:-$ROOT/platform/kaios}"
@@ -55,6 +66,16 @@ COMMON_FLAGS=(
 	-I"$ENGINE"
 	-s USE_SDL=2
 )
+
+if [ "$RENDERER" = "unified" ]; then
+	# Tells vid.c (the only file that reads it) to dispatch vid_renderer
+	# by name across several statically-linked GetRefAPI-alikes instead
+	# of assuming exactly one renderer's plain "GetRefAPI" was linked in
+	# -- see vid.c's VID_LoadRenderer(). Global rather than scoped to
+	# just the client compile group: harmless everywhere else, and
+	# COMMON_FLAGS is what every compile_group call below actually uses.
+	COMMON_FLAGS+=(-DYQ2_KAIOS_UNIFIED_RENDERERS)
+fi
 
 # gl1 shelved by default (see autoexec.cfg's comment: real-device WebGL
 # context creation has failed every attempt so far, even bypassing SDL
@@ -113,6 +134,65 @@ GL1_FLAGS=(
 	-Dgl1_stereo=gl1_local_stereo
 	-Dgl1_stereo_separation=gl1_local_stereo_separation
 	-Dgl1_stereo_convergence=gl1_local_stereo_convergence
+)
+
+# RENDERER=unified only: soft's own GetRefAPI (sw_main.c) needs the same
+# per-renderer rename gl3/gl1 already get above, purely because vid.c
+# now looks up each renderer's entry point by a distinct linked-in name
+# (SoftGetRefAPI/GL3GetRefAPI) instead of the single generic "GetRefAPI"
+# every standalone single-renderer build still exports. Nothing else
+# about soft collides -- its own vid_fullscreen/vid_gamma/modes (see
+# sw_main.c) are already `static`, unlike gl1's/gl3's, so no further
+# renaming is needed there.
+SOFT_UNIFIED_FLAGS=(
+	-DGetRefAPI=SoftGetRefAPI
+)
+
+# RENDERER=unified only: gl3, on top of its already-existing GL3_FLAGS
+# renames above (needed even for a single-renderer gl3 build once
+# statically linked alongside vid.c), also needs GetRefAPI itself
+# renamed for the same reason SOFT_UNIFIED_FLAGS does, plus a batch of
+# further renames for every OTHER non-static global gl3_main.c/
+# gl3_draw.c happen to share a name with in sw_main.c -- found by
+# actually linking soft+gl3 together and diffing `llvm-nm -g
+# --defined-only` between the two object sets for the real, complete
+# list (wasm-ld's own duplicate-symbol errors truncate after a handful).
+# Each of these was checked to make sure nothing outside gl3/soft's own
+# files references the *specific* renderer's copy by this literal name
+# (a `static` local, a same-named cvar *string* passed to Cvar_Get(),
+# or a same-named struct field would all show up in a plain grep without
+# actually being this collision) -- e.g. cl_main.c's "r_fullbright" is a
+# config-defaults table string, not this cvar_t* pointer; sound.c's
+# registration_sequence is a struct *field*, not this int. Three
+# symbols that genuinely are reached directly from outside gl3/soft
+# (`ri`, `r_polycount`, `kaios_cube_test_active`/`RI_KaiosCubeTestFrame`)
+# are NOT in this list -- those are handled in gl3_main.c itself instead
+# (see its YQ2_KAIOS_UNIFIED_RENDERERS block), by making gl3's copies
+# extern to soft's single real definition, since unlike these genuinely
+# gl3-private globals below, code outside either renderer needs to
+# reach a single canonical instance of those three regardless of which
+# renderer is actually active.
+GL3_UNIFIED_FLAGS=(
+	"${GL3_FLAGS[@]}"
+	-DGetRefAPI=GL3GetRefAPI
+	-Dd_8to24table=gl3_d_8to24table
+	-Dfrustum=gl3_frustum
+	-Dr_cull=gl3_r_cull
+	-Dr_drawworld=gl3_r_drawworld
+	-Dr_farsee=gl3_r_farsee
+	-Dr_fixsurfsky=gl3_r_fixsurfsky
+	-Dr_fullbright=gl3_r_fullbright
+	-Dr_gunfov=gl3_r_gunfov
+	-Dr_lerpmodels=gl3_r_lerpmodels
+	-Dr_lightlevel=gl3_r_lightlevel
+	-Dr_modulate=gl3_r_modulate
+	-Dr_retexturing=gl3_r_retexturing
+	-Dr_scale8bittextures=gl3_r_scale8bittextures
+	-Dr_validation=gl3_r_validation
+	-Dregistration_sequence=gl3_registration_sequence
+	-Dvpn=gl3_vpn
+	-Dvright=gl3_vright
+	-Dvup=gl3_vup
 )
 
 # The "baseq2" game code is normally built as its own game.so, with its
@@ -188,6 +268,18 @@ if [ "$RENDERER" = "gl1" ]; then
 elif [ "$RENDERER" = "gl3" ]; then
 	echo "==> Compiling gl3/GLES2 renderer (${#REFGL3_SRCS[@]} files)"
 	compile_group refgl3 GL3_FLAGS REFGL3_SRCS
+elif [ "$RENDERER" = "unified" ]; then
+	# Shared file-format code compiled exactly once (see REFFILES_SRCS's
+	# comment in sources.mk.sh) and linked into both renderers below --
+	# compiling it twice (once per renderer, like the standalone
+	# single-renderer branches above do) would duplicate every symbol in
+	# it once both renderers are statically linked into the same binary.
+	echo "==> Compiling shared renderer file-format code (${#REFFILES_SRCS[@]} files)"
+	compile_group reffiles NO_EXTRA REFFILES_SRCS
+	echo "==> Compiling software renderer (${#REFSOFT_ONLY_SRCS[@]} files)"
+	compile_group refsoft SOFT_UNIFIED_FLAGS REFSOFT_ONLY_SRCS
+	echo "==> Compiling gl3/GLES2 renderer (${#REFGL3_ONLY_SRCS[@]} files)"
+	compile_group refgl3 GL3_UNIFIED_FLAGS REFGL3_ONLY_SRCS
 else
 	echo "==> Compiling software renderer (${#REFSOFT_SRCS[@]} files)"
 	compile_group refsoft NO_EXTRA REFSOFT_SRCS

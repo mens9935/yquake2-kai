@@ -408,6 +408,43 @@ VID_LoadRenderer(void)
 	Com_Printf("Loading library: %s\n", reflib_name);
 
 #ifdef __EMSCRIPTEN__
+#ifdef YQ2_KAIOS_UNIFIED_RENDERERS
+	/* platform/emscripten/build.sh's RENDERER=unified (the default)
+	 * statically links every supported renderer into this one binary,
+	 * each under its own distinct linked-in name (build.sh's
+	 * SOFT_UNIFIED_FLAGS/GL3_UNIFIED_FLAGS -DGetRefAPI=... renames --
+	 * plain "GetRefAPI" would collide once more than one renderer's
+	 * object files land in the same static link). Dispatch by
+	 * vid_renderer's string instead of the single asm.js-has-no-
+	 * dynamic-linking symbol lookup below, which only ever worked
+	 * because exactly one renderer was ever linked in at a time. */
+	{
+		extern refexport_t SoftGetRefAPI(refimport_t) asm("SoftGetRefAPI");
+		extern refexport_t GL3GetRefAPI(refimport_t) asm("GL3GetRefAPI");
+
+		if ((strcmp(vid_renderer->string, "gl3") == 0) ||
+			(strcmp(vid_renderer->string, "gles3") == 0))
+		{
+			GetRefAPI = GL3GetRefAPI;
+		}
+		else
+		{
+			if (strcmp(vid_renderer->string, "soft") != 0)
+			{
+				/* gl1/gles1 asked for but not (yet) linked into the
+				 * unified build -- see sources.mk.sh's REFGL1_SRCS
+				 * comment. Fall back instead of leaving vid_renderer
+				 * pointing at a renderer this binary can't actually
+				 * run. */
+				Com_Printf("Renderer \"%s\" isn't built into this binary, "
+					"falling back to soft.\n", vid_renderer->string);
+				Cvar_Set("vid_renderer", "soft");
+			}
+
+			GetRefAPI = SoftGetRefAPI;
+		}
+	}
+#else
 	/* Emscripten's asm.js output has no dynamic linking, so the
 	 * (single, statically linked) renderer is compiled directly
 	 * into this binary. Call the linked-in symbol instead of
@@ -416,6 +453,7 @@ VID_LoadRenderer(void)
 		extern refexport_t Q2_GetRefAPI_link(refimport_t) asm("GetRefAPI");
 		GetRefAPI = Q2_GetRefAPI_link;
 	}
+#endif /* YQ2_KAIOS_UNIFIED_RENDERERS */
 #else
 	// Check if the renderer libs exists.
 	if (!VID_HasRenderer(vid_renderer->string))
