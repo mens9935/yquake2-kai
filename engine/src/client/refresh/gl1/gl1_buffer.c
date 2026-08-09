@@ -419,7 +419,13 @@ void
 R_UpdateGLBuffer(buffered_draw_t type, int colortex, int lighttex, int flags, float alpha)
 {
 	if ( gl_buf.type != type || gl_buf.texture[0] != colortex ||
-		(gl_config.multitexture && type == buf_mtex && gl_buf.texture[1] != lighttex) ||
+		(gl_config.multitexture &&
+#ifdef __EMSCRIPTEN__
+		 (type == buf_mtex || type == buf_mtex_svbo) &&
+#else
+		 type == buf_mtex &&
+#endif
+		 gl_buf.texture[1] != lighttex) ||
 		((type == buf_singletex || type == buf_alias) && gl_buf.flags != flags) ||
 		(type == buf_alpha && gl_buf.alpha != alpha))
 	{
