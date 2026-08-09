@@ -331,7 +331,24 @@ GL3_Register(void)
 	gl_finish = ri.Cvar_Get("gl_finish", "0", CVAR_ARCHIVE);
 	gl_znear = ri.Cvar_Get("gl_znear", "4", CVAR_ARCHIVE);
 
+#ifdef __EMSCRIPTEN__
+	/* The FBO-based underwater warp postprocess pass (this file's own
+	 * GL3_SetupGL()) needs glCheckFramebufferStatus() to report
+	 * GL_FRAMEBUFFER_COMPLETE for a depth-only renderbuffer + RGB
+	 * texture combo on this device's WebGL1 implementation -- real-
+	 * device reports say water still doesn't visibly do anything in
+	 * gl3, unlike gl1, which never used an FBO for this at all and
+	 * just draws the plain v_blend flash quad (GL3_Draw_Flash(),
+	 * below) directly -- the exact same r_newrefdef.blend data every
+	 * renderer already gets from the shared, renderer-agnostic
+	 * SV_CalcBlend() (game/player/view.c). Defaulting this off here
+	 * falls through to that same simple, already-proven-working
+	 * mechanism instead of the FBO path, trading away the screen-warp
+	 * distortion effect for a reliable underwater tint. */
+	gl3_usefbo = ri.Cvar_Get("gl3_usefbo", "0", CVAR_ARCHIVE);
+#else
 	gl3_usefbo = ri.Cvar_Get("gl3_usefbo", "1", CVAR_ARCHIVE); // use framebuffer object for postprocess effects (water)
+#endif
 
 #if 0 // TODO!
 	//gl_lefthand = ri.Cvar_Get("hand", "0", CVAR_USERINFO | CVAR_ARCHIVE);

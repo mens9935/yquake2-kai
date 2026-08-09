@@ -152,6 +152,22 @@ typedef struct
 	float max_anisotropy;
 } gl3config_t;
 
+#ifdef YQ2_GL3_GLES2_WEB
+/* ES2/WebGL1 has no UBOs, so the full MAX_DLIGHTS (32) dynLights[]
+ * array gl3state.uniLightsData normally holds can't be handed to the
+ * lightmap shader as one block -- each of these needs its own
+ * glUniform3fv/4fv call and its own pair of uniform locations per
+ * shader (see gl3ShaderInfo_t::uniDynLightOrigin/Color below), so a
+ * much smaller cap keeps per-draw uniform traffic and the shader's
+ * uniform budget (WebGL1 only guarantees a modest minimum count of
+ * fragment uniform vectors) sane on this device. Quake II rarely has
+ * more than a handful of dynamic lights alive at once in practice
+ * (rocket/grenade explosions, muzzle flashes) -- world surfaces
+ * simply won't render contributions from the (rare) 9th+ simultaneous
+ * light under ES2, unlike the desktop/GLES3 path's full 32. */
+#define GL3_ES2_MAX_DLIGHTS 8
+#endif
+
 typedef struct
 {
 	GLuint shaderProgram;
@@ -172,6 +188,13 @@ typedef struct
 	GLint uniTransProjView, uniTransModel, uniScroll, uniTime3D,
 	      uniAlpha, uniOverbrightbits, uniParticleFadeFactor,
 	      uniLightScaleForTurb;                               // uni3D
+
+	// uniLights -- only si3Dlm/si3DlmFlow (the lightmapped world-surface
+	// shaders) actually declare these; every other ES2 shader gets -1
+	// for all of them from glGetUniformLocation(), same "not present"
+	// convention as everything else here.
+	GLint uniDynLightOrigin[GL3_ES2_MAX_DLIGHTS];
+	GLint uniDynLightColor[GL3_ES2_MAX_DLIGHTS];
 #endif
 } gl3ShaderInfo_t;
 

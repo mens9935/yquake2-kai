@@ -1669,24 +1669,30 @@ static const char* ES2_vertexSrc3Dflow = MULTILINE_STRING(
 static const char* ES2_vertexSrc3Dlm = MULTILINE_STRING(
 
 		varying vec2 passLMcoord;
+		varying vec3 passWorldCoord;
 
 		void main()
 		{
 			passTexCoord = texCoord;
 			passLMcoord = lmTexCoord;
-			gl_Position = transProjView * transModel * vec4(position, 1.0);
+			vec4 worldCoord = transModel * vec4(position, 1.0);
+			passWorldCoord = worldCoord.xyz;
+			gl_Position = transProjView * worldCoord;
 		}
 );
 
 static const char* ES2_vertexSrc3DlmFlow = MULTILINE_STRING(
 
 		varying vec2 passLMcoord;
+		varying vec3 passWorldCoord;
 
 		void main()
 		{
 			passTexCoord = texCoord + vec2(scroll, 0.0);
 			passLMcoord = lmTexCoord;
-			gl_Position = transProjView * transModel * vec4(position, 1.0);
+			vec4 worldCoord = transModel * vec4(position, 1.0);
+			passWorldCoord = worldCoord.xyz;
+			gl_Position = transProjView * worldCoord;
 		}
 );
 
@@ -1736,6 +1742,21 @@ static const char* ES2_fragmentSrc3Dlm = MULTILINE_STRING(
 		uniform vec4 lmScales[4];
 
 		varying vec2 passLMcoord;
+		varying vec3 passWorldCoord;
+
+		// Fixed-size (not sized by a uniform -- WebGL1/GLSL ES 1.00
+		// loop bounds must be constant expressions) array of the
+		// closest GL3_ES2_MAX_DLIGHTS dynamic lights this frame (see
+		// that #define's comment, header/local.h). Unused slots are
+		// zeroed by GL3_PushDlights() (gl3_light.c), so they
+		// contribute exactly nothing below -- no separate "how many
+		// are actually active" uniform needed. Distance-only falloff
+		// (no surface-normal/angle term, unlike the desktop/GLES3
+		// path's dynLights loop) -- matches gl1's own CPU dynamic-
+		// light technique (gl1_light.c's R_AddDynamicLights), which
+		// doesn't factor in angle either.
+		uniform vec3 dynLightOrigin[8];
+		uniform vec4 dynLightColor[8]; // .a is intensity
 
 		void main()
 		{
@@ -1747,6 +1768,14 @@ static const char* ES2_fragmentSrc3Dlm = MULTILINE_STRING(
 			lmTex     += texture2D(lightmap1, passLMcoord) * lmScales[1];
 			lmTex     += texture2D(lightmap2, passLMcoord) * lmScales[2];
 			lmTex     += texture2D(lightmap3, passLMcoord) * lmScales[3];
+
+			for (int i = 0; i < 8; i++)
+			{
+				float intens = dynLightColor[i].a;
+				float dist = distance(dynLightOrigin[i], passWorldCoord);
+				float fact = max(0.0, intens - dist - 52.0);
+				lmTex.rgb += dynLightColor[i].rgb * fact * (1.0/256.0);
+			}
 
 			lmTex.rgb *= overbrightbits;
 			gl_FragColor = lmTex*texel;
@@ -1768,6 +1797,11 @@ static const char* ES2_fragmentSrc3DlmNoColor = MULTILINE_STRING(
 		uniform vec4 lmScales[4];
 
 		varying vec2 passLMcoord;
+		varying vec3 passWorldCoord;
+
+		// see ES2_fragmentSrc3Dlm's matching comment
+		uniform vec3 dynLightOrigin[8];
+		uniform vec4 dynLightColor[8]; // .a is intensity
 
 		void main()
 		{
@@ -1779,6 +1813,14 @@ static const char* ES2_fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			lmTex     += texture2D(lightmap1, passLMcoord) * lmScales[1];
 			lmTex     += texture2D(lightmap2, passLMcoord) * lmScales[2];
 			lmTex     += texture2D(lightmap3, passLMcoord) * lmScales[3];
+
+			for (int i = 0; i < 8; i++)
+			{
+				float intens = dynLightColor[i].a;
+				float dist = distance(dynLightOrigin[i], passWorldCoord);
+				float fact = max(0.0, intens - dist - 52.0);
+				lmTex.rgb += dynLightColor[i].rgb * fact * (1.0/256.0);
+			}
 
 			// turn lightcolor into grey for gl3_colorlight 0
 			lmTex.rgb = vec3(0.333 * (lmTex.r+lmTex.g+lmTex.b));
@@ -1991,6 +2033,15 @@ initShader2D_ES2(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* f
 	shaderInfo->uniParticleFadeFactor = -1;
 	shaderInfo->uniLightScaleForTurb  = -1;
 
+	{
+		int i;
+		for(i=0; i<GL3_ES2_MAX_DLIGHTS; ++i)
+		{
+			shaderInfo->uniDynLightOrigin[i] = -1;
+			shaderInfo->uniDynLightColor[i] = -1;
+		}
+	}
+
 	shaderInfo->uniLmScalesOrTime = glGetUniformLocation(prog, "time");
 	if(shaderInfo->uniLmScalesOrTime != -1)
 	{
@@ -2093,6 +2144,18 @@ initShader3D_ES2(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* f
 		for(i=1; i<4; ++i)  shaderInfo->lmScales[i] = HMM_Vec4(0.0f, 0.0f, 0.0f, 0.0f);
 
 		glUniform4fv(lmScalesLoc, 4, shaderInfo->lmScales[0].Elements);
+	}
+
+	// -1 for every shader that doesn't declare dynLightOrigin/Color
+	// (only si3Dlm/si3DlmFlow do) -- same "not present" convention as
+	// everything else here.
+	for(i=0; i<GL3_ES2_MAX_DLIGHTS; ++i)
+	{
+		char originName[24], colorName[24];
+		snprintf(originName, sizeof(originName), "dynLightOrigin[%d]", i);
+		snprintf(colorName, sizeof(colorName), "dynLightColor[%d]", i);
+		shaderInfo->uniDynLightOrigin[i] = glGetUniformLocation(prog, originName);
+		shaderInfo->uniDynLightColor[i] = glGetUniformLocation(prog, colorName);
 	}
 
 	shaderInfo->shaderProgram = prog;
@@ -2290,6 +2353,18 @@ GL3_ES2_SyncUniformsForCurrentProgram(void)
 	if(si->uniOverbrightbits != -1)     glUniform1f(si->uniOverbrightbits, gl3state.uni3DData.overbrightbits);
 	if(si->uniParticleFadeFactor != -1) glUniform1f(si->uniParticleFadeFactor, gl3state.uni3DData.particleFadeFactor);
 	if(si->uniLightScaleForTurb != -1)  glUniform1f(si->uniLightScaleForTurb, gl3state.uni3DData.lightScaleForTurb);
+
+	{
+		int i;
+		for(i=0; i<GL3_ES2_MAX_DLIGHTS; ++i)
+		{
+			gl3UniDynLight* dl = &gl3state.uniLightsData.dynLights[i];
+			if(si->uniDynLightOrigin[i] != -1)  glUniform3fv(si->uniDynLightOrigin[i], 1, dl->origin);
+			// dl->color and dl->intensity are contiguous in memory
+			// (vec3_t color; GLfloat intensity;) -- exactly a vec4.
+			if(si->uniDynLightColor[i] != -1)   glUniform4fv(si->uniDynLightColor[i], 1, dl->color);
+		}
+	}
 }
 
 // GL3_UpdateUBOCommon/2D/3D/Lights are called throughout gl3_draw.c/
@@ -2302,6 +2377,6 @@ GL3_ES2_SyncUniformsForCurrentProgram(void)
 void GL3_UpdateUBOCommon(void) { GL3_ES2_SyncUniformsForCurrentProgram(); }
 void GL3_UpdateUBO2D(void)     { GL3_ES2_SyncUniformsForCurrentProgram(); }
 void GL3_UpdateUBO3D(void)     { GL3_ES2_SyncUniformsForCurrentProgram(); }
-void GL3_UpdateUBOLights(void) { /* per-vertex dynlights dropped for ES2, nothing to push */ }
+void GL3_UpdateUBOLights(void) { GL3_ES2_SyncUniformsForCurrentProgram(); }
 
 #endif // YQ2_GL3_GLES2_WEB
