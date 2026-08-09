@@ -2073,7 +2073,7 @@ R_Register(void)
 	 * wpoly/epoly/tex/lmaps console print is there without having to
 	 * type the command in by hand on this platform's keypad. */
 #ifdef __EMSCRIPTEN__
-	r_fullbright = ri.Cvar_Get("r_fullbright", "1", CVAR_ARCHIVE);
+	r_fullbright = ri.Cvar_Get("r_fullbright", "0", CVAR_ARCHIVE);
 #else
 	r_fullbright = ri.Cvar_Get("r_fullbright", "0", 0);
 #endif
@@ -2103,7 +2103,24 @@ R_Register(void)
 	gl_lightmap = ri.Cvar_Get("r_lightmap", "0", 0);
 	gl_shadows = ri.Cvar_Get("r_shadows", "0", CVAR_ARCHIVE);
 	gl1_stencilshadow = ri.Cvar_Get("gl1_stencilshadow", "0", CVAR_ARCHIVE);
+	/* Dynamic lights (explosions, muzzle flashes, weapon glow) make
+	 * gl1_dynamic recompute AND re-upload (glTexSubImage2D) the
+	 * lightmap texture data for every affected surface, every frame --
+	 * a real per-surface CPU recompute plus GL upload that's entirely
+	 * separate from triangle count or draw-call batching (occlusion
+	 * culling, distcull, and the bigger lightmap atlas above all leave
+	 * this untouched). Off by default on this platform: real-device
+	 * testing after those other fixes still showed drops correlating
+	 * with the effects count in combat. CVAR_ARCHIVE and exposed as a
+	 * KaiOS Tuning toggle (menu.c) since it's a genuine visual
+	 * trade-off (nearby walls stop flaring from explosions/muzzle
+	 * flashes), not a free win.
+	 */
+#ifdef __EMSCRIPTEN__
+	gl1_dynamic = ri.Cvar_Get("gl1_dynamic", "0", CVAR_ARCHIVE);
+#else
 	gl1_dynamic = ri.Cvar_Get("gl1_dynamic", "1", 0);
+#endif
 	gl_nobind = ri.Cvar_Get("gl_nobind", "0", 0);
 	gl1_round_down = ri.Cvar_Get("gl1_round_down", "1", 0);
 	gl1_picmip = ri.Cvar_Get("gl1_picmip", "0", 0);

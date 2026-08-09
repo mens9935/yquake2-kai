@@ -2725,6 +2725,7 @@ static menulist_s s_kaios_particles_box;
 static menulist_s s_kaios_prewarm_box;
 static menulist_s s_kaios_fullbright_box;
 static menulist_s s_kaios_speeds_box;
+static menulist_s s_kaios_dynamiclights_box;
 
 /* Set by the buffer slider / sample rate box below instead of calling
  * CL_Snd_Restart_f() directly from their own callback -- a slider fires
@@ -2824,6 +2825,12 @@ KaiosSpeedsFunc(void *unused)
 }
 
 static void
+KaiosDynamicLightsFunc(void *unused)
+{
+	Cvar_SetValue("gl1_dynamic", (float)s_kaios_dynamiclights_box.curvalue);
+}
+
+static void
 KaiosTuning_MenuInit(void)
 {
 	static const char *khz_items[] =
@@ -2842,6 +2849,7 @@ KaiosTuning_MenuInit(void)
 	cvar_t *kaios_prewarm_cache = Cvar_Get("kaios_prewarm_cache", "1", CVAR_ARCHIVE);
 	cvar_t *r_fullbright = Cvar_Get("r_fullbright", "0", 0);
 	cvar_t *r_speeds = Cvar_Get("r_speeds", "0", 0);
+	cvar_t *gl1_dynamic = Cvar_Get("gl1_dynamic", "1", 0);
 	float scale = SCR_GetMenuScale();
 	unsigned short int y = 0;
 	int khz_idx;
@@ -2930,6 +2938,14 @@ KaiosTuning_MenuInit(void)
 	s_kaios_speeds_box.itemnames = onoff_items;
 	s_kaios_speeds_box.curvalue = (r_speeds->value != 0);
 
+	s_kaios_dynamiclights_box.generic.type = MTYPE_SPINCONTROL;
+	s_kaios_dynamiclights_box.generic.x = 0;
+	s_kaios_dynamiclights_box.generic.y = (y += 10);
+	s_kaios_dynamiclights_box.generic.name = "dynamic light relighting";
+	s_kaios_dynamiclights_box.generic.callback = KaiosDynamicLightsFunc;
+	s_kaios_dynamiclights_box.itemnames = onoff_items;
+	s_kaios_dynamiclights_box.curvalue = (gl1_dynamic->value != 0);
+
 	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_distcull_slider);
 	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_crosshair_slider);
 	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_buffer_slider);
@@ -2939,6 +2955,7 @@ KaiosTuning_MenuInit(void)
 	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_prewarm_box);
 	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_fullbright_box);
 	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_speeds_box);
+	Menu_AddItem(&s_kaios_menu, (void *)&s_kaios_dynamiclights_box);
 }
 
 static void
