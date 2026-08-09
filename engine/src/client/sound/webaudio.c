@@ -129,7 +129,7 @@ WA_Init(void)
 			resume();
 
 			Module.kaiosAudio = ka;
-			return 1;
+			return ka.ctx.sampleRate;
 		} catch (e) {
 			console.log('[kaios] webaudio: init threw: ' + e);
 			return 0;
@@ -137,6 +137,21 @@ WA_Init(void)
 	}, s_volume->value, MAX_CHANNELS);
 
 	wa_inited = (ok != 0);
+
+	if (wa_inited)
+	{
+		/* Purely informational (S_SoundInfo_f's "Sound sampling rate"
+		 * print reads sound.speed regardless of backend) -- this
+		 * backend has no software ring buffer, so none of sound_t's
+		 * other fields (samples/submission_chunk/buffer/...) apply.
+		 * sound.channels matters beyond logging though: SDL_Spatialize/
+		 * SDL_SpatializeOrigin (sdl.c), reused as-is here, special-case
+		 * sound.channels == 1 to skip stereo panning -- a real browser
+		 * AudioContext is always genuinely stereo output. */
+		sound.speed = ok;
+		sound.channels = 2;
+	}
+
 	return wa_inited;
 }
 
@@ -541,6 +556,27 @@ WA_Update(void)
 	channel_t *ch;
 
 	paintedtime = cls.realtime;
+
+	/* Browsers keep a fresh AudioContext 'suspended' until a user
+	 * gesture -- WA_Init's own resume() attempt doesn't count (it's not
+	 * itself running inside a gesture handler), and the keydown/
+	 * touchstart listeners it attaches only help if the player actually
+	 * presses something. A build that auto-launches straight into a
+	 * demo (kaios_startcmd "demomap ...") can run through the whole
+	 * thing without a single real keypress, leaving the context
+	 * suspended -- and every sound plays completely silently the entire
+	 * time, with nothing in the C-side state (sounds: counters, sndms)
+	 * showing anything wrong, since AudioBufferSourceNode.start() works
+	 * fine on a suspended context, it just produces no audible output.
+	 * Retrying resume() every frame is cheap (a no-op once actually
+	 * running) and self-heals regardless of which DOM event, if any,
+	 * the input layer actually lets through to document. */
+	EM_ASM({
+		var ka = Module.kaiosAudio;
+		if (ka && ka.ctx.state !== 'running') {
+			ka.ctx.resume().catch(function(){});
+		}
+	});
 
 	if (s_underwater->modified || (wa_framecount == 0))
 	{
