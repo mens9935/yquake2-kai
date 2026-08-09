@@ -51,6 +51,7 @@ Kaios_LogHeapUsage(const char *label)
 {
 	struct mallinfo mi;
 	size_t heap_size;
+	unsigned wa_bytes;
 	static cvar_t *kaios_debug_mem;
 
 	if (!kaios_debug_mem)
@@ -65,10 +66,18 @@ Kaios_LogHeapUsage(const char *label)
 
 	mi = mallinfo();
 	heap_size = emscripten_get_heap_size();
+	/* Loaded sfx/music data on the webaudio backend lives entirely in
+	 * browser-native AudioBuffers/a Blob, never in this C heap at all
+	 * (WA_UploadSfx's own comment: the C-side cache entry is just
+	 * metadata) -- mi.uordblks alone would make every S_LoadSound
+	 * look free no matter how much real memory it actually costs.
+	 * WA_GetMemoryUsage() is 0 on any other backend. */
+	wa_bytes = WA_GetMemoryUsage();
 
-	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%)\n",
+	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%) webaudio=%u bytes\n",
 		label, (unsigned)mi.uordblks, (unsigned)heap_size,
-		heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f);
+		heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f,
+		wa_bytes);
 }
 #endif
 

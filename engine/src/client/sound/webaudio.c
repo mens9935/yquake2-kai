@@ -101,6 +101,18 @@ WA_Init(void)
 			ka.buffers = [null]; /* index 0 reserved as "no buffer" */
 			ka.slots = [];
 
+			/* Running total of bytes actually held by AudioBuffers
+			 * (WA_UploadSfx below) and the current music Blob
+			 * (webaudio_music.c) -- both are real browser-native
+			 * memory that mallinfo()/emscripten_get_heap_size() can
+			 * never see (see WA_UploadSfx's own comment on why the
+			 * C-side cache entry is just metadata). Read back by
+			 * WA_GetMemoryUsage() so sound.c's KAIOS_MEM profiler can
+			 * report the *actual* cost of a loaded sound instead of a
+			 * heap number that never moves for it. */
+			ka.audioBytesUsed = 0;
+			ka.musicBytesUsed = 0;
+
 			for (var i = 0; i < $1; i++) {
 				var g = ka.ctx.createGain();
 				var p = ka.ctx.createStereoPanner ? ka.ctx.createStereoPanner() : null;
@@ -276,6 +288,16 @@ WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
 		try {
 			var buf = ka.ctx.createBuffer(chans, frames, rate);
 
+			/* Web Audio stores channel data as Float32 internally
+			 * regardless of the source width (8/16-bit here) -- this
+			 * is the real, resident size of what createBuffer() just
+			 * allocated, not the (usually smaller) size of the C-side
+			 * `data` this was decoded from. Stashed on the buffer
+			 * itself so WA_DeleteSfx below can subtract the same
+			 * number back out without needing a parallel array. */
+			buf.__kaiosBytes = frames * chans * 4;
+			ka.audioBytesUsed = (ka.audioBytesUsed || 0) + buf.__kaiosBytes;
+
 			for (var c = 0; c < chans; c++) {
 				var out = buf.getChannelData(c);
 
@@ -358,9 +380,32 @@ WA_DeleteSfx(sfx_t *s)
 	EM_ASM({
 		var ka = Module.kaiosAudio;
 		if (ka && $0 > 0 && $0 < ka.buffers.length) {
+			var buf = ka.buffers[$0];
+			if (buf && buf.__kaiosBytes) {
+				ka.audioBytesUsed -= buf.__kaiosBytes;
+			}
 			ka.buffers[$0] = null;
 		}
 	}, sc->wa_bufnum);
+}
+
+/*
+ * Total bytes currently held by loaded sfx AudioBuffers plus the
+ * current music Blob (see the ka.audioBytesUsed/ka.musicBytesUsed
+ * comment in WA_Init above) -- 0 if the webaudio backend was never
+ * initialized. Read by sound.c's KAIOS_MEM profiler to fold this
+ * otherwise-invisible allocation into what it reports.
+ */
+unsigned
+WA_GetMemoryUsage(void)
+{
+	return (unsigned)EM_ASM_INT({
+		var ka = Module.kaiosAudio;
+		if (!ka) {
+			return 0;
+		}
+		return (ka.audioBytesUsed || 0) + (ka.musicBytesUsed || 0);
+	});
 }
 
 /*

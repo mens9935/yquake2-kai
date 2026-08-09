@@ -97,6 +97,7 @@ WA_PlayMusic(const byte *data, int len)
 
 			var blob = new Blob([bytes], {type: 'audio/ogg'});
 			ka.musicUrl = URL.createObjectURL(blob);
+			ka.musicBytesUsed = len;
 			ka.musicEl.src = ka.musicUrl;
 			ka.musicEl.volume = (ka.musicVolume !== undefined) ? ka.musicVolume : 1.0;
 
@@ -129,6 +130,7 @@ WA_StopMusic(void)
 			URL.revokeObjectURL(ka.musicUrl);
 			ka.musicUrl = null;
 		}
+		ka.musicBytesUsed = 0;
 	});
 }
 

@@ -441,6 +441,14 @@ sfxcache_t *WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
 void WA_DeleteSfx(sfx_t *s);
 
 /*
+ * Bytes currently held by loaded sfx AudioBuffers plus the current
+ * music Blob -- real browser-native memory invisible to mallinfo()/
+ * emscripten_get_heap_size(), see webaudio.c's own comment. Used by
+ * sound.c's KAIOS_MEM profiler.
+ */
+unsigned WA_GetMemoryUsage(void);
+
+/*
  * Starts playback of a channel (frontend sense) using the slot
  * (ch - channels) as its persistent GainNode/PannerNode index.
  */
