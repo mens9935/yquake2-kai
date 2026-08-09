@@ -35,6 +35,32 @@ var statusTextEl = document.getElementById('status-text');
 var statusBarEl = document.getElementById('status-bar');
 var canvasEl = document.getElementById('canvas');
 
+// Shared by every keyboard-navigable list screen (main menu, baseq2
+// picker, settings groups, settings items) -- builds the <li> rows,
+// marks the selected one (styled in index.html's <style> block, a
+// cursor glyph + text color rather than a solid highlight block, to
+// read closer to Quake II's own menu convention), and scrolls it into
+// view. The scrollIntoView() call is what actually makes a list
+// longer than the screen (the Debug settings screen has 13+ rows)
+// navigable at all -- index.html's CSS makes the <ul> scrollable, but
+// without this, ArrowDown past the visible rows would move the
+// selection somewhere the player can't see or confirm.
+function renderMenuItems(listEl, labels, selectedIndex) {
+	listEl.innerHTML = '';
+	for (var i = 0; i < labels.length; i++) {
+		var li = document.createElement('li');
+		li.textContent = labels[i];
+		if (i === selectedIndex) {
+			li.className = 'selected';
+		}
+		listEl.appendChild(li);
+	}
+	var selectedEl = listEl.children[selectedIndex];
+	if (selectedEl && selectedEl.scrollIntoView) {
+		selectedEl.scrollIntoView({ block: 'nearest' });
+	}
+}
+
 // Used to be an inline oncontextmenu="..." attribute on the <canvas> tag
 // in index.html -- moved here for the same reason module-init.js exists:
 // privileged KaiOS apps' mandatory CSP silently drops inline scripts
@@ -579,15 +605,9 @@ function showPicker(candidates, onChosen) {
 	var selected = 0;
 
 	function render() {
-		pickerListEl.innerHTML = '';
-		for (var i = 0; i < candidates.length; i++) {
-			var li = document.createElement('li');
-			li.textContent = (candidates[i].root || '') + '/' + candidates[i].dirName;
-			if (i === selected) {
-				li.className = 'selected';
-			}
-			pickerListEl.appendChild(li);
-		}
+		renderMenuItems(pickerListEl, candidates.map(function (c) {
+			return (c.root || '') + '/' + c.dirName;
+		}), selected);
 	}
 
 	function onKeyDown(ev) {
@@ -1020,15 +1040,7 @@ function showMainMenu() {
 	var selected = 0;
 
 	function render() {
-		menuListEl.innerHTML = '';
-		for (var i = 0; i < items.length; i++) {
-			var li = document.createElement('li');
-			li.textContent = items[i].label;
-			if (i === selected) {
-				li.className = 'selected';
-			}
-			menuListEl.appendChild(li);
-		}
+		renderMenuItems(menuListEl, items.map(function (it) { return it.label; }), selected);
 	}
 
 	function onKeyDown(ev) {
@@ -1555,16 +1567,9 @@ function showSettingsItemsScreen(group) {
 	var selected = 0;
 
 	function render() {
-		settingsListEl.innerHTML = '';
-		for (var i = 0; i < group.items.length; i++) {
-			var item = group.items[i];
-			var li = document.createElement('li');
-			li.textContent = item.label + ': ' + item.choices[getItemIndex(item)].label;
-			if (i === selected) {
-				li.className = 'selected';
-			}
-			settingsListEl.appendChild(li);
-		}
+		renderMenuItems(settingsListEl, group.items.map(function (item) {
+			return item.label + ': ' + item.choices[getItemIndex(item)].label;
+		}), selected);
 	}
 
 	function onKeyDown(ev) {
@@ -1607,15 +1612,7 @@ function showSettingsGroups() {
 	var selected = 0;
 
 	function render() {
-		settingsListEl.innerHTML = '';
-		for (var i = 0; i < rows.length; i++) {
-			var li = document.createElement('li');
-			li.textContent = rows[i].label;
-			if (i === selected) {
-				li.className = 'selected';
-			}
-			settingsListEl.appendChild(li);
-		}
+		renderMenuItems(settingsListEl, rows.map(function (r) { return r.label; }), selected);
 	}
 
 	function onKeyDown(ev) {

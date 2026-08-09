@@ -36,16 +36,35 @@
 		list-style: none;
 		margin: 0;
 		padding: 0;
+		/* Leaves room for the h1 above and the hint bar below within the
+		 * fixed 320px-tall screen -- overflow-y lets a list longer than
+		 * that (the Debug settings screen has 13+ rows) scroll instead
+		 * of just clipping with no way to reach the rest via keyboard
+		 * nav. Paired with li.selected's scrollIntoView() call in
+		 * app.js's renderMenuItems(). */
+		max-height: 250px;
+		overflow-y: auto;
 	}
 	#menu li, #picker li, #settings li {
-		padding: 4px 4px;
+		padding: 4px 4px 4px 16px;
+		position: relative;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
+	/* Quake II's own menu marks the selected row with a cursor glyph to
+	 * its left and a distinct text color, not a solid highlight block --
+	 * same idea here, kept in this launcher's existing palette (the
+	 * accent blue already used for the status/progress bar) instead of
+	 * Quake II's yellow. */
 	#menu li.selected, #picker li.selected, #settings li.selected {
-		background: #35c;
-		color: #fff;
+		color: #6cf;
+	}
+	#menu li.selected::before, #picker li.selected::before, #settings li.selected::before {
+		content: '\25B8';
+		position: absolute;
+		left: 2px;
+		color: #6cf;
 	}
 	#menu .hint, #picker .hint, #settings .hint, #status .hint {
 		position: absolute;
