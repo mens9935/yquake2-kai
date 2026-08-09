@@ -2192,10 +2192,13 @@ R_Register(void)
 	/* Static world-geometry vertex cache -- see the block comment above
 	 * R_SVBO_EnsureBuilt (gl1_surf.c) for the full rationale. Uploads
 	 * eligible world surfaces' vertex/texcoord data to a real GPU
-	 * buffer once instead of every frame. New and unproven on real
-	 * hardware; CVAR_ARCHIVE so it can be turned off from the console
-	 * with no rebuild if it causes trouble. */
-	r_gl1_static_vbo = ri.Cvar_Get("r_gl1_static_vbo", "1", CVAR_ARCHIVE);
+	 * buffer once instead of every frame. Real-device testing found
+	 * two rounds of regressions in this path (wrong lightmaps, then a
+	 * build where world geometry stopped rendering entirely once the
+	 * lightmap-flush fix made it flush far more often) -- defaulting
+	 * to off until root-caused. CVAR_ARCHIVE so it can still be
+	 * opted into from the console for further debugging. */
+	r_gl1_static_vbo = ri.Cvar_Get("r_gl1_static_vbo", "0", CVAR_ARCHIVE);
 #endif
 
 	gl_polyblend = ri.Cvar_Get("gl_polyblend", "1", 0);
