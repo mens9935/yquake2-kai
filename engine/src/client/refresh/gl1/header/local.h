@@ -147,6 +147,9 @@ typedef enum
 	buf_2d,
 	buf_singletex,
 	buf_mtex,
+	buf_mtex_svbo,	/* like buf_mtex, but vertex/texcoord data comes from
+			   a static GPU buffer instead of gl_buf's CPU arrays
+			   -- see gl1_surf.c's R_SVBO_EnsureBuilt */
 	buf_alpha,
 	buf_alias,
 	buf_flash,
@@ -362,6 +365,21 @@ void R_UpdateGLBuffer(buffered_draw_t type, int colortex, int lighttex, int flag
 void R_Buffer2DQuad(GLfloat ul_vx, GLfloat ul_vy, GLfloat dr_vx, GLfloat dr_vy,
 	GLfloat ul_tx, GLfloat ul_ty, GLfloat dr_tx, GLfloat dr_ty);
 void R_SetBufferIndices(GLenum primitive, GLuint vertices_num);
+
+#ifdef __EMSCRIPTEN__
+/* Static world-geometry vertex cache (gl1_surf.c) -- see
+ * R_SVBO_EnsureBuilt's comment there for the full rationale. The three
+ * buffers hold, respectively, position (3 floats/vert), diffuse
+ * texcoords (2 floats/vert) and lightmap texcoords (2 floats/vert) for
+ * every eligible world surface, uploaded once with GL_STATIC_DRAW.
+ * R_ApplyGLBuffer (gl1_buffer.c) binds these instead of gl_buf's CPU
+ * arrays when gl_buf.type == buf_mtex_svbo. */
+extern GLuint r_svbo_pos_vbo, r_svbo_tex0_vbo, r_svbo_tex1_vbo;
+extern cvar_t *r_gl1_static_vbo;
+void R_SVBO_EnsureBuilt(void);
+int R_SVBO_BaseVertexForSurface(const msurface_t *surf);
+void R_SVBO_AppendIndices(GLenum primitive, int base_vertex, int vertices_num);
+#endif
 
 #ifdef YQ2_GL1_GLES
 #define glPolygonMode(...)

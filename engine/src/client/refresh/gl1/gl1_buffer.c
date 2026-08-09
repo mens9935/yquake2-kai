@@ -109,13 +109,81 @@ R_ApplyGLBuffer(void)
 #define KAIOS_BUF_TRACE(x) x
 #endif
 
-	if (vtx_ptr == 0 || idx_ptr == 0)
+	if (idx_ptr == 0
+#ifdef __EMSCRIPTEN__
+		|| (gl_buf.type != buf_mtex_svbo && vtx_ptr == 0)
+#else
+		|| vtx_ptr == 0
+#endif
+		)
 	{
 		return;
 	}
 
 #ifdef __EMSCRIPTEN__
 	r_buf_flushes++;
+
+	if (gl_buf.type == buf_mtex_svbo)
+	{
+		/* Vertex/diffuse-UV/lightmap-UV data for this flush already
+		 * lives in real, static GPU buffers (built once at map load,
+		 * see gl1_surf.c's R_SVBO_EnsureBuilt) instead of gl_buf's
+		 * CPU-side arrays -- bind those directly so this draw's
+		 * vertex data never crosses the JS/WASM boundary again, only
+		 * the much smaller index list (gl_buf.idx, still a plain
+		 * client array) does. Mirrors the ordinary buf_mtex draw
+		 * below (same TMU0/TMU1 bind order, same overbright combine),
+		 * just sourcing attributes from bound buffers at offset 0
+		 * instead of gl_buf.vtx/tex. */
+		int lmtexture = gl_state.lightmap_textures + gl_buf.texture[1];
+
+		if (gl_config.lightmapcopies)
+		{
+			lmtexture += MAX_LIGHTMAPS * cur_lm_copy;
+		}
+
+		R_EnableMultitexture(true);
+
+		KAIOS_BUF_TRACE(glBindBuffer(GL_ARRAY_BUFFER, r_svbo_pos_vbo));
+		KAIOS_BUF_TRACE(glEnableClientState(GL_VERTEX_ARRAY));
+		KAIOS_BUF_TRACE(glVertexPointer(3, GL_FLOAT, 0, (void *)0));
+
+		KAIOS_BUF_TRACE(R_MBind(GL_TEXTURE1, lmtexture));
+
+		if (gl1_overbrightbits->value)
+		{
+			R_TexEnv(GL_COMBINE);
+			glTexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE, gl1_overbrightbits->value);
+		}
+
+		KAIOS_BUF_TRACE(glEnableClientState(GL_TEXTURE_COORD_ARRAY));
+		KAIOS_BUF_TRACE(glBindBuffer(GL_ARRAY_BUFFER, r_svbo_tex1_vbo));
+		KAIOS_BUF_TRACE(glTexCoordPointer(2, GL_FLOAT, 0, (void *)0));
+
+		KAIOS_BUF_TRACE(R_MBind(GL_TEXTURE0, gl_buf.texture[0]));
+		KAIOS_BUF_TRACE(glEnableClientState(GL_TEXTURE_COORD_ARRAY));
+		KAIOS_BUF_TRACE(glBindBuffer(GL_ARRAY_BUFFER, r_svbo_tex0_vbo));
+		KAIOS_BUF_TRACE(glTexCoordPointer(2, GL_FLOAT, 0, (void *)0));
+
+		KAIOS_BUF_TRACE(glDrawElements(GL_TRIANGLES, idx_ptr, GL_UNSIGNED_SHORT, gl_buf.idx));
+		if (kaios_trace)
+		{
+			Com_Printf("KAIOS_BUF_TRACE: glGetError after glDrawElements: 0x%x\n", glGetError());
+		}
+
+		/* Critical: leaving a real buffer bound to GL_ARRAY_BUFFER
+		 * would make every *other* glVertexPointer/glTexCoordPointer
+		 * call elsewhere (2D UI, alias models, the ordinary buf_mtex
+		 * path) misinterpret its client-memory pointer as an offset
+		 * into this buffer instead. Always unbind before returning. */
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		glDisableClientState(GL_VERTEX_ARRAY);
+
+		GLBUFFER_RESET
+		return;
+	}
 #endif
 
 	// defaults for drawing (mostly buf_singletex features)
@@ -132,6 +200,11 @@ R_ApplyGLBuffer(void)
 		case buf_mtex:
 			mtex = true;
 			break;
+#ifdef __EMSCRIPTEN__
+		case buf_mtex_svbo:
+			/* unreachable: handled and returned above */
+			break;
+#endif
 		case buf_alpha:
 			alpha = true;
 			break;
@@ -465,3 +538,37 @@ R_SetBufferIndices(GLenum primitive, GLuint vertices_num)
 	// GLBUFFER_VERTEX() must be called as many times as vertices_num
 	vtx_ptr += vertices_num;
 }
+
+#ifdef __EMSCRIPTEN__
+/*
+ * Like R_SetBufferIndices, but for buf_mtex_svbo: the vertices already
+ * live in the static VBOs (r_svbo_*_vbo, gl1_surf.c) at a fixed
+ * base_vertex, so this only ever appends to gl_buf.idx -- vtx_ptr (the
+ * CPU-side vertex cursor) is untouched, since no CPU vertex data is
+ * being written for these.
+ */
+void
+R_SVBO_AppendIndices(GLenum primitive, int base_vertex, int vertices_num)
+{
+	int i;
+
+	if (idx_ptr + ((vertices_num - 2) * 3) >= MAX_INDICES)
+	{
+		R_ApplyGLBuffer();
+	}
+
+	if (primitive != GL_TRIANGLE_FAN)
+	{
+		Com_DPrintf("%s: no such primitive %d\n", __func__, primitive);
+		return;
+	}
+
+	for (i = 0; i < vertices_num - 2; i++)
+	{
+		gl_buf.idx[idx_ptr]   = base_vertex;
+		gl_buf.idx[idx_ptr+1] = base_vertex+i+1;
+		gl_buf.idx[idx_ptr+2] = base_vertex+i+2;
+		idx_ptr += 3;
+	}
+}
+#endif

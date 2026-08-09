@@ -44,6 +44,268 @@ extern int cur_lm_copy;
 void LM_InitBlock(void);
 void LM_UploadBlock(qboolean dynamic);
 
+#ifdef __EMSCRIPTEN__
+/*
+ * ==============================================================
+ *
+ * Static world-geometry vertex cache (r_gl1_static_vbo).
+ *
+ * R_UpdateGLBuffer/R_ApplyGLBuffer (gl1_buffer.c) batch multiple
+ * surfaces into one draw call, but every flush still re-copies each
+ * surface's position + diffuse UV + lightmap UV into gl_buf's CPU-side
+ * arrays and re-uploads that to the GPU from scratch -- every frame,
+ * even though the vast majority of world geometry never changes
+ * position or texture coordinates from one frame to the next. Real
+ * device testing (r_speeds/KAIOS_OCCL) kept showing drops even after
+ * cutting both triangle count (occlusion/distance culling) and draw
+ * call count (bigger lightmap atlas), pointing at this per-frame
+ * vertex data upload itself as the remaining cost.
+ *
+ * Fix: upload every eligible world surface's vertex data to a real,
+ * static (GL_STATIC_DRAW, uploaded once) GPU buffer up front, and at
+ * draw time only ever build a small index list into it (buf_mtex_svbo
+ * in gl1_buffer.c) -- the vertex/texcoord data itself never crosses
+ * the JS/WASM boundary again after the initial build.
+ *
+ * "Eligible" excludes anything whose position or texcoords can change
+ * after this is built: sky (drawn separately), translucent (TRANS33/
+ * 66, drawn back-to-front from a separate chain), warp/water
+ * (SURF_DRAWTURB, subdivided and animated by R_EmitWaterPolys), and
+ * flowing/scrolling surfaces (SURF_FLOWING, whose diffuse U shifts
+ * with r_newrefdef.time). Those all keep using the ordinary buf_mtex
+ * path, unchanged. Animated *textures* (texinfo->next chains, e.g.
+ * flickering screens) are NOT excluded -- only which GL texture gets
+ * bound varies frame to frame for those, never this surface's own
+ * position/texcoord data, so the cache stays correct; R_DrawTextureChains
+ * below already re-resolves the current frame's texture per surface
+ * exactly as before.
+ *
+ * Bounded to what fits in a 16-bit index (see gl1_buffer.c's
+ * GLushort gl_buf.idx): if a map's eligible geometry needs more than
+ * 65535 total vertices, the cache is left unbuilt and every surface
+ * transparently falls back to the ordinary per-frame path instead --
+ * this only ever costs performance, never correctness.
+ *
+ * ==============================================================
+ */
+
+GLuint r_svbo_pos_vbo, r_svbo_tex0_vbo, r_svbo_tex1_vbo;
+int r_svbo_hits, r_svbo_misses; /* reset+reported alongside KAIOS_OCCL, gl1_main.c */
+
+static int *r_svbo_base_vertex; /* [numsurfaces]; -1 = not cached */
+static const model_t *r_svbo_built_for;
+
+static void
+R_SVBO_Clear(void)
+{
+	if (r_svbo_pos_vbo)
+	{
+		glDeleteBuffers(1, &r_svbo_pos_vbo);
+		r_svbo_pos_vbo = 0;
+	}
+
+	if (r_svbo_tex0_vbo)
+	{
+		glDeleteBuffers(1, &r_svbo_tex0_vbo);
+		r_svbo_tex0_vbo = 0;
+	}
+
+	if (r_svbo_tex1_vbo)
+	{
+		glDeleteBuffers(1, &r_svbo_tex1_vbo);
+		r_svbo_tex1_vbo = 0;
+	}
+
+	if (r_svbo_base_vertex)
+	{
+		free(r_svbo_base_vertex);
+		r_svbo_base_vertex = NULL;
+	}
+}
+
+static qboolean
+R_SVBO_SurfaceEligible(const msurface_t *surf)
+{
+	if (!surf->polys || surf->polys->numverts < 3)
+	{
+		return false;
+	}
+
+	if (surf->texinfo->flags & (SURF_SKY | SURF_TRANS33 | SURF_TRANS66 |
+		SURF_WARP | SURF_FLOWING))
+	{
+		return false;
+	}
+
+	if (surf->flags & SURF_DRAWTURB)
+	{
+		return false;
+	}
+
+	return true;
+}
+
+/*
+ * Rebuilds the static VBOs whenever the world model changes (new map)
+ * -- cheap early-out otherwise. Called once per frame, before the
+ * world is walked/drawn.
+ */
+void
+R_SVBO_EnsureBuilt(void)
+{
+	int i, total_verts;
+	GLfloat *pos, *tex0, *tex1;
+
+	if (!r_gl1_static_vbo->value)
+	{
+		return;
+	}
+
+	if (r_svbo_built_for == r_worldmodel)
+	{
+		return;
+	}
+
+	R_SVBO_Clear();
+	r_svbo_built_for = r_worldmodel;
+
+	if (!r_worldmodel || r_worldmodel->numsurfaces <= 0)
+	{
+		return;
+	}
+
+	r_svbo_base_vertex = malloc(sizeof(int) * r_worldmodel->numsurfaces);
+
+	if (!r_svbo_base_vertex)
+	{
+		return;
+	}
+
+	total_verts = 0;
+
+	for (i = 0; i < r_worldmodel->numsurfaces; i++)
+	{
+		const msurface_t *surf = &r_worldmodel->surfaces[i];
+
+		if (!R_SVBO_SurfaceEligible(surf))
+		{
+			r_svbo_base_vertex[i] = -1;
+			continue;
+		}
+
+		/* Stay inside gl_buf.idx's GLushort range (gl1_buffer.c) --
+		 * if this map has more eligible geometry than that, just
+		 * leave the cache unbuilt entirely rather than risk an
+		 * index overflowing 16 bits on a bigger map later. */
+		if (total_verts + surf->polys->numverts > 65535)
+		{
+			Com_Printf("%s: world has more than 65535 eligible "
+				"vertices, leaving the static vertex cache off "
+				"for this map\n", __func__);
+			free(r_svbo_base_vertex);
+			r_svbo_base_vertex = NULL;
+			return;
+		}
+
+		r_svbo_base_vertex[i] = total_verts;
+		total_verts += surf->polys->numverts;
+	}
+
+	if (total_verts <= 0)
+	{
+		free(r_svbo_base_vertex);
+		r_svbo_base_vertex = NULL;
+		return;
+	}
+
+	pos = malloc(sizeof(GLfloat) * 3 * total_verts);
+	tex0 = malloc(sizeof(GLfloat) * 2 * total_verts);
+	tex1 = malloc(sizeof(GLfloat) * 2 * total_verts);
+
+	if (!pos || !tex0 || !tex1)
+	{
+		free(pos);
+		free(tex0);
+		free(tex1);
+		free(r_svbo_base_vertex);
+		r_svbo_base_vertex = NULL;
+		return;
+	}
+
+	for (i = 0; i < r_worldmodel->numsurfaces; i++)
+	{
+		const msurface_t *surf = &r_worldmodel->surfaces[i];
+		int base = r_svbo_base_vertex[i];
+		const float *v;
+		int vi;
+
+		if (base < 0)
+		{
+			continue;
+		}
+
+		v = surf->polys->verts[0];
+
+		for (vi = 0; vi < surf->polys->numverts; vi++, v += VERTEXSIZE)
+		{
+			pos[(base+vi)*3+0] = v[0];
+			pos[(base+vi)*3+1] = v[1];
+			pos[(base+vi)*3+2] = v[2];
+			tex0[(base+vi)*2+0] = v[3];
+			tex0[(base+vi)*2+1] = v[4];
+			tex1[(base+vi)*2+0] = v[5];
+			tex1[(base+vi)*2+1] = v[6];
+		}
+	}
+
+	glGenBuffers(1, &r_svbo_pos_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, r_svbo_pos_vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 3 * total_verts, pos, GL_STATIC_DRAW);
+
+	glGenBuffers(1, &r_svbo_tex0_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, r_svbo_tex0_vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 2 * total_verts, tex0, GL_STATIC_DRAW);
+
+	glGenBuffers(1, &r_svbo_tex1_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, r_svbo_tex1_vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 2 * total_verts, tex1, GL_STATIC_DRAW);
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	Com_Printf("%s: cached %d vertices from %s\n", __func__,
+		total_verts, r_worldmodel->name);
+
+	free(pos);
+	free(tex0);
+	free(tex1);
+}
+
+/*
+ * Returns this surface's base vertex offset into the static VBOs, or
+ * -1 if it isn't (or can't be) cached -- the caller must fall back to
+ * the ordinary per-frame buf_mtex path in that case.
+ */
+int
+R_SVBO_BaseVertexForSurface(const msurface_t *surf)
+{
+	ptrdiff_t idx;
+
+	if (!r_gl1_static_vbo->value || !r_svbo_base_vertex || !r_worldmodel)
+	{
+		return -1;
+	}
+
+	idx = surf - r_worldmodel->surfaces;
+
+	if (idx < 0 || idx >= r_worldmodel->numsurfaces)
+	{
+		return -1;
+	}
+
+	return r_svbo_base_vertex[idx];
+}
+#endif
+
 /*
  * ==============================================================
  *
@@ -1164,8 +1426,25 @@ R_DrawTextureChains(void)
 			{
 				if (!(s->flags & SURF_DRAWTURB))
 				{
-					R_UpdateGLBuffer(buf_mtex, image->texnum, s->lightmaptexturenum, 0, 1);
-					R_RenderLightmappedPoly(s);
+#ifdef __EMSCRIPTEN__
+					int svbo_base = R_SVBO_BaseVertexForSurface(s);
+
+					if (svbo_base >= 0)
+					{
+						r_svbo_hits++;
+						R_UpdateGLBuffer(buf_mtex_svbo, image->texnum, s->lightmaptexturenum, 0, 1);
+						c_brush_polys++;
+						R_SVBO_AppendIndices(GL_TRIANGLE_FAN, svbo_base, s->polys->numverts);
+					}
+					else
+#endif
+					{
+#ifdef __EMSCRIPTEN__
+						r_svbo_misses++;
+#endif
+						R_UpdateGLBuffer(buf_mtex, image->texnum, s->lightmaptexturenum, 0, 1);
+						R_RenderLightmappedPoly(s);
+					}
 				}
 			}
 		}

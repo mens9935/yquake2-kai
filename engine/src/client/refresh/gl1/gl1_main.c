@@ -918,6 +918,9 @@ cvar_t *r_clear;
 cvar_t *r_cull;
 cvar_t *r_distcull_dist;
 cvar_t *r_occlusion_cull;
+#ifdef __EMSCRIPTEN__
+cvar_t *r_gl1_static_vbo;
+#endif
 cvar_t *gl_polyblend;
 cvar_t *gl1_flashblend;
 cvar_t *gl1_saturatelighting;
@@ -1921,6 +1924,10 @@ R_RenderView(refdef_t *fd)
 
 	R_OcclusionGridClear();
 
+#ifdef __EMSCRIPTEN__
+	R_SVBO_EnsureBuilt();
+#endif
+
 	R_DrawWorld();
 
 	R_DrawEntitiesOnList();
@@ -1946,17 +1953,22 @@ R_RenderView(refdef_t *fd)
 		extern int r_occl_nodes_tested, r_occl_nodes_culled;
 		extern int r_occl_cells_marked, r_occl_surfs_projected, r_occl_surfs_skipped;
 		extern int r_buf_flushes;
+		extern int r_svbo_hits, r_svbo_misses;
 		static int kaios_occl_frame;
 
 		if ((kaios_occl_frame++ % 60) == 0)
 		{
 			Com_Printf("KAIOS_OCCL: active=%d nodes_tested=%d nodes_culled=%d "
 				"cells_marked=%d surfs_projected=%d surfs_skipped=%d wpoly=%d "
-				"buf_flushes=%d\n",
+				"buf_flushes=%d svbo=%d/%d(active=%d)\n",
 				(int)r_occlusion_cull->value, r_occl_nodes_tested, r_occl_nodes_culled,
 				r_occl_cells_marked, r_occl_surfs_projected, r_occl_surfs_skipped,
-				c_brush_polys, r_buf_flushes);
+				c_brush_polys, r_buf_flushes, r_svbo_hits, r_svbo_hits + r_svbo_misses,
+				(int)r_gl1_static_vbo->value);
 		}
+
+		r_svbo_hits = 0;
+		r_svbo_misses = 0;
 	}
 #endif
 
@@ -2175,6 +2187,17 @@ R_Register(void)
 	 * and console/menu toggleable with no rebuild if it ever needs to
 	 * be turned off again. */
 	r_occlusion_cull = ri.Cvar_Get("r_occlusion_cull", "1", CVAR_ARCHIVE);
+
+#ifdef __EMSCRIPTEN__
+	/* Static world-geometry vertex cache -- see the block comment above
+	 * R_SVBO_EnsureBuilt (gl1_surf.c) for the full rationale. Uploads
+	 * eligible world surfaces' vertex/texcoord data to a real GPU
+	 * buffer once instead of every frame. New and unproven on real
+	 * hardware; CVAR_ARCHIVE so it can be turned off from the console
+	 * with no rebuild if it causes trouble. */
+	r_gl1_static_vbo = ri.Cvar_Get("r_gl1_static_vbo", "1", CVAR_ARCHIVE);
+#endif
+
 	gl_polyblend = ri.Cvar_Get("gl_polyblend", "1", 0);
 	gl1_flashblend = ri.Cvar_Get("gl1_flashblend", "0", 0);
 	r_fixsurfsky = ri.Cvar_Get("r_fixsurfsky", "0", CVAR_ARCHIVE);
