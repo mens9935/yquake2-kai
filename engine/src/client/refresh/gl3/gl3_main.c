@@ -65,6 +65,23 @@ int gl3_framecount; /* used for dlight push checking */
 
 int c_brush_polys, c_alias_polys;
 
+#ifdef __EMSCRIPTEN__
+/* cl_screen.c's KAIOS_STATS diagnostic (SCR_DrawKaiosStats) references
+ * r_polycount directly (extern int r_polycount;), and frame.c
+ * (shared by all renderers) references kaios_cube_test_active/
+ * RI_KaiosCubeTestFrame() unconditionally -- see gl1_main.c's matching
+ * comment and sw_main.c's always-off stub for the same symbols. gl3
+ * never ran the cube test, so this is an inert stub like the soft
+ * renderer's; r_polycount is kept up to date for real below. */
+int r_polycount;
+qboolean kaios_cube_test_active = false;
+
+void
+RI_KaiosCubeTestFrame(void)
+{
+}
+#endif
+
 static float v_blend[4]; /* final blending color */
 
 int gl3_viewcluster, gl3_viewcluster2, gl3_oldviewcluster, gl3_oldviewcluster2;
@@ -181,11 +198,17 @@ GL3_RotateForEntity(entity_t *e)
 static void
 GL3_Strings(void)
 {
-	GLint i, numExtensions;
 	Com_Printf("GL_VENDOR: %s\n", gl3config.vendor_string);
 	Com_Printf("GL_RENDERER: %s\n", gl3config.renderer_string);
 	Com_Printf("GL_VERSION: %s\n", gl3config.version_string);
 	Com_Printf("GL_SHADING_LANGUAGE_VERSION: %s\n", gl3config.glsl_version_string);
+
+#ifdef YQ2_GL3_GLES2_WEB
+	// ES2 has no glGetStringi()/GL_NUM_EXTENSIONS (those are ES3+/GL3+)
+	// -- GL_EXTENSIONS is one space-separated glGetString() instead.
+	Com_Printf("GL_EXTENSIONS: %s\n", (const char*)glGetString(GL_EXTENSIONS));
+#else
+	GLint i, numExtensions;
 
 	glGetIntegerv(GL_NUM_EXTENSIONS, &numExtensions);
 
@@ -195,6 +218,7 @@ GL3_Strings(void)
 		Com_Printf(" %s", (const char*)glGetStringi(GL_EXTENSIONS, i));
 	}
 	Com_Printf("\n");
+#endif
 }
 
 static void
@@ -710,6 +734,16 @@ GL3_Shutdown(void)
 void
 GL3_BufferAndDraw3D(const gl3_3D_vtx_t* verts, int numVerts, GLenum drawMode)
 {
+#ifdef YQ2_GL3_GLES2_WEB
+	// The useBigVBO workaround below exists for a specific AMD Windows
+	// desktop driver quirk (see the comment inside) and relies on
+	// glMapBufferRange(), which doesn't exist in ES2/WebGL1 at all.
+	// gl3config.useBigVBO only ever gets set true by AMD-desktop-driver
+	// detection or the gl3_usebigvbo cvar (both irrelevant/unset on
+	// this platform), so just always take the plain path.
+	glBufferData( GL_ARRAY_BUFFER, sizeof(gl3_3D_vtx_t)*numVerts, verts, GL_STREAM_DRAW );
+	glDrawArrays( drawMode, 0, numVerts );
+#else
 	if(!gl3config.useBigVBO)
 	{
 		glBufferData( GL_ARRAY_BUFFER, sizeof(gl3_3D_vtx_t)*numVerts, verts, GL_STREAM_DRAW );
@@ -776,6 +810,7 @@ GL3_BufferAndDraw3D(const gl3_3D_vtx_t* verts, int numVerts, GLenum drawMode)
 		gl3state.vbo3DcurOffset = curOffset + neededSize; // TODO: padding or sth needed?
 #endif
 	}
+#endif // YQ2_GL3_GLES2_WEB
 }
 
 static void
@@ -850,8 +885,12 @@ GL3_DrawBeam(entity_t *e)
 		VectorCopy(end_points[pointb], verts[4*i+3].pos);
 	}
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout3D();
+#else
 	GL3_BindVAO(gl3state.vao3D);
 	GL3_BindVBO(gl3state.vbo3D);
+#endif
 
 	GL3_BufferAndDraw3D(verts, NUM_BEAM_SEGS*4, GL_TRIANGLE_STRIP);
 
@@ -932,8 +971,12 @@ GL3_DrawSpriteModel(entity_t *e, gl3model_t *currentmodel)
 	VectorMA( e->origin, -frame->origin_y, up, verts[3].pos );
 	VectorMA( verts[3].pos, frame->width - frame->origin_x, right, verts[3].pos );
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout3D();
+#else
 	GL3_BindVAO(gl3state.vao3D);
 	GL3_BindVBO(gl3state.vbo3D);
+#endif
 
 	GL3_BufferAndDraw3D(verts, 4, GL_TRIANGLE_FAN);
 
@@ -967,8 +1010,12 @@ GL3_DrawNullModel(entity_t *currententity)
 
 	GL3_UseProgram(gl3state.si3DcolorOnly.shaderProgram);
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout3D();
+#else
 	GL3_BindVAO(gl3state.vao3D);
 	GL3_BindVBO(gl3state.vbo3D);
+#endif
 
 	gl3_3D_vtx_t vtxA[6] = {
 		{{0, 0, -16}, {0,0}, {0,0}},
@@ -1059,8 +1106,12 @@ GL3_DrawParticles(void)
 			cur->color[3] = p->alpha;
 		}
 
+#ifdef YQ2_GL3_GLES2_WEB
+		GL3_ES2_BindLayoutParticle();
+#else
 		GL3_BindVAO(gl3state.vaoParticle);
 		GL3_BindVBO(gl3state.vboParticle);
+#endif
 		glBufferData(GL_ARRAY_BUFFER, sizeof(part_vtx)*numParticles, buf, GL_STREAM_DRAW);
 		glDrawArrays(GL_POINTS, 0, numParticles);
 
@@ -1439,11 +1490,27 @@ SetupGL(void)
 
 			// also create a renderbuffer object so the FBO has a stencil- and depth-buffer
 			glBindRenderbuffer(GL_RENDERBUFFER, gl3state.ppFBrbo);
+#ifdef YQ2_GL3_GLES2_WEB
+			// ES2 core has no combined depth+stencil renderbuffer format
+			// or attachment point (that needs the OES_packed_depth_stencil
+			// extension, not guaranteed present on this device) -- just
+			// use a depth-only renderbuffer here. This FBO is only used
+			// for the underwater warp postprocess pass, so losing
+			// stencil-tested effects specifically while that pass is
+			// active is an acceptable tradeoff for not depending on an
+			// unconfirmed extension.
+			glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, w, h);
+			glBindRenderbuffer(GL_RENDERBUFFER, 0);
+			// attach it to the FBO
+			glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+			                          GL_RENDERBUFFER, gl3state.ppFBrbo);
+#else
 			glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
 			glBindRenderbuffer(GL_RENDERBUFFER, 0);
 			// attach it to the FBO
 			glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
 			                          GL_RENDERBUFFER, gl3state.ppFBrbo);
+#endif
 
 			GLenum fbState = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 			if(fbState != GL_FRAMEBUFFER_COMPLETE)
@@ -1767,6 +1834,9 @@ static void
 GL3_RenderFrame(refdef_t *fd)
 {
 	GL3_RenderView(fd);
+#ifdef __EMSCRIPTEN__
+	r_polycount = c_brush_polys + c_alias_polys;
+#endif
 	GL3_SetLightLevel(NULL);
 	qboolean usedFBO = gl3state.ppFBObound; // if it was/is used this frame
 	if(usedFBO)

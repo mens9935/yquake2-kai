@@ -316,8 +316,12 @@ DrawAliasFrameLerp(dmdl_t *paliashdr, entity_t* entity, vec3_t shadelight)
 		}
 	}
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayoutAlias();
+#else
 	GL3_BindVAO(gl3state.vaoAlias);
 	GL3_BindVBO(gl3state.vboAlias);
+#endif
 
 	glBufferData(GL_ARRAY_BUFFER, da_count(vtxBuf)*sizeof(gl3_alias_vtx_t), vtxBuf.p, GL_STREAM_DRAW);
 	GL3_BindEBO(gl3state.eboAlias);
@@ -477,8 +481,12 @@ DrawAliasShadow(gl3_shadowinfo_t* shadowInfo)
 		}
 	}
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayoutAlias();
+#else
 	GL3_BindVAO(gl3state.vaoAlias);
 	GL3_BindVBO(gl3state.vboAlias);
+#endif
 
 	glBufferData(GL_ARRAY_BUFFER, da_count(vtxBuf)*sizeof(gl3_alias_vtx_t), vtxBuf.p, GL_STREAM_DRAW);
 	GL3_BindEBO(gl3state.eboAlias);

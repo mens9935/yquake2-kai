@@ -29,7 +29,25 @@
 #ifndef SRC_CLIENT_REFRESH_GL3_HEADER_LOCAL_H_
 #define SRC_CLIENT_REFRESH_GL3_HEADER_LOCAL_H_
 
-#ifdef IN_IDE_PARSER
+#ifdef YQ2_GL3_GLES2_WEB
+  // KaiOS/Emscripten target: this device's Gecko-48-class engine only
+  // has WebGL1, which is roughly GLES2 -- not GLES3 (needs WebGL2) and
+  // obviously not desktop GL3.2 core, so neither of the two branches
+  // below applies. No glad here either: unlike desktop/GLES3 where a
+  // loader is needed to resolve extension/core functions at runtime,
+  // GLES2/gl2.h is Emscripten's native, always-available GL binding --
+  // the symbols just resolve directly against WebGL1, no loading step.
+  #include <GLES2/gl2.h>
+  #include <GLES2/gl2ext.h>
+  // gl3_sdl.c's DebugCallback() is declared "static void APIENTRY" --
+  // gl2platform.h only defines GL_APIENTRY, not the plain APIENTRY
+  // desktop/glad headers provide.
+  #define APIENTRY GL_APIENTRY
+  // Same shim as the GLES3 branch below: this codebase's desktop-GL-
+  // flavored call sites say glDepthRange(), GLES only has glDepthRangef().
+  #define glDepthRange glDepthRangef
+
+#elif defined(IN_IDE_PARSER)
   // this is just a hack to get proper auto-completion in IDEs:
   // using system headers for their parsers/indexers but glad for real build
   // (in glad glFoo is just a #define to glad_glFoo or sth, which screws up autocompletion)
@@ -78,11 +96,18 @@ qglVertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normaliz
 	glVertexAttribPointer(index, size, type, normalized, stride, (const void*)offset);
 }
 
+#ifndef YQ2_GL3_GLES2_WEB
+// GLES2 has no integer vertex attributes at all (glVertexAttribIPointer is
+// ES3+/GL3+ only) -- the ES2/WEB build drops per-vertex dynamic-light
+// flags entirely instead (see GL3_ATTRIB_LIGHTFLAGS usage in gl3_surf.c),
+// consistent with dynamic lightmap relighting already being disabled by
+// default on this platform (gl1_dynamic, gl1_main.c).
 static inline void
 qglVertexAttribIPointer(GLuint index, GLint size, GLenum type, GLsizei stride, GLintptr offset)
 {
 	glVertexAttribIPointer(index, size, type, stride, (void*)offset);
 }
+#endif
 
 // attribute locations for vertex shaders
 enum {
@@ -133,6 +158,21 @@ typedef struct
 	GLint uniVblend;
 	GLint uniLmScalesOrTime; // for 3D it's lmScales, for 2D underwater PP it's time
 	hmm_vec4 lmScales[4];
+
+#ifdef YQ2_GL3_GLES2_WEB
+	// ES2/WebGL1 has no uniform buffer objects, so instead of one UBO
+	// shared (via binding points) by every program, each program gets
+	// its own individual uniform locations, cached here at shader-init
+	// time and (re-)pushed with the last known values whenever this
+	// program becomes current -- see GL3_UseProgram() below. -1 means
+	// "this shader doesn't declare that uniform", same convention as
+	// uniVblend/uniLmScalesOrTime above.
+	GLint uniGamma, uniIntensity, uniIntensity2D, uniColor; // uniCommon
+	GLint uniTrans;                                          // uni2D
+	GLint uniTransProjView, uniTransModel, uniScroll, uniTime3D,
+	      uniAlpha, uniOverbrightbits, uniParticleFadeFactor,
+	      uniLightScaleForTurb;                               // uni3D
+#endif
 } gl3ShaderInfo_t;
 
 typedef struct
@@ -339,6 +379,25 @@ extern gl3image_t *gl3_particletexture; /* little dot for particles */
 extern int gl_filter_min;
 extern int gl_filter_max;
 
+#ifdef YQ2_GL3_GLES2_WEB
+// gl3_shaders.c: pushes the last-known uniCommon/uni2D/uni3D data (plain
+// glUniform* calls, no UBOs in ES2) to whichever program just became
+// current, using that program's cached uniform locations. Needed on
+// every switch since, unlike UBOs, ES2 uniform state isn't shared
+// between programs via a binding point -- each program has to be told
+// separately.
+extern void GL3_ES2_SyncUniformsForCurrentProgram(void);
+
+// gl3_surf.c: (re-)issue the glVertexAttribPointer()/glEnableVertexAttribArray()
+// setup for one of the three 3D vertex layouts, in place of a VAO bind.
+extern void GL3_ES2_BindLayout3D(void);
+extern void GL3_ES2_BindLayoutAlias(void);
+extern void GL3_ES2_BindLayoutParticle(void);
+// gl3_draw.c: same idea for the two 2D UI layouts.
+extern void GL3_ES2_BindLayout2D(void);
+extern void GL3_ES2_BindLayout2Dcolor(void);
+#endif
+
 static inline void
 GL3_UseProgram(GLuint shaderProgram)
 {
@@ -346,9 +405,16 @@ GL3_UseProgram(GLuint shaderProgram)
 	{
 		gl3state.currentShaderProgram = shaderProgram;
 		glUseProgram(shaderProgram);
+#ifdef YQ2_GL3_GLES2_WEB
+		GL3_ES2_SyncUniformsForCurrentProgram();
+#endif
 	}
 }
 
+#ifndef YQ2_GL3_GLES2_WEB
+// No VAOs in ES2/WebGL1 -- every call site is guarded to use
+// GL3_ES2_BindLayoutXxx() (gl3_surf.c/gl3_draw.c) instead when this
+// macro is defined, so this never needs to exist for that build.
 static inline void
 GL3_BindVAO(GLuint vao)
 {
@@ -358,6 +424,7 @@ GL3_BindVAO(GLuint vao)
 		glBindVertexArray(vao);
 	}
 }
+#endif
 
 static inline void
 GL3_BindVBO(GLuint vbo)

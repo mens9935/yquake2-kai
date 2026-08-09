@@ -136,6 +136,37 @@ REFGL1_SRCS=(
 	"src/client/refresh/files/pvs.c"
 )
 
+# gl3 renderer, cut down to target GLES2/WebGL1 instead of its normal
+# GLES3/GLSL-ES-300 baseline (see REFGL1_SRCS's comment for why gl1 was
+# chosen first -- this is the follow-up attempt at a real shader/VBO
+# renderer instead of gl1's emulated fixed-function path). No glad here:
+# unlike gl1's GLES 1.1 fixed-function API (which Emscripten doesn't
+# provide headers for at all, hence needing LEGACY_GL_EMULATION's JS
+# shim plus glad-gles1's matching declarations), GLES2 is Emscripten's
+# native/default GL binding -- GLES2/gl2.h ships in its sysroot and the
+# symbols resolve directly, no loader or emulation flag needed.
+REFGL3_SRCS=(
+	"src/client/refresh/gl3/gl3_draw.c"
+	"src/client/refresh/gl3/gl3_image.c"
+	"src/client/refresh/gl3/gl3_light.c"
+	"src/client/refresh/gl3/gl3_lightmap.c"
+	"src/client/refresh/gl3/gl3_main.c"
+	"src/client/refresh/gl3/gl3_mesh.c"
+	"src/client/refresh/gl3/gl3_misc.c"
+	"src/client/refresh/gl3/gl3_model.c"
+	"src/client/refresh/gl3/gl3_sdl.c"
+	"src/client/refresh/gl3/gl3_shaders.c"
+	"src/client/refresh/gl3/gl3_surf.c"
+	"src/client/refresh/gl3/gl3_warp.c"
+	"src/client/refresh/files/surf.c"
+	"src/client/refresh/files/common.c"
+	"src/client/refresh/files/models.c"
+	"src/client/refresh/files/pcx.c"
+	"src/client/refresh/files/stb.c"
+	"src/client/refresh/files/wal.c"
+	"src/client/refresh/files/pvs.c"
+)
+
 GAME_SRCS=(
 	"src/game/g_ai.c"
 	"src/game/g_chase.c"

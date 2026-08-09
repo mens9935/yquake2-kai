@@ -120,7 +120,9 @@ void GL3_EndFrame(void)
 	if(gl3config.useBigVBO)
 	{
 		// I think this is a good point to orphan the VBO and get a fresh one
+#ifndef YQ2_GL3_GLES2_WEB
 		GL3_BindVAO(gl3state.vao3D);
+#endif
 		GL3_BindVBO(gl3state.vbo3D);
 		glBufferData(GL_ARRAY_BUFFER, gl3state.vbo3Dsize, NULL, GL_STREAM_DRAW);
 		gl3state.vbo3DcurOffset = 0;
@@ -257,7 +259,14 @@ int GL3_PrepareForWindow(void)
 		gl3config.stencil = false;
 	}
 
-#ifdef YQ2_GL3_GLES3
+#ifdef YQ2_GL3_GLES2_WEB
+	// This device's Gecko-48-class engine only has WebGL1, roughly
+	// GLES2 -- ask Emscripten's SDL2 port for that context version
+	// (mirrors gl1_sdl.c's own ES 1.0 request for the same reason).
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#elif defined(YQ2_GL3_GLES3)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
@@ -388,6 +397,24 @@ int GL3_InitContext(void* win)
 	// Enable vsync if requested.
 	GL3_SetVsync();
 
+#ifdef YQ2_GL3_GLES2_WEB
+	// No glad here -- GLES2/gl2.h symbols resolve natively against
+	// WebGL1, nothing to load. No GL_KHR_debug/glDebugMessageCallback
+	// on ES2 either (a dev-only diagnostic feature, not core
+	// rendering), so debug_output/anisotropic just stay off.
+	gl3config.debug_output = false;
+	gl3config.anisotropic = false;
+	gl3config.major_version = 2;
+	gl3config.minor_version = 0;
+
+	Com_Printf("Using native GLES2 function pointers (no loader needed), got version %d.%d\n",
+		gl3config.major_version, gl3config.minor_version);
+
+	// Window title - set here so we can display renderer name in it.
+	char title[40] = {0};
+	snprintf(title, sizeof(title), "Yamagi Quake II %s - OpenGL ES 2.0", YQ2VERSION);
+	SDL_SetWindowTitle(window, title);
+#else
 	// Load GL pointers through GLAD and check context.
 #ifdef YQ2_GL3_GLES
 	if( !gladLoadGLES2Loader((void *)SDL_GL_GetProcAddress))
@@ -447,6 +474,7 @@ int GL3_InitContext(void* win)
 	snprintf(title, sizeof(title), "Yamagi Quake II %s - OpenGL 3.2", YQ2VERSION);
 #endif
 	SDL_SetWindowTitle(window, title);
+#endif // YQ2_GL3_GLES2_WEB
 
 #if SDL_VERSION_ATLEAST(2, 26, 0)
 	// Figure out if we are high dpi aware.

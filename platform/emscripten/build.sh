@@ -72,6 +72,30 @@ if [ "$RENDERER" = "gl1" ]; then
 	COMMON_FLAGS+=(-s GL_FFP_ONLY=1)
 fi
 
+GL3_FLAGS=(
+	# New platform macro (not one of upstream's own YQ2_GL3_GLES /
+	# YQ2_GL3_GLES3): selects the ES2/WebGL1 header + code paths added
+	# for this port, distinct from gl3's stock GLES3 and desktop-GL3.2
+	# targets, neither of which this device's Gecko-48-class engine can
+	# provide (confirmed WebGL1-only). No glad include path either --
+	# see REFGL3_SRCS's comment in sources.mk.sh.
+	-DYQ2_GL3_GLES2_WEB
+	# Upstream's gl3_sdl.c already has a couple of "any GLES flavor"
+	# checks (YQ2_GL3_GLES, distinct from the ES3-specific
+	# YQ2_GL3_GLES3) -- e.g. skipping SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG,
+	# which some GLES context creation paths reject. Define it here too.
+	-DYQ2_GL3_GLES
+	# Same duplicate-symbol story as GL1_FLAGS below: vid.c (always in
+	# CLIENT_SRCS) already defines its own vid_fullscreen/vid_gamma
+	# cvar_t* and modes[] array; gl3_main.c/gl3_image.c define their own
+	# copies of the same names, which collides once both are statically
+	# linked into one binary. Rename only the C-level symbol -- the
+	# Cvar_Get() strings inside gl3 are untouched.
+	-Dmodes=gl3_local_modes
+	-Dvid_fullscreen=gl3_vid_fullscreen
+	-Dvid_gamma=gl3_vid_gamma
+)
+
 GL1_FLAGS=(
 	-DYQ2_GL1_GLES
 	-I"$ENGINE/src/client/refresh/gl1/glad-gles1/include"
@@ -161,6 +185,9 @@ compile_group client NO_EXTRA CLIENT_SRCS
 if [ "$RENDERER" = "gl1" ]; then
 	echo "==> Compiling gl1/GLES1 renderer (${#REFGL1_SRCS[@]} files)"
 	compile_group refgl1 GL1_FLAGS REFGL1_SRCS
+elif [ "$RENDERER" = "gl3" ]; then
+	echo "==> Compiling gl3/GLES2 renderer (${#REFGL3_SRCS[@]} files)"
+	compile_group refgl3 GL3_FLAGS REFGL3_SRCS
 else
 	echo "==> Compiling software renderer (${#REFSOFT_SRCS[@]} files)"
 	compile_group refsoft NO_EXTRA REFSOFT_SRCS

@@ -42,8 +42,94 @@ gl3lightmapstate_t gl3_lms;
 extern gl3image_t gl3textures[MAX_GL3TEXTURES];
 extern int numgl3textures;
 
+#ifdef YQ2_GL3_GLES2_WEB
+// ES2/WebGL1 has no VAOs, so instead of recording each layout's
+// glVertexAttribPointer() setup once (into a VAO) at init time, these
+// re-issue it every time that layout is about to be drawn with --
+// called from the draw-call sites that used to say
+// GL3_BindVAO(gl3state.vao3D) etc. See also GL3_ES2_BindLayout2D()/
+// GL3_ES2_BindLayout2Dcolor() in gl3_draw.c for the 2D UI layouts.
+void
+GL3_ES2_BindLayout3D(void)
+{
+	GL3_BindVBO(gl3state.vbo3D);
+
+	glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
+	qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), 0);
+
+	glEnableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
+	qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, texCoord));
+
+	glEnableVertexAttribArray(GL3_ATTRIB_LMTEXCOORD);
+	qglVertexAttribPointer(GL3_ATTRIB_LMTEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, lmTexCoord));
+
+	glEnableVertexAttribArray(GL3_ATTRIB_NORMAL);
+	qglVertexAttribPointer(GL3_ATTRIB_NORMAL, 3, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, normal));
+
+	// no lightFlags attribute for ES2 (dropped, see GL3_ATTRIB_LIGHTFLAGS
+	// comment in header/local.h) -- leave attrib 5 disabled.
+	glDisableVertexAttribArray(GL3_ATTRIB_LIGHTFLAGS);
+	glDisableVertexAttribArray(GL3_ATTRIB_COLOR);
+}
+
+void
+GL3_ES2_BindLayoutAlias(void)
+{
+	GL3_BindVBO(gl3state.vboAlias);
+
+	glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
+	qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, 9*sizeof(GLfloat), 0);
+
+	glEnableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
+	qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 9*sizeof(GLfloat), 3*sizeof(GLfloat));
+
+	glEnableVertexAttribArray(GL3_ATTRIB_COLOR);
+	qglVertexAttribPointer(GL3_ATTRIB_COLOR, 4, GL_FLOAT, GL_FALSE, 9*sizeof(GLfloat), 5*sizeof(GLfloat));
+
+	glDisableVertexAttribArray(GL3_ATTRIB_LMTEXCOORD);
+	glDisableVertexAttribArray(GL3_ATTRIB_NORMAL);
+	glDisableVertexAttribArray(GL3_ATTRIB_LIGHTFLAGS);
+}
+
+void
+GL3_ES2_BindLayoutParticle(void)
+{
+	GL3_BindVBO(gl3state.vboParticle);
+
+	glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
+	qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, 9*sizeof(GLfloat), 0);
+
+	glEnableVertexAttribArray(GL3_ATTRIB_TEXCOORD); // abused for (point_size, distance) here
+	qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 9*sizeof(GLfloat), 3*sizeof(GLfloat));
+
+	glEnableVertexAttribArray(GL3_ATTRIB_COLOR);
+	qglVertexAttribPointer(GL3_ATTRIB_COLOR, 4, GL_FLOAT, GL_FALSE, 9*sizeof(GLfloat), 5*sizeof(GLfloat));
+
+	glDisableVertexAttribArray(GL3_ATTRIB_LMTEXCOORD);
+	glDisableVertexAttribArray(GL3_ATTRIB_NORMAL);
+	glDisableVertexAttribArray(GL3_ATTRIB_LIGHTFLAGS);
+}
+#endif // YQ2_GL3_GLES2_WEB
+
 void GL3_SurfInit(void)
 {
+#ifdef YQ2_GL3_GLES2_WEB
+	// no VAOs -- just allocate the VBOs/EBO here, attribute layout is
+	// set up per-draw by GL3_ES2_BindLayoutXxx() above.
+	glGenBuffers(1, &gl3state.vbo3D);
+	GL3_BindVBO(gl3state.vbo3D);
+
+	if(gl3config.useBigVBO)
+	{
+		gl3state.vbo3Dsize = 5*1024*1024;
+		gl3state.vbo3DcurOffset = 0;
+		glBufferData(GL_ARRAY_BUFFER, gl3state.vbo3Dsize, NULL, GL_STREAM_DRAW);
+	}
+
+	glGenBuffers(1, &gl3state.vboAlias);
+	glGenBuffers(1, &gl3state.eboAlias);
+	glGenBuffers(1, &gl3state.vboParticle);
+#else
 	// init the VAO and VBO for the standard vertexdata: 10 floats and 1 uint
 	// (X, Y, Z), (S, T), (LMS, LMT), (normX, normY, normZ) ; lightFlags - last two groups for lightmap/dynlights
 
@@ -115,21 +201,25 @@ void GL3_SurfInit(void)
 
 	glEnableVertexAttribArray(GL3_ATTRIB_COLOR);
 	qglVertexAttribPointer(GL3_ATTRIB_COLOR, 4, GL_FLOAT, GL_FALSE, 9*sizeof(GLfloat), 5*sizeof(GLfloat));
+#endif // YQ2_GL3_GLES2_WEB
 }
 
 void GL3_SurfShutdown(void)
 {
 	glDeleteBuffers(1, &gl3state.vbo3D);
 	gl3state.vbo3D = 0;
-	glDeleteVertexArrays(1, &gl3state.vao3D);
-	gl3state.vao3D = 0;
 
 	glDeleteBuffers(1, &gl3state.eboAlias);
 	gl3state.eboAlias = 0;
 	glDeleteBuffers(1, &gl3state.vboAlias);
 	gl3state.vboAlias = 0;
+
+#ifndef YQ2_GL3_GLES2_WEB
+	glDeleteVertexArrays(1, &gl3state.vao3D);
+	gl3state.vao3D = 0;
 	glDeleteVertexArrays(1, &gl3state.vaoAlias);
 	gl3state.vaoAlias = 0;
+#endif
 }
 
 static void
@@ -169,8 +259,12 @@ GL3_DrawGLPoly(msurface_t *fa)
 {
 	glpoly_t *p = fa->polys;
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout3D();
+#else
 	GL3_BindVAO(gl3state.vao3D);
 	GL3_BindVBO(gl3state.vbo3D);
+#endif
 
 	GL3_BufferAndDraw3D(p->vertices, p->numverts, GL_TRIANGLE_FAN);
 }
@@ -196,8 +290,12 @@ GL3_DrawGLFlowingPoly(msurface_t *fa)
 		GL3_UpdateUBO3D();
 	}
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout3D();
+#else
 	GL3_BindVAO(gl3state.vao3D);
 	GL3_BindVBO(gl3state.vbo3D);
+#endif
 
 	GL3_BufferAndDraw3D(p->vertices, p->numverts, GL_TRIANGLE_FAN);
 }

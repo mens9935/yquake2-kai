@@ -36,7 +36,16 @@ CompileShader(GLenum shaderType, const char* shaderSrc, const char* shaderSrc2)
 {
 	GLuint shader = glCreateShader(shaderType);
 
-#ifdef YQ2_GL3_GLES3
+#ifdef YQ2_GL3_GLES2_WEB
+	// GLSL ES 1.00 (WebGL1/GLES2): unlike GLSL ES 3.00, "#version 100"
+	// takes no "es" suffix. Fragment shaders need an explicit default
+	// float precision (spec requires it, browsers vary in how strictly
+	// they enforce it); vertex shaders default to highp and should stay
+	// there (world-space position math), so don't force mediump on them.
+	const char* version = (shaderType == GL_FRAGMENT_SHADER)
+		? "#version 100\nprecision mediump float;\n"
+		: "#version 100\n";
+#elif defined(YQ2_GL3_GLES3)
 	const char* version = "#version 300 es\nprecision mediump float;\n";
 #else // Desktop GL
 	const char* version = "#version 150\n";
@@ -166,6 +175,15 @@ CreateShaderProgram(int numShaders, const GLuint* shaders)
 }
 
 #define MULTILINE_STRING(...) #__VA_ARGS__
+
+// The GLES3/desktop-GL shader set below uses UBOs (layout(std140) uniform
+// blocks) and VAOs throughout, neither available in ES2/WebGL1 -- the
+// KaiOS/web build uses its own separate shader set + non-UBO uniform
+// update path instead, see the YQ2_GL3_GLES2_WEB block at the end of
+// this file. Keep this whole block out of that build entirely so it
+// never has to compile UBO/`in`/`out`/`flat`/`uint` GLSL syntax that
+// doesn't exist in GLSL ES 1.00.
+#ifndef YQ2_GL3_GLES2_WEB
 
 // ############## shaders for 2D rendering (HUD, menus, console, videos, ..) #####################
 
@@ -1435,3 +1453,844 @@ void GL3_UpdateUBOLights(void)
 {
 	updateUBO(gl3state.uniLightsUBO, sizeof(gl3state.uniLightsData), &gl3state.uniLightsData);
 }
+
+#endif // !YQ2_GL3_GLES2_WEB
+
+#ifdef YQ2_GL3_GLES2_WEB
+
+// ############## ES2/WebGL1 shader set for KaiOS #####################
+//
+// No UBOs (replaced by plain per-program uniforms, pushed on every
+// program switch -- see GL3_ES2_SyncUniformsForCurrentProgram()), no
+// VAOs, no `in`/`out` (GLSL ES 1.00 uses attribute/varying), no `flat`/
+// `uint` (per-vertex dynamic-light flags dropped entirely -- lightmaps
+// only, consistent with gl1_dynamic already being off by default on
+// this platform), texture2D() instead of texture(), gl_FragColor
+// instead of a user-declared output.
+
+#define MULTILINE_STRING(...) #__VA_ARGS__
+
+static const char* ES2_vertexSrc2D = MULTILINE_STRING(
+
+		attribute vec2 position; // GL3_ATTRIB_POSITION
+		attribute vec2 texCoord; // GL3_ATTRIB_TEXCOORD
+
+		uniform mat4 trans;
+
+		varying vec2 passTexCoord;
+
+		void main()
+		{
+			gl_Position = trans * vec4(position, 0.0, 1.0);
+			passTexCoord = texCoord;
+		}
+);
+
+static const char* ES2_fragmentSrc2D = MULTILINE_STRING(
+
+		varying vec2 passTexCoord;
+
+		uniform sampler2D tex;
+		uniform float gamma;
+		uniform float intensity2D;
+
+		void main()
+		{
+			vec4 texel = texture2D(tex, passTexCoord);
+			if(texel.a <= 0.666)
+				discard;
+
+			texel.rgb *= intensity2D;
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a;
+		}
+);
+
+static const char* ES2_fragmentSrc2Dtinted = MULTILINE_STRING(
+
+		varying vec2 passTexCoord;
+
+		uniform sampler2D tex;
+		uniform float gamma;
+		uniform float intensity2D;
+		uniform vec4 color;
+
+		void main()
+		{
+			vec4 texel = texture2D(tex, passTexCoord);
+			if(texel.a <= 0.666)
+				discard;
+
+			texel.rgb *= color.rgb;
+			texel.rgb *= intensity2D;
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a;
+		}
+);
+
+static const char* ES2_fragmentSrc2Dpostprocess = MULTILINE_STRING(
+
+		varying vec2 passTexCoord;
+
+		uniform sampler2D tex;
+		uniform vec4 v_blend;
+
+		void main()
+		{
+			vec4 res = texture2D(tex, passTexCoord);
+			res.rgb = v_blend.a * v_blend.rgb + (1.0 - v_blend.a) * res.rgb;
+			gl_FragColor = res;
+		}
+);
+
+static const char* ES2_fragmentSrc2DpostprocessWater = MULTILINE_STRING(
+
+		varying vec2 passTexCoord;
+
+		uniform sampler2D tex;
+		uniform float time;
+		uniform vec4 v_blend;
+
+		void main()
+		{
+			vec2 uv = passTexCoord;
+
+			float sx = 1.0 - abs(0.5-uv.x)*2.0;
+			float sy = 1.0 - abs(0.5-uv.y)*2.0;
+			float xShift = 2.0 * time + uv.y * 3.14159265358979323846 * 10.0;
+			float yShift = 2.0 * time + uv.x * 3.14159265358979323846 * 10.0;
+			vec2 distortion = vec2(sin(xShift) * sx, sin(yShift) * sy) * 0.00666;
+
+			uv += distortion;
+			uv = clamp(uv, vec2(0.0, 0.0), vec2(1.0, 1.0));
+
+			vec4 res = texture2D(tex, uv);
+			res.rgb = v_blend.a * v_blend.rgb + (1.0 - v_blend.a) * res.rgb;
+			gl_FragColor = res;
+		}
+);
+
+static const char* ES2_vertexSrc2Dcolor = MULTILINE_STRING(
+
+		attribute vec2 position; // GL3_ATTRIB_POSITION
+
+		uniform mat4 trans;
+
+		void main()
+		{
+			gl_Position = trans * vec4(position, 0.0, 1.0);
+		}
+);
+
+static const char* ES2_fragmentSrc2Dcolor = MULTILINE_STRING(
+
+		uniform float gamma;
+		uniform float intensity2D;
+		uniform vec4 color;
+
+		void main()
+		{
+			vec3 col = color.rgb * intensity2D;
+			gl_FragColor.rgb = pow(col, vec3(gamma));
+			gl_FragColor.a = color.a;
+		}
+);
+
+// ############## shaders for 3D rendering (ES2) #####################
+
+static const char* ES2_vertexCommon3D = MULTILINE_STRING(
+
+		attribute vec3 position;   // GL3_ATTRIB_POSITION
+		attribute vec2 texCoord;   // GL3_ATTRIB_TEXCOORD
+		attribute vec2 lmTexCoord; // GL3_ATTRIB_LMTEXCOORD
+		attribute vec4 vertColor;  // GL3_ATTRIB_COLOR
+		attribute vec3 normal;     // GL3_ATTRIB_NORMAL
+		// no lightFlags attribute here -- ES2 has no integer vertex
+		// attributes, per-vertex dynamic-light flags are dropped.
+
+		varying vec2 passTexCoord;
+
+		uniform mat4 transProjView;
+		uniform mat4 transModel;
+
+		uniform float scroll; // for SURF_FLOWING
+		uniform float time;
+		uniform float alpha;
+		uniform float overbrightbits;
+		uniform float particleFadeFactor;
+		uniform float lightScaleForTurb;
+);
+
+static const char* ES2_fragmentCommon3D = MULTILINE_STRING(
+
+		varying vec2 passTexCoord;
+
+		uniform float gamma;
+		uniform float intensity;
+		uniform vec4 color;
+
+		uniform float scroll;
+		uniform float time;
+		uniform float alpha;
+		uniform float overbrightbits;
+		uniform float particleFadeFactor;
+		uniform float lightScaleForTurb;
+);
+
+static const char* ES2_vertexSrc3D = MULTILINE_STRING(
+
+		void main()
+		{
+			passTexCoord = texCoord;
+			gl_Position = transProjView * transModel * vec4(position, 1.0);
+		}
+);
+
+static const char* ES2_vertexSrc3Dflow = MULTILINE_STRING(
+
+		void main()
+		{
+			passTexCoord = texCoord + vec2(scroll, 0.0);
+			gl_Position = transProjView * transModel * vec4(position, 1.0);
+		}
+);
+
+static const char* ES2_vertexSrc3Dlm = MULTILINE_STRING(
+
+		varying vec2 passLMcoord;
+
+		void main()
+		{
+			passTexCoord = texCoord;
+			passLMcoord = lmTexCoord;
+			gl_Position = transProjView * transModel * vec4(position, 1.0);
+		}
+);
+
+static const char* ES2_vertexSrc3DlmFlow = MULTILINE_STRING(
+
+		varying vec2 passLMcoord;
+
+		void main()
+		{
+			passTexCoord = texCoord + vec2(scroll, 0.0);
+			passLMcoord = lmTexCoord;
+			gl_Position = transProjView * transModel * vec4(position, 1.0);
+		}
+);
+
+static const char* ES2_fragmentSrc3D = MULTILINE_STRING(
+
+		uniform sampler2D tex;
+
+		void main()
+		{
+			vec4 texel = texture2D(tex, passTexCoord);
+
+			texel.rgb *= intensity;
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a*alpha;
+		}
+);
+
+static const char* ES2_fragmentSrc3Dwater = MULTILINE_STRING(
+
+		uniform sampler2D tex;
+
+		void main()
+		{
+			vec2 tc = passTexCoord;
+			tc.s += sin( passTexCoord.t*0.125 + time ) * 4.0;
+			tc.s += scroll;
+			tc.t += sin( passTexCoord.s*0.125 + time ) * 4.0;
+			tc *= 1.0/64.0;
+
+			vec4 texel = texture2D(tex, tc);
+
+			texel.rgb *= intensity * lightScaleForTurb;
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a*alpha;
+		}
+);
+
+static const char* ES2_fragmentSrc3Dlm = MULTILINE_STRING(
+
+		uniform sampler2D tex;
+
+		uniform sampler2D lightmap0;
+		uniform sampler2D lightmap1;
+		uniform sampler2D lightmap2;
+		uniform sampler2D lightmap3;
+
+		uniform vec4 lmScales[4];
+
+		varying vec2 passLMcoord;
+
+		void main()
+		{
+			vec4 texel = texture2D(tex, passTexCoord);
+
+			texel.rgb *= intensity;
+
+			vec4 lmTex = texture2D(lightmap0, passLMcoord) * lmScales[0];
+			lmTex     += texture2D(lightmap1, passLMcoord) * lmScales[1];
+			lmTex     += texture2D(lightmap2, passLMcoord) * lmScales[2];
+			lmTex     += texture2D(lightmap3, passLMcoord) * lmScales[3];
+
+			lmTex.rgb *= overbrightbits;
+			gl_FragColor = lmTex*texel;
+			gl_FragColor.rgb = pow(gl_FragColor.rgb, vec3(gamma));
+
+			gl_FragColor.a = 1.0;
+		}
+);
+
+static const char* ES2_fragmentSrc3DlmNoColor = MULTILINE_STRING(
+
+		uniform sampler2D tex;
+
+		uniform sampler2D lightmap0;
+		uniform sampler2D lightmap1;
+		uniform sampler2D lightmap2;
+		uniform sampler2D lightmap3;
+
+		uniform vec4 lmScales[4];
+
+		varying vec2 passLMcoord;
+
+		void main()
+		{
+			vec4 texel = texture2D(tex, passTexCoord);
+
+			texel.rgb *= intensity;
+
+			vec4 lmTex = texture2D(lightmap0, passLMcoord) * lmScales[0];
+			lmTex     += texture2D(lightmap1, passLMcoord) * lmScales[1];
+			lmTex     += texture2D(lightmap2, passLMcoord) * lmScales[2];
+			lmTex     += texture2D(lightmap3, passLMcoord) * lmScales[3];
+
+			// turn lightcolor into grey for gl3_colorlight 0
+			lmTex.rgb = vec3(0.333 * (lmTex.r+lmTex.g+lmTex.b));
+
+			lmTex.rgb *= overbrightbits;
+			gl_FragColor = lmTex*texel;
+			gl_FragColor.rgb = pow(gl_FragColor.rgb, vec3(gamma));
+
+			gl_FragColor.a = 1.0;
+		}
+);
+
+static const char* ES2_fragmentSrc3Dcolor = MULTILINE_STRING(
+
+		void main()
+		{
+			vec4 texel = color;
+
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a*alpha;
+		}
+);
+
+static const char* ES2_fragmentSrc3Dsky = MULTILINE_STRING(
+
+		uniform sampler2D tex;
+
+		void main()
+		{
+			vec4 texel = texture2D(tex, passTexCoord);
+
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a*alpha;
+		}
+);
+
+static const char* ES2_fragmentSrc3Dsprite = MULTILINE_STRING(
+
+		uniform sampler2D tex;
+
+		void main()
+		{
+			vec4 texel = texture2D(tex, passTexCoord);
+
+			texel.rgb *= intensity;
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a*alpha;
+		}
+);
+
+static const char* ES2_fragmentSrc3DspriteAlpha = MULTILINE_STRING(
+
+		uniform sampler2D tex;
+
+		void main()
+		{
+			vec4 texel = texture2D(tex, passTexCoord);
+
+			if(texel.a <= 0.666)
+				discard;
+
+			texel.rgb *= intensity;
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a*alpha;
+		}
+);
+
+static const char* ES2_vertexSrcAlias = MULTILINE_STRING(
+
+		varying vec4 passColor;
+
+		void main()
+		{
+			passColor = vertColor*overbrightbits;
+			passTexCoord = texCoord;
+			gl_Position = transProjView* transModel * vec4(position, 1.0);
+		}
+);
+
+static const char* ES2_fragmentSrcAlias = MULTILINE_STRING(
+
+		uniform sampler2D tex;
+
+		varying vec4 passColor;
+
+		void main()
+		{
+			vec4 texel = texture2D(tex, passTexCoord);
+
+			texel.rgb *= intensity;
+			texel.a *= alpha;
+			texel *= min(vec4(1.5), passColor);
+
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a;
+		}
+);
+
+static const char* ES2_fragmentSrcAliasColor = MULTILINE_STRING(
+
+		varying vec4 passColor;
+
+		void main()
+		{
+			vec4 texel = passColor;
+
+			texel.a *= alpha;
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+			gl_FragColor.a = texel.a;
+		}
+);
+
+static const char* ES2_vertexSrcParticles = MULTILINE_STRING(
+
+		varying vec4 passColor;
+
+		void main()
+		{
+			passColor = vertColor;
+			gl_Position = transProjView * transModel * vec4(position, 1.0);
+
+			float pointDist = texCoord.y*0.1;
+
+			gl_PointSize = texCoord.x/pointDist;
+		}
+);
+
+static const char* ES2_fragmentSrcParticles = MULTILINE_STRING(
+
+		varying vec4 passColor;
+
+		void main()
+		{
+			vec2 offsetFromCenter = 2.0*(gl_PointCoord - vec2(0.5, 0.5));
+			float distSquared = dot(offsetFromCenter, offsetFromCenter);
+			if(distSquared > 1.0)
+				discard;
+
+			vec4 texel = passColor;
+
+			gl_FragColor.rgb = pow(texel.rgb, vec3(gamma));
+
+			texel.a *= min(1.0, particleFadeFactor*(1.0 - distSquared));
+
+			gl_FragColor.a = texel.a;
+		}
+);
+
+static const char* ES2_fragmentSrcParticlesSquare = MULTILINE_STRING(
+
+		varying vec4 passColor;
+
+		void main()
+		{
+			gl_FragColor.rgb = pow(passColor.rgb, vec3(gamma));
+			gl_FragColor.a = passColor.a;
+		}
+);
+
+#undef MULTILINE_STRING
+
+static qboolean
+initShader2D_ES2(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragSrc)
+{
+	GLuint shaders2D[2] = {0};
+	GLuint prog = 0;
+	GLint texLoc;
+
+	if(shaderInfo->shaderProgram != 0)
+	{
+		Com_Printf("WARNING: calling initShader2D_ES2 for gl3ShaderInfo_t that already has a shaderProgram!\n");
+		glDeleteProgram(shaderInfo->shaderProgram);
+	}
+
+	shaderInfo->shaderProgram = 0;
+
+	shaders2D[0] = CompileShader(GL_VERTEX_SHADER, vertSrc, NULL);
+	if(shaders2D[0] == 0)  return false;
+
+	shaders2D[1] = CompileShader(GL_FRAGMENT_SHADER, fragSrc, NULL);
+	if(shaders2D[1] == 0)
+	{
+		glDeleteShader(shaders2D[0]);
+		return false;
+	}
+
+	prog = CreateShaderProgram(2, shaders2D);
+
+	glDeleteShader(shaders2D[0]);
+	glDeleteShader(shaders2D[1]);
+
+	if(prog == 0)
+	{
+		return false;
+	}
+
+	GL3_UseProgram(prog);
+
+	shaderInfo->uniGamma              = glGetUniformLocation(prog, "gamma");
+	shaderInfo->uniIntensity          = -1; // 2D shaders don't use "intensity", only "intensity2D"
+	shaderInfo->uniIntensity2D        = glGetUniformLocation(prog, "intensity2D");
+	shaderInfo->uniColor              = glGetUniformLocation(prog, "color");
+	shaderInfo->uniTrans              = glGetUniformLocation(prog, "trans");
+	shaderInfo->uniTransProjView      = -1;
+	shaderInfo->uniTransModel         = -1;
+	shaderInfo->uniScroll             = -1;
+	shaderInfo->uniTime3D             = -1; // 2D's "time" (postprocess water) uses uniLmScalesOrTime below, not this
+	shaderInfo->uniAlpha              = -1;
+	shaderInfo->uniOverbrightbits     = -1;
+	shaderInfo->uniParticleFadeFactor = -1;
+	shaderInfo->uniLightScaleForTurb  = -1;
+
+	shaderInfo->uniLmScalesOrTime = glGetUniformLocation(prog, "time");
+	if(shaderInfo->uniLmScalesOrTime != -1)
+	{
+		glUniform1f(shaderInfo->uniLmScalesOrTime, 0.0f);
+	}
+
+	shaderInfo->uniVblend = glGetUniformLocation(prog, "v_blend");
+	if(shaderInfo->uniVblend != -1)
+	{
+		glUniform4f(shaderInfo->uniVblend, 0, 0, 0, 0);
+	}
+
+	texLoc = glGetUniformLocation(prog, "tex");
+	if(texLoc != -1)
+	{
+		glUniform1i(texLoc, 0);
+	}
+
+	shaderInfo->shaderProgram = prog;
+
+	return true;
+}
+
+static qboolean
+initShader3D_ES2(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragSrc)
+{
+	GLuint shaders3D[2] = {0};
+	GLuint prog = 0;
+	int i = 0;
+	GLint texLoc, lmScalesLoc;
+	char lmName[10] = "lightmapX";
+
+	if(shaderInfo->shaderProgram != 0)
+	{
+		Com_Printf("WARNING: calling initShader3D_ES2 for gl3ShaderInfo_t that already has a shaderProgram!\n");
+		glDeleteProgram(shaderInfo->shaderProgram);
+	}
+
+	shaderInfo->shaderProgram = 0;
+
+	shaders3D[0] = CompileShader(GL_VERTEX_SHADER, ES2_vertexCommon3D, vertSrc);
+	if(shaders3D[0] == 0)  return false;
+
+	shaders3D[1] = CompileShader(GL_FRAGMENT_SHADER, ES2_fragmentCommon3D, fragSrc);
+	if(shaders3D[1] == 0)
+	{
+		glDeleteShader(shaders3D[0]);
+		return false;
+	}
+
+	prog = CreateShaderProgram(2, shaders3D);
+
+	glDeleteShader(shaders3D[0]);
+	glDeleteShader(shaders3D[1]);
+
+	if(prog == 0)
+	{
+		return false;
+	}
+
+	GL3_UseProgram(prog);
+
+	shaderInfo->uniGamma              = glGetUniformLocation(prog, "gamma");
+	shaderInfo->uniIntensity          = glGetUniformLocation(prog, "intensity");
+	shaderInfo->uniIntensity2D        = -1;
+	shaderInfo->uniColor              = glGetUniformLocation(prog, "color");
+	shaderInfo->uniTrans              = -1;
+	shaderInfo->uniTransProjView      = glGetUniformLocation(prog, "transProjView");
+	shaderInfo->uniTransModel         = glGetUniformLocation(prog, "transModel");
+	shaderInfo->uniScroll             = glGetUniformLocation(prog, "scroll");
+	shaderInfo->uniTime3D             = glGetUniformLocation(prog, "time");
+	shaderInfo->uniAlpha              = glGetUniformLocation(prog, "alpha");
+	shaderInfo->uniOverbrightbits     = glGetUniformLocation(prog, "overbrightbits");
+	shaderInfo->uniParticleFadeFactor = glGetUniformLocation(prog, "particleFadeFactor");
+	shaderInfo->uniLightScaleForTurb  = glGetUniformLocation(prog, "lightScaleForTurb");
+
+	shaderInfo->uniVblend = -1;
+
+	texLoc = glGetUniformLocation(prog, "tex");
+	if(texLoc != -1)
+	{
+		glUniform1i(texLoc, 0);
+	}
+
+	for(i=0; i<4; ++i)
+	{
+		lmName[8] = '0'+i;
+		GLint lmLoc = glGetUniformLocation(prog, lmName);
+		if(lmLoc != -1)
+		{
+			glUniform1i(lmLoc, i+1);
+		}
+	}
+
+	lmScalesLoc = glGetUniformLocation(prog, "lmScales");
+	shaderInfo->uniLmScalesOrTime = lmScalesLoc;
+	if(lmScalesLoc != -1)
+	{
+		shaderInfo->lmScales[0] = HMM_Vec4(1.0f, 1.0f, 1.0f, 1.0f);
+		for(i=1; i<4; ++i)  shaderInfo->lmScales[i] = HMM_Vec4(0.0f, 0.0f, 0.0f, 0.0f);
+
+		glUniform4fv(lmScalesLoc, 4, shaderInfo->lmScales[0].Elements);
+	}
+
+	shaderInfo->shaderProgram = prog;
+
+	return true;
+}
+
+static qboolean createShaders_ES2(void)
+{
+	const char* lightmappedFrag;
+	const char* particleFrag;
+
+	if(!initShader2D_ES2(&gl3state.si2D, ES2_vertexSrc2D, ES2_fragmentSrc2D))
+	{
+		Com_Printf("WARNING: Failed to create shader program for textured 2D rendering!\n");
+		return false;
+	}
+	if(!initShader2D_ES2(&gl3state.si2Dtinted, ES2_vertexSrc2D, ES2_fragmentSrc2Dtinted))
+	{
+		Com_Printf("WARNING: Failed to create shader program for tinted 2D rendering!\n");
+		return false;
+	}
+	if(!initShader2D_ES2(&gl3state.si2Dcolor, ES2_vertexSrc2Dcolor, ES2_fragmentSrc2Dcolor))
+	{
+		Com_Printf("WARNING: Failed to create shader program for color-only 2D rendering!\n");
+		return false;
+	}
+	if(!initShader2D_ES2(&gl3state.si2DpostProcess, ES2_vertexSrc2D, ES2_fragmentSrc2Dpostprocess))
+	{
+		Com_Printf("WARNING: Failed to create shader program to render framebuffer object!\n");
+		return false;
+	}
+	if(!initShader2D_ES2(&gl3state.si2DpostProcessWater, ES2_vertexSrc2D, ES2_fragmentSrc2DpostprocessWater))
+	{
+		Com_Printf("WARNING: Failed to create shader program to render framebuffer object under water!\n");
+		return false;
+	}
+
+	lightmappedFrag = (gl3_colorlight->value == 0.0f)
+	                  ? ES2_fragmentSrc3DlmNoColor : ES2_fragmentSrc3Dlm;
+
+	if(!initShader3D_ES2(&gl3state.si3Dlm, ES2_vertexSrc3Dlm, lightmappedFrag))
+	{
+		Com_Printf("WARNING: Failed to create shader program for textured 3D rendering with lightmap!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3Dtrans, ES2_vertexSrc3D, ES2_fragmentSrc3D))
+	{
+		Com_Printf("WARNING: Failed to create shader program for rendering translucent 3D things!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3DcolorOnly, ES2_vertexSrc3D, ES2_fragmentSrc3Dcolor))
+	{
+		Com_Printf("WARNING: Failed to create shader program for flat-colored 3D rendering!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3Dturb, ES2_vertexSrc3D, ES2_fragmentSrc3Dwater))
+	{
+		Com_Printf("WARNING: Failed to create shader program for water rendering!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3DlmFlow, ES2_vertexSrc3DlmFlow, lightmappedFrag))
+	{
+		Com_Printf("WARNING: Failed to create shader program for scrolling textured 3D rendering with lightmap!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3DtransFlow, ES2_vertexSrc3Dflow, ES2_fragmentSrc3D))
+	{
+		Com_Printf("WARNING: Failed to create shader program for scrolling textured translucent 3D rendering!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3Dsky, ES2_vertexSrc3D, ES2_fragmentSrc3Dsky))
+	{
+		Com_Printf("WARNING: Failed to create shader program for sky rendering!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3Dsprite, ES2_vertexSrc3D, ES2_fragmentSrc3Dsprite))
+	{
+		Com_Printf("WARNING: Failed to create shader program for sprite rendering!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3DspriteAlpha, ES2_vertexSrc3D, ES2_fragmentSrc3DspriteAlpha))
+	{
+		Com_Printf("WARNING: Failed to create shader program for alpha-tested sprite rendering!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3Dalias, ES2_vertexSrcAlias, ES2_fragmentSrcAlias))
+	{
+		Com_Printf("WARNING: Failed to create shader program for rendering textured models!\n");
+		return false;
+	}
+	if(!initShader3D_ES2(&gl3state.si3DaliasColor, ES2_vertexSrcAlias, ES2_fragmentSrcAliasColor))
+	{
+		Com_Printf("WARNING: Failed to create shader program for rendering flat-colored models!\n");
+		return false;
+	}
+
+	particleFrag = (gl3_particle_square->value != 0.0f) ? ES2_fragmentSrcParticlesSquare : ES2_fragmentSrcParticles;
+
+	if(!initShader3D_ES2(&gl3state.siParticle, ES2_vertexSrcParticles, particleFrag))
+	{
+		Com_Printf("WARNING: Failed to create shader program for rendering particles!\n");
+		return false;
+	}
+
+	gl3state.currentShaderProgram = 0;
+
+	return true;
+}
+
+static void deleteShaders_ES2(void)
+{
+	const gl3ShaderInfo_t siZero = {0};
+	gl3ShaderInfo_t* si;
+
+	for(si = &gl3state.si2D; si <= &gl3state.siParticle; ++si)
+	{
+		if(si->shaderProgram != 0)  glDeleteProgram(si->shaderProgram);
+		*si = siZero;
+	}
+}
+
+qboolean GL3_InitShaders(void)
+{
+	// no UBOs to set up -- gl3state.uniCommonData/uni2DData/uni3DData
+	// just need sane in-memory defaults, they're pushed to whichever
+	// shader is current via GL3_ES2_SyncUniformsForCurrentProgram()
+	// (called from GL3_UseProgram()) instead of a shared GPU buffer.
+	gl3state.uniCommonData.gamma = 1.0f/vid_gamma->value;
+	gl3state.uniCommonData.intensity = gl3_intensity->value;
+	gl3state.uniCommonData.intensity2D = gl3_intensity_2D->value;
+	gl3state.uniCommonData.color = HMM_Vec4(1, 1, 1, 1);
+
+	gl3state.uni2DData.transMat4 = HMM_Mat4();
+
+	gl3state.uni3DData.transProjViewMat4 = HMM_Mat4();
+	gl3state.uni3DData.transModelMat4 = gl3_identityMat4;
+	gl3state.uni3DData.scroll = 0.0f;
+	gl3state.uni3DData.time = 0.0f;
+	gl3state.uni3DData.alpha = 1.0f;
+	gl3state.uni3DData.overbrightbits = (gl3_overbrightbits->value <= 0.0f) ? 1.0f : gl3_overbrightbits->value;
+	gl3state.uni3DData.particleFadeFactor = gl3_particle_fade_factor->value;
+	gl3state.uni3DData.lightScaleForTurb = 1.0f;
+
+	return createShaders_ES2();
+}
+
+void GL3_ShutdownShaders(void)
+{
+	deleteShaders_ES2();
+}
+
+qboolean GL3_RecreateShaders(void)
+{
+	deleteShaders_ES2();
+	return createShaders_ES2();
+}
+
+void
+GL3_ES2_SyncUniformsForCurrentProgram(void)
+{
+	gl3ShaderInfo_t* si = NULL;
+	gl3ShaderInfo_t* it;
+
+	for(it = &gl3state.si2D; it <= &gl3state.siParticle; ++it)
+	{
+		if(it->shaderProgram == gl3state.currentShaderProgram)
+		{
+			si = it;
+			break;
+		}
+	}
+
+	if(si == NULL)
+	{
+		// either nothing is bound yet, or this is a shader still being
+		// created in initShader2D_ES2()/initShader3D_ES2() (its
+		// gl3ShaderInfo_t::shaderProgram field isn't assigned until
+		// after that function's own uniform setup) -- nothing to sync.
+		return;
+	}
+
+	if(si->uniGamma != -1)              glUniform1f(si->uniGamma, gl3state.uniCommonData.gamma);
+	if(si->uniIntensity != -1)          glUniform1f(si->uniIntensity, gl3state.uniCommonData.intensity);
+	if(si->uniIntensity2D != -1)        glUniform1f(si->uniIntensity2D, gl3state.uniCommonData.intensity2D);
+	if(si->uniColor != -1)              glUniform4fv(si->uniColor, 1, gl3state.uniCommonData.color.Elements);
+
+	if(si->uniTrans != -1)              glUniformMatrix4fv(si->uniTrans, 1, GL_FALSE, gl3state.uni2DData.transMat4.Elements[0]);
+
+	if(si->uniTransProjView != -1)      glUniformMatrix4fv(si->uniTransProjView, 1, GL_FALSE, gl3state.uni3DData.transProjViewMat4.Elements[0]);
+	if(si->uniTransModel != -1)         glUniformMatrix4fv(si->uniTransModel, 1, GL_FALSE, gl3state.uni3DData.transModelMat4.Elements[0]);
+	if(si->uniScroll != -1)             glUniform1f(si->uniScroll, gl3state.uni3DData.scroll);
+	if(si->uniTime3D != -1)             glUniform1f(si->uniTime3D, gl3state.uni3DData.time);
+	if(si->uniAlpha != -1)              glUniform1f(si->uniAlpha, gl3state.uni3DData.alpha);
+	if(si->uniOverbrightbits != -1)     glUniform1f(si->uniOverbrightbits, gl3state.uni3DData.overbrightbits);
+	if(si->uniParticleFadeFactor != -1) glUniform1f(si->uniParticleFadeFactor, gl3state.uni3DData.particleFadeFactor);
+	if(si->uniLightScaleForTurb != -1)  glUniform1f(si->uniLightScaleForTurb, gl3state.uni3DData.lightScaleForTurb);
+}
+
+// GL3_UpdateUBOCommon/2D/3D/Lights are called throughout gl3_draw.c/
+// gl3_surf.c/gl3_mesh.c/gl3_warp.c/gl3_light.c/gl3_main.c whenever the
+// corresponding data changes. With real UBOs that's a single shared
+// buffer update visible to every program; without them, the data only
+// really needs to reach whichever program is *currently* bound -- so
+// just re-sync now, and GL3_UseProgram() will re-sync again on every
+// future program switch to pick up whatever's current in gl3state.
+void GL3_UpdateUBOCommon(void) { GL3_ES2_SyncUniformsForCurrentProgram(); }
+void GL3_UpdateUBO2D(void)     { GL3_ES2_SyncUniformsForCurrentProgram(); }
+void GL3_UpdateUBO3D(void)     { GL3_ES2_SyncUniformsForCurrentProgram(); }
+void GL3_UpdateUBOLights(void) { /* per-vertex dynlights dropped for ES2, nothing to push */ }
+
+#endif // YQ2_GL3_GLES2_WEB

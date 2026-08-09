@@ -266,8 +266,12 @@ GL3_EmitWaterPolys(msurface_t *fa)
 
 	GL3_UseProgram(gl3state.si3Dturb.shaderProgram);
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout3D();
+#else
 	GL3_BindVAO(gl3state.vao3D);
 	GL3_BindVBO(gl3state.vbo3D);
+#endif
 
 	for (bp = fa->polys; bp != NULL; bp = bp->next)
 	{
@@ -712,8 +716,12 @@ GL3_DrawSkyBox(void)
 	GL3_UpdateUBO3D();
 
 	GL3_UseProgram(gl3state.si3Dsky.shaderProgram);
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout3D();
+#else
 	GL3_BindVAO(gl3state.vao3D);
 	GL3_BindVBO(gl3state.vbo3D);
+#endif
 
 	// TODO: this could all be done in one drawcall.. but.. whatever, it's <= 6 drawcalls/frame
 

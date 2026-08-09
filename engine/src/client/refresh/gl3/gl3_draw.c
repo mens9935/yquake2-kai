@@ -33,6 +33,41 @@ gl3image_t *draw_chars;
 
 static GLuint vbo2D = 0, vao2D = 0, vao2Dcolor = 0; // vao2D is for textured rendering, vao2Dcolor for color-only
 
+#ifdef YQ2_GL3_GLES2_WEB
+// No VAOs in ES2 -- re-issue the layout setup before every draw instead
+// of once at init time. Both 2D layouts share vbo2D (like the VAOs used
+// to), so just (re-)bind that and set the right attributes.
+void
+GL3_ES2_BindLayout2D(void)
+{
+	GL3_BindVBO(vbo2D);
+
+	glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
+	qglVertexAttribPointer(GL3_ATTRIB_POSITION, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
+
+	glEnableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
+	qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), 2*sizeof(float));
+
+	glDisableVertexAttribArray(GL3_ATTRIB_LMTEXCOORD);
+	glDisableVertexAttribArray(GL3_ATTRIB_COLOR);
+	glDisableVertexAttribArray(GL3_ATTRIB_NORMAL);
+}
+
+void
+GL3_ES2_BindLayout2Dcolor(void)
+{
+	GL3_BindVBO(vbo2D);
+
+	glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
+	qglVertexAttribPointer(GL3_ATTRIB_POSITION, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), 0);
+
+	glDisableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
+	glDisableVertexAttribArray(GL3_ATTRIB_LMTEXCOORD);
+	glDisableVertexAttribArray(GL3_ATTRIB_COLOR);
+	glDisableVertexAttribArray(GL3_ATTRIB_NORMAL);
+}
+#endif
+
 void
 GL3_Draw_InitLocal(void)
 {
@@ -44,6 +79,11 @@ GL3_Draw_InitLocal(void)
 			__func__);
 	}
 
+#ifdef YQ2_GL3_GLES2_WEB
+	// just allocate the (shared) VBO -- attribute layout is set up
+	// per-draw by GL3_ES2_BindLayout2D()/GL3_ES2_BindLayout2Dcolor().
+	glGenBuffers(1, &vbo2D);
+#else
 	// set up attribute layout for 2D textured rendering
 	glGenVertexArrays(1, &vao2D);
 	glBindVertexArray(vao2D);
@@ -74,6 +114,7 @@ GL3_Draw_InitLocal(void)
 	qglVertexAttribPointer(GL3_ATTRIB_POSITION, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), 0);
 
 	GL3_BindVAO(0);
+#endif
 }
 
 void
@@ -81,10 +122,12 @@ GL3_Draw_ShutdownLocal(void)
 {
 	glDeleteBuffers(1, &vbo2D);
 	vbo2D = 0;
+#ifndef YQ2_GL3_GLES2_WEB
 	glDeleteVertexArrays(1, &vao2D);
 	vao2D = 0;
 	glDeleteVertexArrays(1, &vao2Dcolor);
 	vao2Dcolor = 0;
+#endif
 }
 
 // bind the texture before calling this
@@ -110,7 +153,11 @@ drawTexturedRectangle(float x, float y, float w, float h,
 		x+w, y,   sh, tl
 	};
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout2D();
+#else
 	GL3_BindVAO(vao2D);
+#endif
 
 	// Note: while vao2D "remembers" its vbo for drawing, binding the vao does *not*
 	//       implicitly bind the vbo, so I need to explicitly bind it before glBufferData()
@@ -317,7 +364,11 @@ GL3_Draw_Fill(int x, int y, int w, int h, int c)
 	GL3_UpdateUBOCommon();
 
 	GL3_UseProgram(gl3state.si2Dcolor.shaderProgram);
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout2Dcolor();
+#else
 	GL3_BindVAO(vao2Dcolor);
+#endif
 
 	GL3_BindVBO(vbo2D);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vBuf), vBuf, GL_STREAM_DRAW);
@@ -354,7 +405,11 @@ GL3_Draw_Flash(const float color[4], float x, float y, float w, float h)
 
 	GL3_UseProgram(gl3state.si2Dcolor.shaderProgram);
 
+#ifdef YQ2_GL3_GLES2_WEB
+	GL3_ES2_BindLayout2Dcolor();
+#else
 	GL3_BindVAO(vao2Dcolor);
+#endif
 
 	GL3_BindVBO(vbo2D);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vBuf), vBuf, GL_STREAM_DRAW);
