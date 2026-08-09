@@ -414,6 +414,50 @@ cvar_t *cl_pitchspeed;
 cvar_t *cl_run;
 cvar_t *cl_anglespeedkey;
 
+#ifdef __EMSCRIPTEN__
+/* KaiOS's D-Pad and softkeys are plain digital buttons -- turning at
+ * the full configured rate the instant one is pressed felt "too
+ * sensitive" for fine aiming on real hardware (a quick tap for a
+ * small correction moved the view exactly as fast as a deliberate
+ * long hold, since there's no analog stick/mouse deflection to scale
+ * by). Ramp the effective turn speed from a low starting fraction up
+ * to full speed over KAIOS_TURN_RAMP_MS of continuously holding the
+ * same key instead -- short taps stay small and precise, holding
+ * longer still reaches full speed for sweeping turns. Emulates the
+ * "gentle start, builds momentum" feel of an analog input (what was
+ * actually asked for -- "плавный скролл мышью") on a control that's
+ * fundamentally just an on/off switch.
+ *
+ * Independent of kbutton_t::downtime -- that field gets overwritten
+ * to "now" by every CL_KeyState() call (used for its own, different,
+ * per-frame-fraction bookkeeping), so it can't double as "when did
+ * this key originally go down" across more than one frame. */
+#define KAIOS_TURN_RAMP_MS  400.0f
+#define KAIOS_TURN_RAMP_MIN 0.25f
+
+static float
+KaiOS_TurnRampScale(kbutton_t *key, unsigned *heldSinceMsec)
+{
+	float t;
+
+	if (!(key->state & 1))
+	{
+		*heldSinceMsec = 0;
+		return 1.0f; /* not held -- CL_KeyState() will read 0 for it anyway */
+	}
+
+	if (*heldSinceMsec == 0)
+	{
+		*heldSinceMsec = sys_frame_time;
+	}
+
+	t = (float)(sys_frame_time - *heldSinceMsec) / KAIOS_TURN_RAMP_MS;
+	t = (t < 0.0f) ? 0.0f : (t > 1.0f) ? 1.0f : t;
+
+	return KAIOS_TURN_RAMP_MIN + (1.0f - KAIOS_TURN_RAMP_MIN) * t;
+}
+#endif
+
 /*
  * Moves the local angle positions
  */
@@ -422,6 +466,15 @@ CL_AdjustAngles(void)
 {
 	float speed;
 	float up, down;
+#ifdef __EMSCRIPTEN__
+	static unsigned rightHeldSince, leftHeldSince, lookupHeldSince, lookdownHeldSince;
+	float rightScale, leftScale, upScale, downScale;
+
+	rightScale = KaiOS_TurnRampScale(&in_right, &rightHeldSince);
+	leftScale = KaiOS_TurnRampScale(&in_left, &leftHeldSince);
+	upScale = KaiOS_TurnRampScale(&in_lookup, &lookupHeldSince);
+	downScale = KaiOS_TurnRampScale(&in_lookdown, &lookdownHeldSince);
+#endif
 
 	if (in_speed.state & 1)
 	{
@@ -434,8 +487,13 @@ CL_AdjustAngles(void)
 
 	if (!(in_strafe.state & 1))
 	{
+#ifdef __EMSCRIPTEN__
+		cl.viewangles[YAW] -= speed * cl_yawspeed->value * rightScale * CL_KeyState(&in_right);
+		cl.viewangles[YAW] += speed * cl_yawspeed->value * leftScale * CL_KeyState(&in_left);
+#else
 		cl.viewangles[YAW] -= speed * cl_yawspeed->value * CL_KeyState(&in_right);
 		cl.viewangles[YAW] += speed * cl_yawspeed->value * CL_KeyState(&in_left);
+#endif
 	}
 
 	if (in_klook.state & 1)
@@ -447,8 +505,13 @@ CL_AdjustAngles(void)
 	up = CL_KeyState(&in_lookup);
 	down = CL_KeyState(&in_lookdown);
 
+#ifdef __EMSCRIPTEN__
+	cl.viewangles[PITCH] -= speed * cl_pitchspeed->value * upScale * up;
+	cl.viewangles[PITCH] += speed * cl_pitchspeed->value * downScale * down;
+#else
 	cl.viewangles[PITCH] -= speed * cl_pitchspeed->value * up;
 	cl.viewangles[PITCH] += speed * cl_pitchspeed->value * down;
+#endif
 
 	// centerview progression
 	if (center_progress < 1.0f && cl_centertime->value > 0)
