@@ -38,13 +38,19 @@ CompileShader(GLenum shaderType, const char* shaderSrc, const char* shaderSrc2)
 
 #ifdef YQ2_GL3_GLES2_WEB
 	// GLSL ES 1.00 (WebGL1/GLES2): unlike GLSL ES 3.00, "#version 100"
-	// takes no "es" suffix. Fragment shaders need an explicit default
-	// float precision (spec requires it, browsers vary in how strictly
-	// they enforce it); vertex shaders default to highp and should stay
-	// there (world-space position math), so don't force mediump on them.
-	const char* version = (shaderType == GL_FRAGMENT_SHADER)
-		? "#version 100\nprecision mediump float;\n"
-		: "#version 100\n";
+	// takes no "es" suffix. Applying "precision mediump float" to only
+	// the fragment shader (not the vertex one, to preserve highp for
+	// world-space position math) seemed reasonable but real-device
+	// testing found it breaks linking: "Uniform `scroll` is not
+	// linkable between attached shaders" -- GLSL ES 1.00 requires a
+	// uniform's declared precision to match exactly between every
+	// stage that declares it, and scroll/time/alpha/etc are declared
+	// in both vertexCommon3D and fragmentCommon3D. Match upstream's
+	// own GLES3 branch below instead: apply mediump to both stages
+	// uniformly (it already does this successfully there), and mark
+	// position/matrix uniforms explicitly highp in the shader source
+	// itself where precision actually matters.
+	const char* version = "#version 100\nprecision mediump float;\n";
 #elif defined(YQ2_GL3_GLES3)
 	const char* version = "#version 300 es\nprecision mediump float;\n";
 #else // Desktop GL
@@ -1600,7 +1606,7 @@ static const char* ES2_fragmentSrc2Dcolor = MULTILINE_STRING(
 
 static const char* ES2_vertexCommon3D = MULTILINE_STRING(
 
-		attribute vec3 position;   // GL3_ATTRIB_POSITION
+		attribute highp vec3 position; // GL3_ATTRIB_POSITION
 		attribute vec2 texCoord;   // GL3_ATTRIB_TEXCOORD
 		attribute vec2 lmTexCoord; // GL3_ATTRIB_LMTEXCOORD
 		attribute vec4 vertColor;  // GL3_ATTRIB_COLOR
@@ -1610,8 +1616,13 @@ static const char* ES2_vertexCommon3D = MULTILINE_STRING(
 
 		varying vec2 passTexCoord;
 
-		uniform mat4 transProjView;
-		uniform mat4 transModel;
+		// highp here (not shared with any fragment-shader declaration,
+		// so no cross-stage precision-match constraint) -- world-space
+		// position math needs it, unlike the plain scalars below which
+		// stay at the file-wide mediump default (shared with
+		// fragmentCommon3D, so must match exactly there).
+		uniform highp mat4 transProjView;
+		uniform highp mat4 transModel;
 
 		uniform float scroll; // for SURF_FLOWING
 		uniform float time;
