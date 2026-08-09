@@ -1939,7 +1939,25 @@ SCR_UpdateScreen(void)
 			SCR_DrawStats();
 			SCR_DrawSpeed();
 #ifdef __EMSCRIPTEN__
-			SCR_DrawKaiosStats();
+			{
+				/* Off by default -- Sys_ConsoleOutput() (SCR_DrawKaiosStats,
+				 * below) isn't free on this device, and running it every
+				 * single second for the whole session was itself a steady
+				 * background cost, apart from any of the numbers it was
+				 * trying to measure. A real device log showed frame-time
+				 * spikes lining up with exactly these prints. */
+				static cvar_t *kaios_debug_stats;
+
+				if (!kaios_debug_stats)
+				{
+					kaios_debug_stats = Cvar_Get("kaios_debug_stats", "0", CVAR_ARCHIVE);
+				}
+
+				if (kaios_debug_stats->value)
+				{
+					SCR_DrawKaiosStats();
+				}
+			}
 #endif
 
 			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 1)

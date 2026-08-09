@@ -660,6 +660,15 @@ function copyBaseq2(files, choice) {
 	// used for anything.
 	var SKIP_PREFIXES = ['save/', 'scrnshot/'];
 
+	// music/ is real input data (unlike save/scrnshot above) but a
+	// large one on a slow SD-card read -- not worth the time/memory if
+	// the Audio settings screen's Music toggle is off anyway, since
+	// nothing will ever play it this session.
+	var musicItem = AUDIO_ITEMS.filter(function (it) { return it.id === 'music'; })[0];
+	if (musicItem && !getItemIndex(musicItem)) {
+		SKIP_PREFIXES.push('music/');
+	}
+
 	var toCopy = files.filter(function (f) {
 		var norm = '/' + f.name.replace(/^\/+/, '');
 		if (norm.toLowerCase().indexOf(srcPrefix.toLowerCase()) !== 0) {
@@ -884,11 +893,6 @@ function writeAutoexec() {
 var bootedOnce = false;
 
 function bootEngine() {
-	// Temporary diagnostic, see also the matching one at the top of
-	// main() (backends/unix/main.c) -- chasing a report of the engine
-	// appearing to boot twice in one session.
-	console.log('[kaios] bootEngine() called, bootedOnce=' + bootedOnce);
-
 	// Never call Module.callMain() more than once, from wherever it
 	// might get triggered -- main() isn't designed to run twice in the
 	// same module instance, and it's a cheap, unconditional guard
@@ -1197,7 +1201,7 @@ var VIDEO_ITEMS = [
 		label: 'Resolution',
 		cvars: ['r_customwidth', 'r_customheight', 'r_mode'],
 		choices: [
-			{ label: '640x480', values: ['640', '480', '-1'] },
+			{ label: '480x640', values: ['480', '640', '-1'] },
 			{ label: '240x320', values: ['240', '320', '-1'] },
 			{ label: '176x220', values: ['176', '220', '-1'] },
 			{ label: '128x160', values: ['128', '160', '-1'] }
@@ -1341,7 +1345,18 @@ var DEBUG_ITEMS = [
 			{ label: 'Off', values: ['99999'] }
 		],
 		def: 1
-	}
+	},
+	// Console diagnostic logging -- each one below off by default. A
+	// real device log showed frame-time spikes lining up with exactly
+	// these prints (Sys_ConsoleOutput/console.log aren't free on this
+	// hardware, see cl_screen.c's SCR_DrawKaiosStats/KAIOS_STATS gate),
+	// so leaving any of them on for normal play is a real, measurable
+	// performance cost, not just console noise.
+	toggleItem('debugstats', 'Log: perf stats (1/s)', 'kaios_debug_stats', false),
+	toggleItem('debugframespike', 'Log: frame spikes', 'kaios_debug_framespike', false),
+	toggleItem('debugwastate', 'Log: audio state (1/s)', 'kaios_debug_wa_state', false),
+	toggleItem('debugunderwater', 'Log: underwater FBO', 'kaios_debug_underwater', false),
+	toggleItem('debugwebaudiotrace', 'Log: audio trace', 'kaios_debug_webaudio_trace', false)
 ];
 
 var SETTINGS_GROUPS = [
@@ -1516,9 +1531,6 @@ function showSettingsGroups() {
 }
 
 function start() {
-	// Temporary diagnostic, see the note by bootEngine().
-	console.log('[kaios] start() called, document.readyState=' + document.readyState);
-
 	installKeyHandlers();
 	installWakeLock();
 

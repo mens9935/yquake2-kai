@@ -1499,12 +1499,22 @@ SetupGL(void)
 #ifdef __EMSCRIPTEN__
 	{
 		static qboolean logged_this_dip = false;
+		static cvar_t *kaios_debug_underwater;
 		qboolean nowUnderwater = (r_newrefdef.rdflags & RDF_UNDERWATER) != 0;
+
+		if (!kaios_debug_underwater)
+		{
+			kaios_debug_underwater = ri.Cvar_Get("kaios_debug_underwater", "0", CVAR_ARCHIVE);
+		}
+
 		if (nowUnderwater && !logged_this_dip)
 		{
 			logged_this_dip = true;
-			Com_Printf("KAIOS_UNDERWATER: entered, gl3_usefbo=%.0f ppFBO=%u w=%d h=%d\n",
-				gl3_usefbo->value, gl3state.ppFBO, w, h);
+			if (kaios_debug_underwater->value)
+			{
+				Com_Printf("KAIOS_UNDERWATER: entered, gl3_usefbo=%.0f ppFBO=%u w=%d h=%d\n",
+					gl3_usefbo->value, gl3state.ppFBO, w, h);
+			}
 		}
 		else if (!nowUnderwater)
 		{
@@ -1570,8 +1580,20 @@ SetupGL(void)
 
 			GLenum fbState = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 #ifdef __EMSCRIPTEN__
-			Com_Printf("KAIOS_UNDERWATER: FBO (re)created at %dx%d, status=0x%x (complete=0x%x)\n",
-				w, h, fbState, GL_FRAMEBUFFER_COMPLETE);
+			{
+				static cvar_t *kaios_debug_underwater2;
+
+				if (!kaios_debug_underwater2)
+				{
+					kaios_debug_underwater2 = ri.Cvar_Get("kaios_debug_underwater", "0", CVAR_ARCHIVE);
+				}
+
+				if (kaios_debug_underwater2->value)
+				{
+					Com_Printf("KAIOS_UNDERWATER: FBO (re)created at %dx%d, status=0x%x (complete=0x%x)\n",
+						w, h, fbState, GL_FRAMEBUFFER_COMPLETE);
+				}
+			}
 #endif
 			if(fbState != GL_FRAMEBUFFER_COMPLETE)
 			{

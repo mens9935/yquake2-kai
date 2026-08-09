@@ -42,14 +42,6 @@ void setCustomCfgDir(const char* dir);
 int
 main(int argc, char **argv)
 {
-#ifdef __EMSCRIPTEN__
-	/* Temporary diagnostic: chasing a report of the engine appearing to
-	 * boot twice in one session (first attempt with no baseq2 data
-	 * mounted yet, second one for real) -- raw stdio, so it shows up
-	 * unconditionally regardless of any engine-level state. */
-	fprintf(stderr, "KAIOS_DEBUG: main() entered\n");
-#endif
-
 	// register signal handler
 	registerHandler();
 

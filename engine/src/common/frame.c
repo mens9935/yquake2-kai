@@ -213,13 +213,15 @@ Qcommon_EmscriptenTick(void *arg)
 
 #ifndef DEDICATED_ONLY
 	{
-		/* Unconditional, first-few-ticks-only: settle, with zero
-		 * ambiguity, whether the cube test is even being entered and
-		 * what it sees, before trusting any of its own conditional
-		 * prints. */
+		/* First-few-ticks-only: settle, with zero ambiguity, whether the
+		 * cube test is even being entered and what it sees, before
+		 * trusting any of its own conditional prints. Gated on
+		 * developer (off by default) -- this is boot-time-only wiring
+		 * verification, not something a normal play session needs in
+		 * the console. */
 		static int kaios_tick_count = 0;
 
-		if (kaios_tick_count < 5)
+		if ((kaios_tick_count < 5) && developer->value)
 		{
 			kaios_tick_count++;
 			Com_Printf("KAIOS_TICK: #%d kaios_cube_test_active=%d\n",
@@ -929,8 +931,23 @@ Qcommon_Frame(int usec)
 	 * frame even when host_speeds itself is off, instead of asking for
 	 * a full-session host_speeds 1 (every frame, all session) just to
 	 * catch the rare multi-hundred-ms spikes actually worth looking
-	 * at. */
-	qboolean kaios_want_speeds = (renderdelta > 400000);
+	 * at.
+	 *
+	 * Gated on kaios_debug_framespike (off by default), same cvar
+	 * cl_main.c's own KAIOS_FRAMESPIKE print checks -- a real device
+	 * log showed these two prints firing back to back on *every*
+	 * reported spike, strongly suggesting the printing itself (not
+	 * free on this device, see cl_screen.c's SCR_DrawKaiosStats gate)
+	 * was feeding the very next frame's spike, not just reporting on
+	 * the current one. */
+	static cvar_t *kaios_debug_framespike;
+
+	if (!kaios_debug_framespike)
+	{
+		kaios_debug_framespike = Cvar_Get("kaios_debug_framespike", "0", CVAR_ARCHIVE);
+	}
+
+	qboolean kaios_want_speeds = kaios_debug_framespike->value && (renderdelta > 400000);
 #else
 	qboolean kaios_want_speeds = false;
 #endif

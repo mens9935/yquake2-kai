@@ -74,6 +74,7 @@ static int wa_framecount = 0;
 qboolean
 WA_Init(void)
 {
+	cvar_t *kaios_debug_webaudio_trace = Cvar_Get("kaios_debug_webaudio_trace", "0", CVAR_ARCHIVE);
 	int ok = EM_ASM_INT({
 		try {
 			var AC = window.AudioContext || window.webkitAudioContext;
@@ -140,9 +141,11 @@ WA_Init(void)
 			document.addEventListener('touchstart', resume);
 			resume();
 
-			console.log('[kaios] webaudio: init ok, sampleRate=' + ka.ctx.sampleRate +
-				', state=' + ka.ctx.state + ', hasResume=' + (typeof ka.ctx.resume === 'function') +
-				', hasStereoPanner=' + (typeof ka.ctx.createStereoPanner === 'function'));
+			if ($2) {
+				console.log('[kaios] webaudio: init ok, sampleRate=' + ka.ctx.sampleRate +
+					', state=' + ka.ctx.state + ', hasResume=' + (typeof ka.ctx.resume === 'function') +
+					', hasStereoPanner=' + (typeof ka.ctx.createStereoPanner === 'function'));
+			}
 
 			Module.kaiosAudio = ka;
 			return ka.ctx.sampleRate;
@@ -150,7 +153,7 @@ WA_Init(void)
 			console.log('[kaios] webaudio: init threw: ' + e);
 			return 0;
 		}
-	}, s_volume->value, MAX_CHANNELS);
+	}, s_volume->value, MAX_CHANNELS, kaios_debug_webaudio_trace->value);
 
 	wa_inited = (ok != 0);
 
@@ -245,6 +248,16 @@ WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
 {
 	sfxcache_t *sc;
 	int bufnum;
+	/* Off by default -- this is the *decode-correctness* trace (first 8
+	 * uploads/plays only, see WA_PlayChannel's matching one below), not
+	 * a per-frame cost like KAIOS_WA_STATE, but still real console
+	 * output during normal play with no way to silence it before this. */
+	static cvar_t *kaios_debug_webaudio_trace;
+
+	if (!kaios_debug_webaudio_trace)
+	{
+		kaios_debug_webaudio_trace = Cvar_Get("kaios_debug_webaudio_trace", "0", CVAR_ARCHIVE);
+	}
 
 	if (!s_info->samples)
 	{
@@ -258,11 +271,10 @@ WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
 		var width = $2;
 		var chans = $3;
 		var rate = $4;
+		var traceEnabled = $5;
 
 		try {
 			var buf = ka.ctx.createBuffer(chans, frames, rate);
-
-			var peak = 0;
 
 			for (var c = 0; c < chans; c++) {
 				var out = buf.getChannelData(c);
@@ -277,22 +289,28 @@ WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
 						out[i] = HEAP16[base + i * chans + c] / 32768.0;
 					}
 				}
-
-				for (var i = 0; i < frames; i++) {
-					var a = Math.abs(out[i]);
-					if (a > peak) {
-						peak = a;
-					}
-				}
 			}
 
-			ka.uploadLogCount = (ka.uploadLogCount || 0);
-			if (ka.uploadLogCount < 8) {
-				ka.uploadLogCount++;
-				console.log('[kaios] webaudio: upload#' + ka.uploadLogCount +
-					' frames=' + frames + ' width=' + width + ' chans=' + chans +
-					' rate=' + rate + ' peak=' + peak.toFixed(4) +
-					' duration=' + buf.duration.toFixed(3));
+			if (traceEnabled) {
+				var peak = 0;
+				for (var c2 = 0; c2 < chans; c2++) {
+					var out2 = buf.getChannelData(c2);
+					for (var i2 = 0; i2 < frames; i2++) {
+						var a = Math.abs(out2[i2]);
+						if (a > peak) {
+							peak = a;
+						}
+					}
+				}
+
+				ka.uploadLogCount = (ka.uploadLogCount || 0);
+				if (ka.uploadLogCount < 8) {
+					ka.uploadLogCount++;
+					console.log('[kaios] webaudio: upload#' + ka.uploadLogCount +
+						' frames=' + frames + ' width=' + width + ' chans=' + chans +
+						' rate=' + rate + ' peak=' + peak.toFixed(4) +
+						' duration=' + buf.duration.toFixed(3));
+				}
 			}
 
 			ka.buffers.push(buf);
@@ -301,7 +319,8 @@ WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
 			console.log('[kaios] webaudio: upload threw: ' + e);
 			return 0;
 		}
-	}, data, s_info->samples, s_info->width, s_info->channels, s_info->rate);
+	}, data, s_info->samples, s_info->width, s_info->channels, s_info->rate,
+		kaios_debug_webaudio_trace->value);
 
 	if (!bufnum)
 	{
@@ -376,6 +395,12 @@ WA_PlayChannel(channel_t *ch)
 {
 	sfxcache_t *sc = ch->sfx->cache;
 	int slot = ch - channels;
+	static cvar_t *kaios_debug_webaudio_trace;
+
+	if (!kaios_debug_webaudio_trace)
+	{
+		kaios_debug_webaudio_trace = Cvar_Get("kaios_debug_webaudio_trace", "0", CVAR_ARCHIVE);
+	}
 
 	if (!sc || !sc->wa_bufnum)
 	{
@@ -394,19 +419,22 @@ WA_PlayChannel(channel_t *ch)
 		var gain = $2;
 		var pan = $3;
 		var loop = $4;
+		var traceEnabled = $5;
 
 		try {
 			var s = ka && ka.slots[slot];
 			var buf = ka && ka.buffers[bufnum];
 
-			ka.playLogCount = (ka.playLogCount || 0);
-			if (ka.playLogCount < 8) {
-				ka.playLogCount++;
-				console.log('[kaios] webaudio: play#' + ka.playLogCount +
-					' slot=' + slot + ' bufnum=' + bufnum + ' hasSlot=' + !!s +
-					' hasBuf=' + !!buf + ' gain=' + gain.toFixed(3) + ' pan=' + pan.toFixed(3) +
-					' loop=' + loop + ' ctxState=' + ka.ctx.state +
-					' masterGain=' + ka.master.gain.value);
+			if (traceEnabled) {
+				ka.playLogCount = (ka.playLogCount || 0);
+				if (ka.playLogCount < 8) {
+					ka.playLogCount++;
+					console.log('[kaios] webaudio: play#' + ka.playLogCount +
+						' slot=' + slot + ' bufnum=' + bufnum + ' hasSlot=' + !!s +
+						' hasBuf=' + !!buf + ' gain=' + gain.toFixed(3) + ' pan=' + pan.toFixed(3) +
+						' loop=' + loop + ' ctxState=' + ka.ctx.state +
+						' masterGain=' + ka.master.gain.value);
+				}
 			}
 
 			if (!s || !buf) {
@@ -439,7 +467,8 @@ WA_PlayChannel(channel_t *ch)
 		(ch->leftvol + ch->rightvol) / (2.0f * 255.0f),
 		((ch->leftvol + ch->rightvol) > 0) ?
 			((float)(ch->rightvol - ch->leftvol) / (float)(ch->leftvol + ch->rightvol)) : 0.0f,
-		ch->autosound ? 1 : 0);
+		ch->autosound ? 1 : 0,
+		kaios_debug_webaudio_trace->value);
 
 	ch->end = paintedtime + sc->length;
 }
@@ -667,33 +696,56 @@ WA_Update(void)
 	 * state while actually muted at some OS/browser level outside the
 	 * Web Audio spec's own visibility (KaiOS's B2G/Gecko heritage has
 	 * its own audio-channel/focus concepts that a plain AudioContext
-	 * might not automatically satisfy). */
-	if ((wa_framecount % 30) == 0)
+	 * might not automatically satisfy).
+	 *
+	 * Off by default -- same reasoning as cl_screen.c's KAIOS_STATS
+	 * gate, this is called every single WA_Update() (i.e. every audio
+	 * frame) for the whole session once active. */
 	{
-		EM_ASM({
-			var ka = Module.kaiosAudio;
-			if (ka) {
-				console.log('KAIOS_WA_STATE: ctxState=' + ka.ctx.state +
-					' currentTime=' + ka.ctx.currentTime.toFixed(2) +
-					' destChannels=' + ka.ctx.destination.channelCount +
-					' baseLatency=' + (ka.ctx.baseLatency !== undefined ? ka.ctx.baseLatency : 'n/a'));
-			}
-		});
+		static cvar_t *kaios_debug_wa_state;
+
+		if (!kaios_debug_wa_state)
+		{
+			kaios_debug_wa_state = Cvar_Get("kaios_debug_wa_state", "0", CVAR_ARCHIVE);
+		}
+
+		if (kaios_debug_wa_state->value && (wa_framecount % 30) == 0)
+		{
+			EM_ASM({
+				var ka = Module.kaiosAudio;
+				if (ka) {
+					console.log('KAIOS_WA_STATE: ctxState=' + ka.ctx.state +
+						' currentTime=' + ka.ctx.currentTime.toFixed(2) +
+						' destChannels=' + ka.ctx.destination.channelCount +
+						' baseLatency=' + (ka.ctx.baseLatency !== undefined ? ka.ctx.baseLatency : 'n/a'));
+				}
+			});
+		}
 	}
 
 	if (s_underwater->modified || (wa_framecount == 0))
 	{
+		static cvar_t *kaios_debug_webaudio_trace;
+
+		if (!kaios_debug_webaudio_trace)
+		{
+			kaios_debug_webaudio_trace = Cvar_Get("kaios_debug_webaudio_trace", "0", CVAR_ARCHIVE);
+		}
+
 		s_underwater->modified = false;
 
 		EM_ASM({
 			var ka = Module.kaiosAudio;
 			if (ka) {
 				ka.underwaterFilter.frequency.value = $0;
-				console.log('[kaios] webaudio: underwaterFilter.frequency=' + $0 +
-					' filterType=' + ka.underwaterFilter.type);
+				if ($1) {
+					console.log('[kaios] webaudio: underwaterFilter.frequency=' + $0 +
+						' filterType=' + ka.underwaterFilter.type);
+				}
 			}
 		}, (snd_is_underwater && s_underwater->value) ?
-			(200.0f + s_underwater_gain_hf->value * 2000.0f) : 22050.0f);
+			(200.0f + s_underwater_gain_hf->value * 2000.0f) : 22050.0f,
+			kaios_debug_webaudio_trace->value);
 	}
 
 	if (s_volume->modified)

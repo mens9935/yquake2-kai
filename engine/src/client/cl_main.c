@@ -891,10 +891,22 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 	 * spec.samples) the worst frames actually run. Print the real,
 	 * unclamped number for anything that would show as pegged 100%
 	 * anyway, so the next report has the true magnitude instead of a
-	 * clamped guess. */
-	if (renderdelta > 400000)
+	 * clamped guess.
+	 *
+	 * Off by default (kaios_debug_framespike, same cvar frame.c's own
+	 * KAIOS_FRAMESPIKE_BREAKDOWN checks) -- see that comment for why. */
 	{
-		Com_Printf("KAIOS_FRAMESPIKE: renderdelta=%dms\n", renderdelta / 1000);
+		static cvar_t *kaios_debug_framespike;
+
+		if (!kaios_debug_framespike)
+		{
+			kaios_debug_framespike = Cvar_Get("kaios_debug_framespike", "0", CVAR_ARCHIVE);
+		}
+
+		if (kaios_debug_framespike->value && (renderdelta > 400000))
+		{
+			Com_Printf("KAIOS_FRAMESPIKE: renderdelta=%dms\n", renderdelta / 1000);
+		}
 	}
 #endif
 
