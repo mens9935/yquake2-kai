@@ -471,6 +471,15 @@ void WA_Update(void);
 void WA_RawSamples(int samples, int rate, int width,
 		int channels, const byte *data, float volume);
 
+/*
+ * Background music (ogg.c's OGG_StartNative()) -- decodes and loops
+ * natively via the browser's own decodeAudioData() instead of this
+ * build's stb_vorbis, see webaudio.c's own doc comment.
+ */
+void WA_PlayMusic(const byte *data, int len);
+void WA_StopMusic(void);
+void WA_SetMusicVolume(float vol);
+
 #endif /* __EMSCRIPTEN__ */
 
 #endif /* CL_SOUND_LOCAL_H */
