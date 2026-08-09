@@ -26,6 +26,7 @@ var GAMEDIR = 'baseq2';
 
 var menuEl = document.getElementById('menu');
 var menuListEl = document.getElementById('menu-list');
+var mainMenuCaptionEl = document.getElementById('menu-caption');
 var pickerEl = document.getElementById('picker');
 var pickerListEl = document.getElementById('picker-list');
 var settingsEl = document.getElementById('settings');
@@ -55,13 +56,20 @@ var canvasEl = document.getElementById('canvas');
 // keyboard-dead, matching a real-device report of exactly that after
 // this scrolling behavior was added). Plain scrollTop arithmetic has
 // no API-version risk at all.
-function renderMenuItems(listEl, labels, selectedIndex) {
+function renderMenuItems(listEl, labels, selectedIndex, disabledFlags) {
 	listEl.innerHTML = '';
 	for (var i = 0; i < labels.length; i++) {
 		var li = document.createElement('li');
 		li.textContent = labels[i];
+		var classes = [];
 		if (i === selectedIndex) {
-			li.className = 'selected';
+			classes.push('selected');
+		}
+		if (disabledFlags && disabledFlags[i]) {
+			classes.push('disabled');
+		}
+		if (classes.length) {
+			li.className = classes.join(' ');
 		}
 		listEl.appendChild(li);
 	}
@@ -589,6 +597,45 @@ function enumerateStorage(storage, path) {
 	});
 }
 
+// navigator.getDeviceStorage('sdcard') (singular) only ever returns
+// ONE DeviceStorage -- the platform's default volume for that type,
+// which on a device with both built-in storage and a removable SD
+// slot is not guaranteed to be the actual physical SD card. The
+// (plural) getDeviceStorages('sdcard') form returns one DeviceStorage
+// per available volume of that type -- looping over all of them is
+// what actually searches both internal storage and an inserted SD
+// card, instead of silently only ever checking whichever one happens
+// to be default. Falls back to the singular form for engines that
+// only implement that (older devices, or this project's earlier code
+// before this existed), and to an empty list if neither exists at all
+// (checked by every caller before using the Device Storage API).
+function getAllDeviceStorages() {
+	if (navigator.getDeviceStorages) {
+		return navigator.getDeviceStorages('sdcard') || [];
+	}
+	if (navigator.getDeviceStorage) {
+		var s = navigator.getDeviceStorage('sdcard');
+		return s ? [s] : [];
+	}
+	return [];
+}
+
+// Enumerates `path` on every storage in `storages` in parallel and
+// returns each one's own {storage, files} pair (never rejects for an
+// individual storage's failure -- one bad/missing volume shouldn't
+// abort the whole search when others might still have baseq2).
+function enumerateAllStorages(storages, path) {
+	return Promise.all(storages.map(function (storage) {
+		return enumerateStorage(storage, path).then(function (files) {
+			return { storage: storage, files: files };
+		}, function (err) {
+			console.log('[kaios] enumerate failed on storage "' + storage.storageName +
+				'": ' + describeError(err));
+			return { storage: storage, files: [] };
+		});
+	}));
+}
+
 // Case-insensitive on both the folder name ("BaseQ2", "BASEQ2", ... all
 // match) and the pak file name -- matched by basename instead of a fixed
 // lowercase path string, so the actual on-disk casing of the baseq2
@@ -596,7 +643,11 @@ function enumerateStorage(storage, path) {
 // copyBaseq2() instead of assuming it matches GAMEDIR's casing exactly.
 var PAK0_RE = /\/pak0\.pak$/i;
 
-function findBaseq2Candidates(files) {
+// `storageName` tags every resulting candidate with which volume it
+// came from -- needed to re-target the same physical storage later
+// (playFast()'s scoped re-enumerate, a cache-refresh after adding
+// files) instead of assuming whichever one happens to be default.
+function findBaseq2Candidates(files, storageName) {
 	var candidates = [];
 	var seen = {};
 	for (var i = 0; i < files.length; i++) {
@@ -616,9 +667,29 @@ function findBaseq2Candidates(files) {
 			continue;
 		}
 		seen[key] = true;
-		candidates.push({ root: root, dirName: dirName, file: files[i] });
+		candidates.push({ root: root, dirName: dirName, file: files[i], storageName: storageName });
 	}
 	return candidates;
+}
+
+// Runs findBaseq2Candidates() across every storage's own listing (see
+// enumerateAllStorages()) and returns the merged candidates plus a
+// storageName -> files lookup, so a caller that ends up proceeding
+// with one particular candidate can hand copyBaseq2() that SAME
+// storage's file listing without having to re-enumerate it.
+function discoverBaseq2(storages, path) {
+	return enumerateAllStorages(storages, path).then(function (perStorage) {
+		var candidates = [];
+		var filesByStorage = {};
+
+		for (var i = 0; i < perStorage.length; i++) {
+			var entry = perStorage[i];
+			filesByStorage[entry.storage.storageName] = entry.files;
+			candidates = candidates.concat(findBaseq2Candidates(entry.files, entry.storage.storageName));
+		}
+
+		return { candidates: candidates, filesByStorage: filesByStorage };
+	});
 }
 
 // ---------------------------------------------------------------------
@@ -1026,18 +1097,38 @@ function isBaseq2Confirmed() {
 	return localStorage.getItem(BASEQ2_CONFIRMED_KEY) === '1';
 }
 
+// Set by showMainMenu() while (and only while) the main menu is the
+// screen on display, so autoScanOnFirstLaunch() can refresh it in
+// place if it finishes while the player is still looking at it.
+// Cleared here since every screen transition -- including back into
+// showMainMenu() itself, which reassigns it -- calls hideAllScreens()
+// first.
+var refreshMainMenuIfShown = null;
+
 function hideAllScreens() {
 	menuEl.style.display = 'none';
 	pickerEl.style.display = 'none';
 	settingsEl.style.display = 'none';
 	statusEl.style.display = 'none';
+	refreshMainMenuIfShown = null;
 }
 
 function mainMenuItems() {
+	var confirmed = isBaseq2Confirmed();
 	var items = [];
-	if (isBaseq2Confirmed()) {
-		items.push({ label: 'Play', action: playFast });
-	}
+	// Always shown, even before baseq2 has ever been found -- disabled
+	// (see showMainMenu()'s render(), which also surfaces `caption`
+	// underneath) instead of only appearing once confirmed, so first
+	// launch shows *why* Play can't be used yet rather than just not
+	// offering it. autoScanOnFirstLaunch() (see start() below) is what
+	// enables it in the background without the player having to
+	// manually press "Find baseq2" first.
+	items.push({
+		label: 'Play',
+		action: playFast,
+		disabled: !confirmed,
+		caption: confirmed ? '' : 'pak0.pak not found'
+	});
 	items.push({ label: 'Find baseq2', action: startBaseq2Scan });
 	items.push({ label: 'Settings', action: showSettingsGroups });
 	items.push({ label: 'Exit', action: exitApp });
@@ -1060,14 +1151,25 @@ function exitApp() {
 }
 
 function showMainMenu() {
-	var items = mainMenuItems();
 	var selected = 0;
 
+	// mainMenuItems() is recomputed on every render(), not cached once
+	// at screen-entry -- autoScanOnFirstLaunch() finishing in the
+	// background (or a manual "Find baseq2" coming back to this
+	// screen) needs the very next render() to pick up the now-
+	// confirmed state without a full re-entry into showMainMenu().
 	function render() {
-		renderMenuItems(menuListEl, items.map(function (it) { return it.label; }), selected);
+		var items = mainMenuItems();
+		var labels = items.map(function (it) { return it.label; });
+		var disabledFlags = items.map(function (it) { return !!it.disabled; });
+		renderMenuItems(menuListEl, labels, selected, disabledFlags);
+
+		var current = items[selected];
+		mainMenuCaptionEl.textContent = (current && current.caption) ? current.caption : '';
 	}
 
 	function onKeyDown(ev) {
+		var items = mainMenuItems();
 		if (ev.key === 'ArrowUp') {
 			selected = (selected - 1 + items.length) % items.length;
 			render();
@@ -1075,6 +1177,9 @@ function showMainMenu() {
 			selected = (selected + 1) % items.length;
 			render();
 		} else if (ev.key === 'Enter') {
+			if (items[selected].disabled) {
+				return;
+			}
 			activeMenuKeyHandler = null;
 			items[selected].action();
 		}
@@ -1084,6 +1189,7 @@ function showMainMenu() {
 	menuEl.style.display = 'block';
 	render();
 	activeMenuKeyHandler = onKeyDown;
+	refreshMainMenuIfShown = render;
 }
 
 // ---------------------------------------------------------------------
@@ -1185,7 +1291,12 @@ function getCachedBaseq2Choice() {
 function setCachedBaseq2Choice(choice) {
 	localStorage.setItem(BASEQ2_PATH_KEY, JSON.stringify({
 		root: choice.root,
-		dirName: choice.dirName
+		dirName: choice.dirName,
+		// which DeviceStorage volume (internal vs. an inserted SD card,
+		// see getAllDeviceStorages()) this was found on -- playFast()
+		// needs to re-resolve the *same* volume, not just assume
+		// whichever one happens to be default.
+		storageName: choice.storageName
 	}));
 }
 
@@ -1217,29 +1328,37 @@ function proceedWithChoice(files, choice) {
 	});
 }
 
+// Manual "Find baseq2" / rescan entry point -- searches every storage
+// volume (internal + any inserted SD card, see getAllDeviceStorages())
+// from scratch. This is also what the automatic first-launch scan
+// (autoScanOnFirstLaunch() below) uses under the hood, and it's the
+// right thing to reach for later too if the player adds files (music,
+// cutscenes) to baseq2/ after the fact -- a cached choice's scoped
+// re-enumerate (playFast() below) only ever looks inside baseq2/
+// itself, never rediscovers a *new* top-level candidate folder.
 function startBaseq2Scan() {
 	hideAllScreens();
 
-	if (!navigator.getDeviceStorage) {
+	var storages = getAllDeviceStorages();
+	if (storages.length === 0) {
 		showErrorWithBack('No Device Storage API on this browser.\n' +
 			'This shell needs to run as a packaged KaiOS app.');
 		return;
 	}
 
-	var storage = navigator.getDeviceStorage('sdcard');
-	setStatus('Scanning SD card for baseq2...');
+	setStatus('Scanning for baseq2...');
 
-	enumerateStorage(storage, '').then(function (files) {
-		var candidates = findBaseq2Candidates(files);
+	discoverBaseq2(storages, '').then(function (result) {
+		var candidates = result.candidates;
 
 		if (candidates.length === 0) {
-			showErrorWithBack('No baseq2/pak0.pak found on the SD card.\n' +
-				'Copy your baseq2 folder to the SD card and reopen the app.');
+			showErrorWithBack('No baseq2/pak0.pak found on internal storage or SD card.\n' +
+				'Copy your baseq2 folder there and try again.');
 			return;
 		}
 
 		function proceed(choice) {
-			proceedWithChoice(files, choice);
+			proceedWithChoice(result.filesByStorage[choice.storageName], choice);
 		}
 
 		if (candidates.length === 1) {
@@ -1250,37 +1369,51 @@ function startBaseq2Scan() {
 			showPicker(candidates, proceed);
 		}
 	}, function (err) {
-		showErrorWithBack('Could not scan SD card: ' + describeError(err));
+		showErrorWithBack('Could not scan storage: ' + describeError(err));
 	});
 }
 
 // "Play" from the main menu -- baseq2 was already found and confirmed
-// on some earlier launch (that's the only way "Play" ever shows up at
-// all, see mainMenuItems()), so re-enumerating the *whole* SD card
+// on some earlier launch (that's the only way "Play" is ever enabled
+// at all, see mainMenuItems()), so re-enumerating the *whole* card
 // again just to rediscover the exact same folder is pure waste on a
 // slow SD-card read. Scope the enumerate() to the cached folder's own
-// path instead of the card root -- lists only that subtree, not every
-// unrelated file elsewhere on the card. Falls back to a full
-// startBaseq2Scan() (which also refreshes the cache) if there's no
-// cached path yet, or the scoped listing comes back without a valid
-// pak0.pak in it (folder renamed/removed, card swapped, etc.) --
-// exactly the "rescan on error" behavior asked for.
+// path on its own cached storage volume instead of every volume's
+// root -- lists only that subtree, not every unrelated file
+// elsewhere. Falls back to a full startBaseq2Scan() (which also
+// refreshes the cache) if there's no cached path yet, the cached
+// volume no longer exists (card removed/swapped), or the scoped
+// listing comes back without a valid pak0.pak in it (folder renamed)
+// -- exactly the "rescan on error" behavior asked for.
 function playFast() {
 	var cached = getCachedBaseq2Choice();
+	var storages = getAllDeviceStorages();
 
-	if (!cached || !navigator.getDeviceStorage) {
+	if (!cached || storages.length === 0) {
+		startBaseq2Scan();
+		return;
+	}
+
+	var storage = null;
+	for (var i = 0; i < storages.length; i++) {
+		if (storages[i].storageName === cached.storageName) {
+			storage = storages[i];
+			break;
+		}
+	}
+
+	if (!storage) {
 		startBaseq2Scan();
 		return;
 	}
 
 	hideAllScreens();
 
-	var storage = navigator.getDeviceStorage('sdcard');
 	var scopedPath = (cached.root ? cached.root + '/' : '') + cached.dirName;
 	setStatus('Loading baseq2...');
 
 	enumerateStorage(storage, scopedPath).then(function (files) {
-		var candidates = findBaseq2Candidates(files);
+		var candidates = findBaseq2Candidates(files, cached.storageName);
 		var match = null;
 
 		for (var i = 0; i < candidates.length; i++) {
@@ -1300,6 +1433,41 @@ function playFast() {
 		// Cached path no longer resolves (renamed/removed/card swapped)
 		// -- fall back to the full rescan rather than a dead end.
 		startBaseq2Scan();
+	});
+}
+
+// Runs once at startup when baseq2 has never been confirmed yet (see
+// start() below) -- the whole point is letting "Play" light up
+// without the player having to manually press "Find baseq2" first on
+// their very first launch. Purely a background discovery pass: it
+// caches a found choice and flips isBaseq2Confirmed() on, exactly
+// like startBaseq2Scan() does, but deliberately stops there instead
+// of calling proceedWithChoice() -- loading the engine, copying
+// baseq2, and booting only ever happens from the "Play" button itself
+// (per spec), never automatically. If the main menu is still what's
+// on screen when this finishes, it's re-rendered so the now-enabled
+// Play row (or the "not found" caption) shows up without the player
+// having to do anything.
+function autoScanOnFirstLaunch() {
+	var storages = getAllDeviceStorages();
+	if (storages.length === 0) {
+		return;
+	}
+
+	discoverBaseq2(storages, '').then(function (result) {
+		if (result.candidates.length === 0) {
+			return;
+		}
+
+		setCachedBaseq2Choice(result.candidates[0]);
+		localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
+
+		if (typeof refreshMainMenuIfShown === 'function')
+		{
+			refreshMainMenuIfShown();
+		}
+	}, function (err) {
+		console.log('[kaios] autoScanOnFirstLaunch: scan failed: ' + describeError(err));
 	});
 }
 
@@ -1669,6 +1837,7 @@ function start() {
 		showBootSkipTimer();
 	} else {
 		showMainMenu();
+		autoScanOnFirstLaunch();
 	}
 }
 

@@ -66,6 +66,24 @@
 		left: 2px;
 		color: #6cf;
 	}
+	/* Play before baseq2 has ever been found -- greyed out and
+	   non-actionable (see app.js's showMainMenu()), with #menu-caption
+	   underneath explaining why. */
+	#menu li.disabled {
+		color: #555;
+	}
+	#menu li.disabled.selected {
+		color: #789;
+	}
+	#menu li.disabled.selected::before {
+		color: #789;
+	}
+	#menu-caption {
+		font-size: 11px;
+		color: #888;
+		padding: 2px 4px 0 16px;
+		min-height: 13px;
+	}
 	#menu .hint, #picker .hint, #settings .hint, #status .hint {
 		position: absolute;
 		bottom: 6px;
@@ -112,6 +130,7 @@
 <div id="menu">
 	<h1>Quake II</h1>
 	<ul id="menu-list"></ul>
+	<div id="menu-caption"></div>
 	<div class="hint">OK: select</div>
 </div>
 
