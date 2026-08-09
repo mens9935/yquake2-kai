@@ -137,6 +137,9 @@ cvar_t *gl_finish;
 cvar_t *r_cull;
 cvar_t *gl_zfix;
 cvar_t *r_fullbright;
+#ifdef __EMSCRIPTEN__
+cvar_t *r_lerpmodels;
+#endif
 cvar_t *r_modulate;
 cvar_t *gl_lightmap;
 cvar_t *gl_shadows;
@@ -253,6 +256,15 @@ GL3_Register(void)
 	r_drawentities = ri.Cvar_Get("r_drawentities", "1", 0);
 	r_drawworld = ri.Cvar_Get("r_drawworld", "1", 0);
 	r_fullbright = ri.Cvar_Get("r_fullbright", "0", 0);
+#ifdef __EMSCRIPTEN__
+	/* Wired up here (unlike upstream gl3, which registers this cvar
+	 * nowhere at all -- see the dead #if 0 block above and its "screw
+	 * this, it looks horrible without" comment) because per-vertex
+	 * keyframe interpolation is a real, measured CPU cost on this
+	 * platform. See GL3_DrawAliasModel's r_lerpmodels gate for where
+	 * this actually takes effect. */
+	r_lerpmodels = ri.Cvar_Get("r_lerpmodels", "1", 0);
+#endif
 	r_fixsurfsky = ri.Cvar_Get("r_fixsurfsky", "0", CVAR_ARCHIVE);
 	r_palettedtexture = ri.Cvar_Get("r_palettedtexture", "0", 0);
 	r_validation = ri.Cvar_Get("r_validation", "0", CVAR_ARCHIVE);

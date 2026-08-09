@@ -595,6 +595,9 @@ extern cvar_t *r_novis;
 extern cvar_t *r_cull;
 extern cvar_t *gl_zfix;
 extern cvar_t *r_fullbright;
+#ifdef __EMSCRIPTEN__
+extern cvar_t *r_lerpmodels;
+#endif
 
 extern cvar_t *r_norefresh;
 extern cvar_t *gl_lefthand;

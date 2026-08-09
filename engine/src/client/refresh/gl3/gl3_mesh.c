@@ -79,8 +79,31 @@ LerpVerts(qboolean powerUpEffect, int nverts, dtrivertx_t *v, dtrivertx_t *ov,
 {
 	int i;
 
+	/* backv is exactly 0 whenever backlerp is 0 (see DrawAliasFrameLerp:
+	 * backv[i] = backlerp * oldframe->scale[i]) -- the old-frame terms
+	 * below (ov->v[i] * backv[i]) are then always 0 too and can just be
+	 * skipped instead of computed. Numerically identical output, fewer
+	 * multiply-adds in this hot per-vertex loop -- always safe to take
+	 * this path whenever it applies, not just when interpolation is
+	 * deliberately disabled (it also naturally happens for one frame at
+	 * every exact keyframe boundary). */
+	qboolean noBacklerp = (backv[0] == 0.0f && backv[1] == 0.0f && backv[2] == 0.0f);
+
 	if (powerUpEffect)
 	{
+		if (noBacklerp)
+		{
+			for (i = 0; i < nverts; i++, v++, lerp += 4)
+			{
+				float *normal = r_avertexnormals[verts[i].lightnormalindex];
+
+				lerp[0] = move[0] + v->v[0] * frontv[0] + normal[0] * POWERSUIT_SCALE;
+				lerp[1] = move[1] + v->v[1] * frontv[1] + normal[1] * POWERSUIT_SCALE;
+				lerp[2] = move[2] + v->v[2] * frontv[2] + normal[2] * POWERSUIT_SCALE;
+			}
+
+			return;
+		}
 		for (i = 0; i < nverts; i++, v++, ov++, lerp += 4)
 		{
 			float *normal = r_avertexnormals[verts[i].lightnormalindex];
@@ -91,6 +114,15 @@ LerpVerts(qboolean powerUpEffect, int nverts, dtrivertx_t *v, dtrivertx_t *ov,
 					  normal[1] * POWERSUIT_SCALE;
 			lerp[2] = move[2] + ov->v[2] * backv[2] + v->v[2] * frontv[2] +
 					  normal[2] * POWERSUIT_SCALE;
+		}
+	}
+	else if (noBacklerp)
+	{
+		for (i = 0; i < nverts; i++, v++, lerp += 4)
+		{
+			lerp[0] = move[0] + v->v[0] * frontv[0];
+			lerp[1] = move[1] + v->v[1] * frontv[1];
+			lerp[2] = move[2] + v->v[2] * frontv[2];
 		}
 	}
 	else
@@ -907,6 +939,25 @@ GL3_DrawAliasModel(entity_t *entity)
 		entity->frame = 0;
 		entity->oldframe = 0;
 	}
+
+#ifdef __EMSCRIPTEN__
+	/* r_lerpmodels was registered but never actually wired up in gl3
+	 * (upstream comment: "screw this, it looks horrible without" --
+	 * a deliberate call for desktop hardware). On this platform,
+	 * per-vertex keyframe interpolation (LerpVerts(), below) is a real,
+	 * measured CPU cost -- r_speeds showed epoly-heavy frames (several
+	 * monsters at once) as the dominant driver of FPS drops all session,
+	 * unrelated to world geometry or renderer backend. Match gl1's own
+	 * gating (gl1_mesh.c) so this is a real, working choppier-but-
+	 * cheaper toggle here too, same tradeoff ClassiCube's own
+	 * interpolation-off option offers. Left off only for this
+	 * Emscripten target -- desktop/gles3 gl3 keeps upstream's original
+	 * always-interpolate behavior. */
+	if (!r_lerpmodels->value)
+	{
+		entity->backlerp = 0;
+	}
+#endif
 
 	DrawAliasFrameLerp(paliashdr, entity, shadelight);
 
