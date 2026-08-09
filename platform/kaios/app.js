@@ -972,7 +972,7 @@ function bootEngine() {
 // ---------------------------------------------------------------------
 
 // Set once a baseq2 scan+copy has genuinely succeeded (see proceed()
-// inside startBaseq2Scan()) -- gates both "Играть" showing up on the
+// inside startBaseq2Scan()) -- gates both "Play" showing up on the
 // main menu at all (there's nothing to play until baseq2 has been
 // found at least once) and the boot-time skip timer below, per spec:
 // the timer only makes sense once there's something to skip *to*.
@@ -992,10 +992,10 @@ function hideAllScreens() {
 function mainMenuItems() {
 	var items = [];
 	if (isBaseq2Confirmed()) {
-		items.push({ label: 'Играть', action: startBaseq2Scan });
+		items.push({ label: 'Play', action: startBaseq2Scan });
 	}
-	items.push({ label: 'Найти baseq2', action: startBaseq2Scan });
-	items.push({ label: 'Настройки', action: showSettingsGroups });
+	items.push({ label: 'Find baseq2', action: startBaseq2Scan });
+	items.push({ label: 'Settings', action: showSettingsGroups });
 	return items;
 }
 
@@ -1037,7 +1037,7 @@ function showMainMenu() {
 // ---------------------------------------------------------------------
 // Boot-time skip timer: on any launch *after* baseq2 has already been
 // found successfully once, a 3-second "press any key for settings"
-// window is offered before auto-proceeding straight to Играть -- per
+// window is offered before auto-proceeding straight to Play -- per
 // spec, first launches (or any launch where baseq2 was never
 // successfully found) skip straight to the normal main menu instead,
 // there being nothing yet to fast-path into.
@@ -1053,7 +1053,7 @@ function showBootSkipTimer() {
 	function render() {
 		menuListEl.innerHTML = '';
 		var li = document.createElement('li');
-		li.textContent = 'Нажмите любую клавишу для настроек (' + remaining + ')';
+		li.textContent = 'Press any key for settings (' + remaining + ')';
 		menuListEl.appendChild(li);
 	}
 
@@ -1142,7 +1142,7 @@ function startBaseq2Scan() {
 			}).then(function () {
 				// Only marked once a copy has actually completed --
 				// see mainMenuItems()/showBootSkipTimer()'s comment for
-				// why this specifically gates both the "Играть" menu
+				// why this specifically gates both the "Play" menu
 				// entry and the boot-time skip timer.
 				localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
 				bootEngine();
@@ -1262,8 +1262,8 @@ var AUDIO_ITEMS = [
 			// "Custom" in the engine (s_backend "custom", sound.c) --
 			// this is our own WebAudio backend (webaudio.c), named
 			// plainly here rather than by that internal cvar spelling.
-			{ label: 'Встроенный', values: ['custom'] },
-			{ label: 'Выключено', values: ['none'] }
+			{ label: 'Built-in', values: ['custom'] },
+			{ label: 'Off', values: ['none'] }
 		],
 		def: 2
 	},
@@ -1366,8 +1366,8 @@ var DEBUG_ITEMS = [
 ];
 
 var SETTINGS_GROUPS = [
-	{ id: 'video', label: 'Видео', items: VIDEO_ITEMS },
-	{ id: 'audio', label: 'Аудио', items: AUDIO_ITEMS },
+	{ id: 'video', label: 'Video', items: VIDEO_ITEMS },
+	{ id: 'audio', label: 'Audio', items: AUDIO_ITEMS },
 	{ id: 'debug', label: 'Debug', items: DEBUG_ITEMS }
 ];
 
@@ -1493,7 +1493,7 @@ function showSettingsGroups() {
 		return { label: g.label, action: function () { showSettingsItemsScreen(g); } };
 	});
 	rows.push({
-		label: 'Сбросить настройки',
+		label: 'Reset settings',
 		action: function () {
 			resetLauncherSettings();
 			showSettingsGroups();
