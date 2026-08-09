@@ -29,10 +29,30 @@
 
 #include "header/local.h"
 
+#include <stdint.h>
+
 #ifdef USE_SDL3
 #include <SDL3/SDL.h>
 #else
 #include <SDL2/SDL.h>
+#endif
+
+#ifdef YQ2_GL3_GLES2_WEB
+/* SDL_GL_CreateContext() under Emscripten's SDL2 port goes through a real
+ * EGL emulation layer that real-device testing found unreliable (see
+ * gl1_sdl.c's em_ctx_handle comment for the detailed history -- gl1 hit
+ * EGL_BAD_CONFIG, then EGL_BAD_MATCH, from that exact path, regardless of
+ * which context-version attributes were requested; gl3 hit the same
+ * EGL_BAD_MATCH here too, since it's the same broken layer for any GLES
+ * context). ClassiCube's own KaiOS build (confirmed working on this exact
+ * device) never goes through that layer, calling
+ * emscripten_webgl_create_context()/GL.registerContext() directly instead.
+ * Mirror gl1's fix: bypass SDL_GL_CreateContext/SDL_GL_SwapWindow/
+ * SDL_GL_DeleteContext specifically for this path, while still using SDL
+ * for window creation, input, and everything else. */
+#include <emscripten/html5.h>
+#include <emscripten/em_asm.h>
+static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE em_ctx_handle = 0;
 #endif
 
 static SDL_Window* window = NULL;
@@ -128,7 +148,14 @@ void GL3_EndFrame(void)
 		gl3state.vbo3DcurOffset = 0;
 	}
 
+#ifdef YQ2_GL3_GLES2_WEB
+	/* Nothing to do -- em_ctx_handle wasn't created through SDL, so
+	 * window->driverdata has no egl_surface for SDL_GL_SwapWindow to
+	 * swap. WebGL has no manual swap step anyway: the browser presents
+	 * the canvas automatically once this frame's JS finishes. */
+#else
 	SDL_GL_SwapWindow(window);
+#endif
 }
 
 /*
@@ -333,7 +360,19 @@ int GL3_PrepareForWindow(void)
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
 	}
 
+#ifdef YQ2_GL3_GLES2_WEB
+	/* NOT SDL_WINDOW_OPENGL here -- that flag makes SDL_CreateWindow()
+	 * itself call SDL_EGL_CreateSurface() -> SDL_EGL_ChooseConfig() as a
+	 * side effect of window creation alone, the same broken EGL
+	 * emulation layer GL3_InitContext() bypasses below, and it runs
+	 * regardless of whether SDL_GL_CreateContext() ever gets called
+	 * afterwards -- it would consume the canvas's one WebGL context slot
+	 * before GL3_InitContext()'s own manual context creation ever gets a
+	 * chance to claim it. See gl1_sdl.c's matching comment. */
+	return 0;
+#else
 	return SDL_WINDOW_OPENGL;
+#endif
 }
 
 /*
@@ -352,6 +391,102 @@ int GL3_InitContext(void* win)
 
 	window = (SDL_Window *)win;
 
+#ifdef YQ2_GL3_GLES2_WEB
+	// See the comment by em_ctx_handle's declaration above for why this
+	// bypasses SDL_GL_CreateContext entirely on this platform.
+	{
+		// GL3_PrepareForWindow() deliberately didn't request
+		// SDL_WINDOW_OPENGL, so SDL_CreateWindow() never called
+		// SDL_GL_LoadLibrary() on our behalf -- do it here. This only
+		// loads eglGetProcAddress and friends, it doesn't create a
+		// surface or touch the canvas.
+		if (SDL_GL_LoadLibrary(NULL) < 0)
+		{
+			Com_Printf("%s: SDL_GL_LoadLibrary() failed: %s\n", __func__, SDL_GetError());
+
+			window = NULL;
+
+			return false;
+		}
+
+		// Minimal attribute set matching ClassiCube's own known-working
+		// config on this exact device (alpha/stencil/antialias off) --
+		// gl1_sdl.c's em_ctx_handle comment has the full real-device
+		// debugging history for why. majorVersion=1 means "give me a
+		// WebGL1 context" (Emscripten's WebGL-version flag, unrelated to
+		// which GLES entry points we call afterward) -- this old Gecko-
+		// 48-class engine has no WebGL2 at all, so majorVersion=2 here
+		// would request "webgl2" and fail outright.
+		em_ctx_handle = (EMSCRIPTEN_WEBGL_CONTEXT_HANDLE)EM_ASM_INT({
+			try {
+				var c = document.getElementById('canvas');
+				if (!c) {
+					console.log('[kaios] gl3 manual GL context: no #canvas element found');
+					return 0;
+				}
+				var attrs = {};
+				attrs.alpha = false;
+				attrs.depth = true;
+				attrs.stencil = false;
+				attrs.antialias = false;
+				attrs.majorVersion = 1;
+				attrs.minorVersion = 0;
+				var ctx = c.getContext('webgl', attrs) || c.getContext('experimental-webgl', attrs);
+				if (!ctx) {
+					console.log('[kaios] gl3 manual GL context: getContext returned null');
+					return 0;
+				}
+				console.log('[kaios] gl3 manual GL context: getContext OK, registering with GL...');
+				var handle = GL.registerContext(ctx, attrs);
+				console.log('[kaios] gl3 manual GL context: GL.registerContext handle=' + handle);
+				return handle;
+			} catch (e) {
+				console.log('[kaios] gl3 manual GL context threw: ' + e);
+				return 0;
+			}
+		});
+
+		if (!em_ctx_handle)
+		{
+			Com_Printf("%s: manual GL.registerContext() path failed too "
+				"(see console for the JS-level reason)\n", __func__);
+
+			window = NULL;
+
+			return false;
+		}
+
+		emscripten_webgl_make_context_current(em_ctx_handle);
+
+		// Same as gl1_sdl.c: normal SDL2/Emscripten context creation
+		// reaches Browser.createContext() -> ... ->
+		// Browser.moduleContextCreatedCallbacks.forEach(cb => cb()),
+		// which also sets Module.useWebGL = true. Our manual bypass
+		// above never goes through that function, so do both by hand --
+		// other Emscripten subsystems (not just GLES1's GLImmediate
+		// layer) may depend on either being set.
+		EM_ASM({
+			try {
+				Module.useWebGL = true;
+				if (typeof Browser !== 'undefined' && Browser.moduleContextCreatedCallbacks) {
+					Browser.moduleContextCreatedCallbacks.forEach(function (callback) {
+						callback();
+					});
+					console.log('[kaios] gl3: fired ' + Browser.moduleContextCreatedCallbacks.length +
+						' moduleContextCreatedCallbacks manually (Module.useWebGL=' + Module.useWebGL + ')');
+				} else {
+					console.log('[kaios] gl3: Browser.moduleContextCreatedCallbacks not available to fire manually');
+				}
+			} catch (e) {
+				console.log('[kaios] gl3: firing moduleContextCreatedCallbacks threw: ' + e);
+			}
+		});
+
+		// Only used by GL3_ShutdownContext()'s guard -- never
+		// dereferenced as a real SDL_GLContext.
+		context = (SDL_GLContext)(uintptr_t)em_ctx_handle;
+	}
+#else
 	// Initialize GL context.
 	context = SDL_GL_CreateContext(window);
 
@@ -363,6 +498,7 @@ int GL3_InitContext(void* win)
 
 		return false;
 	}
+#endif
 
 	// Check if we've got the requested MSAA.
 	int msaa_samples = 0;
@@ -510,7 +646,10 @@ void GL3_ShutdownContext()
 	{
 		if(context)
 		{
-#ifdef USE_SDL3
+#ifdef YQ2_GL3_GLES2_WEB
+			emscripten_webgl_destroy_context(em_ctx_handle);
+			em_ctx_handle = 0;
+#elif defined(USE_SDL3)
 			SDL_GL_DestroyContext(context);
 #else
 			SDL_GL_DeleteContext(context);
