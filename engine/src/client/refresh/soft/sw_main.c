@@ -2958,7 +2958,15 @@ SWimp_CreateRender(int width, int height)
 	newedges = malloc(height * sizeof(edge_t *));
 	removeedges = malloc(height * sizeof(edge_t *));
 
-	warp_rowptr = malloc((width+AMP2*2) * sizeof(byte*));
+	/* Same bug class as newedges/removeedges above, missed at the time
+	 * because D_WarpScreen (sw_scan.c) only runs underwater: warp_rowptr
+	 * is indexed by scanline row v, 0..height+AMP2*2-1 (see its fill
+	 * loop there), not by column -- sizing it by width silently worked
+	 * on every landscape display this ever ran on and overflowed by
+	 * (height-width) entries on this port's 240x320 portrait mode.
+	 * warp_column genuinely is indexed by column (0..width+AMP2*2-1),
+	 * so it keeps the width-based size. */
+	warp_rowptr = malloc((height+AMP2*2) * sizeof(byte*));
 	warp_column = malloc((width+AMP2*2) * sizeof(int));
 
 	// count of "out of items"

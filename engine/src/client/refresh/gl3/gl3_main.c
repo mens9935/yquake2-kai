@@ -1468,6 +1468,22 @@ SetupGL(void)
 	// set up the FBO accordingly, but only if actually rendering the world
 	// (=> don't use FBO when rendering the playermodel in the player menu)
 	// also, only do this when under water, because this has a noticeable overhead on some systems
+#ifdef __EMSCRIPTEN__
+	{
+		static qboolean logged_this_dip = false;
+		qboolean nowUnderwater = (r_newrefdef.rdflags & RDF_UNDERWATER) != 0;
+		if (nowUnderwater && !logged_this_dip)
+		{
+			logged_this_dip = true;
+			Com_Printf("KAIOS_UNDERWATER: entered, gl3_usefbo=%.0f ppFBO=%u w=%d h=%d\n",
+				gl3_usefbo->value, gl3state.ppFBO, w, h);
+		}
+		else if (!nowUnderwater)
+		{
+			logged_this_dip = false;
+		}
+	}
+#endif
 	if (gl3_usefbo->value && gl3state.ppFBO != 0
 		&& (r_newrefdef.rdflags & (RDF_NOWORLDMODEL|RDF_UNDERWATER)) == RDF_UNDERWATER)
 	{
@@ -1525,6 +1541,10 @@ SetupGL(void)
 #endif
 
 			GLenum fbState = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+#ifdef __EMSCRIPTEN__
+			Com_Printf("KAIOS_UNDERWATER: FBO (re)created at %dx%d, status=0x%x (complete=0x%x)\n",
+				w, h, fbState, GL_FRAMEBUFFER_COMPLETE);
+#endif
 			if(fbState != GL_FRAMEBUFFER_COMPLETE)
 			{
 				Com_Printf("GL3 SetupGL(): WARNING: FBO is not complete, status = 0x%x\n", fbState);
@@ -1534,9 +1554,23 @@ SetupGL(void)
 			}
 		}
 
-		GL3_Clear(); // clear the FBO that's bound now
+		if (gl3state.ppFBObound)
+		{
+			GL3_Clear(); // clear the FBO that's bound now
 
-		glViewport(0, 0, w, h); // this will be moved to the center later, so no x/y offset
+			glViewport(0, 0, w, h); // this will be moved to the center later, so no x/y offset
+		}
+		else
+		{
+			/* FBO turned out incomplete this frame (just detected above,
+			 * or from an earlier frame this size was last tried) --
+			 * previously this fell through to the FBO-sized 0,0,w,h
+			 * viewport regardless, rendering the whole world into a
+			 * small viewport pinned to the corner of the real screen
+			 * instead of falling back to the normal full-screen path
+			 * below. Match the plain (non-FBO) branch exactly instead. */
+			glViewport(x, y2, w, h);
+		}
 	}
 	else // rendering directly (not to FBO for postprocessing)
 	{
