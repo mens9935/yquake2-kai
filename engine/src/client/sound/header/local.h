@@ -464,21 +464,13 @@ void WA_StopAllChannels(void);
 void WA_Update(void);
 
 /*
- * Queues raw PCM for playback (cinematics audio, cl_cin.c), scheduled
- * back-to-back on the browser's own audio clock instead of through our
- * own ring buffer.
+ * Queues raw PCM for playback (cinematics audio via cl_cin.c, and OGG
+ * music via ogg.c's OGG_Read()/S_RawSamples()), scheduled back-to-back
+ * on the browser's own audio clock instead of through our own ring
+ * buffer.
  */
 void WA_RawSamples(int samples, int rate, int width,
 		int channels, const byte *data, float volume);
-
-/*
- * Background music (ogg.c's OGG_StartNative()) -- decodes and loops
- * natively via the browser's own decodeAudioData() instead of this
- * build's stb_vorbis, see webaudio.c's own doc comment.
- */
-void WA_PlayMusic(const byte *data, int len);
-void WA_StopMusic(void);
-void WA_SetMusicVolume(float vol);
 
 #endif /* __EMSCRIPTEN__ */
 

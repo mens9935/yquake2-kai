@@ -115,19 +115,6 @@ WA_Init(void)
 
 			ka.rawNextTime = 0;
 
-			/* Background music (WA_PlayMusic/WA_StopMusic/
-			 * WA_SetMusicVolume, ogg.c's OGG_StartNative()) -- its own
-			 * gain node into master (so it's still subject to the
-			 * shared underwater lowpass, matching S_RawSamples'
-			 * pre-existing routing for music on every other backend)
-			 * rather than reusing one of the MAX_CHANNELS sfx slots
-			 * above, which are sized/managed for one-shot/looping sfx
-			 * churn, not one long-lived music source. */
-			ka.musicGain = ka.ctx.createGain();
-			ka.musicGain.gain.value = 0;
-			ka.musicGain.connect(ka.master);
-			ka.musicSrc = null;
-
 			/* AudioContext starts (or resumes after a tab switch)
 			 * suspended until a user gesture on most engines -- this is
 			 * a KaiOS phone, every session starts with a keypress or
@@ -889,84 +876,6 @@ WA_RawSamples(int samples, int rate, int width, int channels,
 	}, data, samples, width, channels, rate, volume);
 
 	s_rawend += samples;
-}
-
-/*
- * Background music -- ogg.c's OGG_StartNative() hands over the whole
- * (still Vorbis-compressed) file; decodeAudioData() does the actual
- * decode natively in the browser instead of this build's own
- * stb_vorbis, and the resulting AudioBuffer loops on its own once
- * started, no per-frame feeding needed (unlike SDL/OpenAL's chunked
- * S_RawSamples() path). Volume starts at 0 (WA_Init) and is pushed by
- * OGG_Stream() every frame via WA_SetMusicVolume() -- avoids an
- * audible jump to full volume between decodeAudioData() finishing and
- * that first push landing.
- */
-void
-WA_PlayMusic(const byte *data, int len)
-{
-	EM_ASM({
-		var ka = Module.kaiosAudio;
-		if (!ka) {
-			return;
-		}
-
-		var ptr = $0;
-		var len = $1;
-
-		try {
-			/* .slice() copies out of HEAPU8 into a fresh, independent
-			 * ArrayBuffer right now, synchronously -- decodeAudioData()
-			 * below is async (a Promise), and the C-side buffer this
-			 * data came from is freed by the caller as soon as this
-			 * EM_ASM call returns, long before that promise settles. */
-			var bytes = HEAPU8.slice(ptr, ptr + len);
-
-			ka.ctx.decodeAudioData(bytes.buffer).then(function (buf) {
-				if (ka.musicSrc) {
-					try { ka.musicSrc.stop(); } catch (e) {}
-					ka.musicSrc.disconnect();
-					ka.musicSrc = null;
-				}
-
-				var src = ka.ctx.createBufferSource();
-				src.buffer = buf;
-				src.loop = true;
-				src.connect(ka.musicGain);
-				src.start(0);
-				ka.musicSrc = src;
-			}).catch(function (e) {
-				console.log('[kaios] webaudio: music decodeAudioData failed: ' + e);
-			});
-		} catch (e) {
-			console.log('[kaios] webaudio: WA_PlayMusic threw: ' + e);
-		}
-	}, data, len);
-}
-
-void
-WA_StopMusic(void)
-{
-	EM_ASM({
-		var ka = Module.kaiosAudio;
-		if (!ka || !ka.musicSrc) {
-			return;
-		}
-		try { ka.musicSrc.stop(); } catch (e) {}
-		ka.musicSrc.disconnect();
-		ka.musicSrc = null;
-	});
-}
-
-void
-WA_SetMusicVolume(float vol)
-{
-	EM_ASM({
-		var ka = Module.kaiosAudio;
-		if (ka && ka.musicGain) {
-			ka.musicGain.gain.value = $0;
-		}
-	}, vol);
 }
 
 #endif /* __EMSCRIPTEN__ */
