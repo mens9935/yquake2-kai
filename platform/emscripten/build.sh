@@ -28,12 +28,13 @@ OBJDIR="$HERE/obj"
 # same as before this existed -- useful for one-off single-variable perf
 # testing (this session's whole demo1.dm2 A/B methodology depends on
 # isolating one renderer at a time) without the unified binary's small
-# extra size/complexity, and gl1 in particular is still just a shelved
-# diagnostic target (see the "gl1 shelved for now" comment below) never
-# linked into the unified build at all yet. TOTAL_MEMORY_OVERRIDE and
-# OUT_NAME exist for the same one-off-testing reason: a smaller heap
-# reservation, or writing the build somewhere other than platform/kaios/
-# so a diagnostic build never overwrites the working shipped one.
+# extra size/complexity. gl1 is NOT linked into RENDERER=unified by
+# default -- see the LEGACY_GL_EMULATION/INCLUDE_GL1 comment below for
+# why (it taxes gl3 too, since GL emulation is a whole-binary setting).
+# TOTAL_MEMORY_OVERRIDE and OUT_NAME exist for the same one-off-testing
+# reason: a smaller heap reservation, or writing the build somewhere
+# other than platform/kaios/ so a diagnostic build never overwrites the
+# working shipped one.
 RENDERER="${RENDERER:-unified}"
 TOTAL_MEMORY_OVERRIDE="${TOTAL_MEMORY_OVERRIDE:-100663296}"
 OUT_NAME="${OUT_NAME:-quake2-kaios}"
@@ -78,16 +79,45 @@ if [ "$RENDERER" = "unified" ]; then
 fi
 
 # gl1 needs Emscripten's GLES1-via-WebGL1 fixed-function emulation
-# layer, on by default for RENDERER=unified (gl1 is one of the three
-# renderers linked into it) and still available standalone via
-# RENDERER=gl1 for one-off testing of just that renderer.
-if [ "$RENDERER" = "gl1" ] || [ "$RENDERER" = "unified" ]; then
+# layer (LEGACY_GL_EMULATION) -- and that's a whole-*binary* setting,
+# not something scoped to just gl1's own object files. Linking gl1
+# into the same binary as gl3 (a real GLSL ES shader renderer) forces
+# EVERY gl3 GL call through that same emulation layer too, whether
+# gl3 is even the renderer in use or not. Real-device testing after
+# gl1 was restored into the default unified build confirmed exactly
+# this: gl3 visibly running through GL emulation it never used to
+# (console output says so directly), plus stutters in unpredictable
+# places -- LEGACY_GL_EMULATION with GL_FFP_ONLY=1 (removed below)
+# actively assumes NO programmable-pipeline usage exists anywhere in
+# the binary, which is simply false once gl3 is linked in too, and
+# likely explains the state-tracking-desync-flavored stutters as much
+# as the raw overhead.
+#
+# Since this can't be scoped per-renderer within one binary, gl1
+# defaults to OUT of RENDERER=unified -- INCLUDE_GL1=1 opts back in
+# for one-off testing (accepting gl3 also pays the emulation-layer
+# tax while it's set), same as it worked before gl1 was restored this
+# session. Standalone RENDERER=gl1 is unaffected either way.
+INCLUDE_GL1="${INCLUDE_GL1:-0}"
+
+if [ "$RENDERER" = "gl1" ] || { [ "$RENDERER" = "unified" ] && [ "$INCLUDE_GL1" = "1" ]; }; then
 	COMMON_FLAGS+=(-s LEGACY_GL_EMULATION=1)
-	# gl1 only ever uses the fixed-function pipeline (no GLSL shaders
-	# anywhere in this renderer) -- GL_FFP_ONLY tells the emulation
-	# layer it never needs to support the programmable path, which per
-	# Emscripten's own docs lets it skip some of LEGACY_GL_EMULATION's
-	# overhead.
+fi
+
+if [ "$RENDERER" = "unified" ] && [ "$INCLUDE_GL1" = "1" ]; then
+	# Tells vid.c's VID_LoadRenderer() that GL1GetRefAPI is actually
+	# linked into this particular unified binary, so it's safe to
+	# dispatch "gl1"/"gles1" to it -- see vid.c.
+	COMMON_FLAGS+=(-DYQ2_KAIOS_UNIFIED_HAS_GL1)
+fi
+
+# GL_FFP_ONLY tells the emulation layer the WHOLE PROGRAM only ever
+# uses the fixed-function pipeline, letting it skip some of
+# LEGACY_GL_EMULATION's bookkeeping -- true for a standalone gl1
+# build (it never touches a single GLSL call), never true once gl3 is
+# linked into the same binary (see the comment above), so this is
+# gl1-standalone only regardless of INCLUDE_GL1.
+if [ "$RENDERER" = "gl1" ]; then
 	COMMON_FLAGS+=(-s GL_FFP_ONLY=1)
 fi
 
@@ -382,8 +412,10 @@ elif [ "$RENDERER" = "unified" ]; then
 	compile_group refsoft SOFT_UNIFIED_FLAGS REFSOFT_ONLY_SRCS
 	echo "==> Compiling gl3/GLES2 renderer (${#REFGL3_ONLY_SRCS[@]} files)"
 	compile_group refgl3 GL3_UNIFIED_FLAGS REFGL3_ONLY_SRCS
-	echo "==> Compiling gl1/GLES1 renderer (${#REFGL1_ONLY_SRCS[@]} files)"
-	compile_group refgl1 GL1_UNIFIED_FLAGS REFGL1_ONLY_SRCS
+	if [ "$INCLUDE_GL1" = "1" ]; then
+		echo "==> Compiling gl1/GLES1 renderer (${#REFGL1_ONLY_SRCS[@]} files)"
+		compile_group refgl1 GL1_UNIFIED_FLAGS REFGL1_ONLY_SRCS
+	fi
 else
 	echo "==> Compiling software renderer (${#REFSOFT_SRCS[@]} files)"
 	compile_group refsoft NO_EXTRA REFSOFT_SRCS

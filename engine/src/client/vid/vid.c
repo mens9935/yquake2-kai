@@ -421,18 +421,22 @@ VID_LoadRenderer(void)
 	{
 		extern refexport_t SoftGetRefAPI(refimport_t) asm("SoftGetRefAPI");
 		extern refexport_t GL3GetRefAPI(refimport_t) asm("GL3GetRefAPI");
+#ifdef YQ2_KAIOS_UNIFIED_HAS_GL1
 		extern refexport_t GL1GetRefAPI(refimport_t) asm("GL1GetRefAPI");
+#endif
 
 		if ((strcmp(vid_renderer->string, "gl3") == 0) ||
 			(strcmp(vid_renderer->string, "gles3") == 0))
 		{
 			GetRefAPI = GL3GetRefAPI;
 		}
+#ifdef YQ2_KAIOS_UNIFIED_HAS_GL1
 		else if ((strcmp(vid_renderer->string, "gl1") == 0) ||
 			(strcmp(vid_renderer->string, "gles1") == 0))
 		{
 			GetRefAPI = GL1GetRefAPI;
 		}
+#endif
 		else
 		{
 			if (strcmp(vid_renderer->string, "soft") != 0)

@@ -1214,16 +1214,18 @@ var VIDEO_ITEMS = [
 		cvars: ['vid_renderer'],
 		choices: [
 			{ label: 'Software', values: ['soft'] },
-			// gl1 is genuinely linked into the unified binary now (see
-			// build.sh's GL1_UNIFIED_FLAGS) and its WebGL/GLES1-emulation
-			// context creation succeeds in headless testing -- but the
-			// real KaiOS device's much older Gecko-48-class WebGL
-			// implementation is what actually matters here, and that has
-			// not been confirmed since gl1 last shipped (see git history
-			// around the occlusion-culling regression). "экспериментально"
-			// instead of a flat "available" label until that real-device
-			// confirmation comes back.
-			{ label: 'GL1 (экспериментально)', values: ['gl1'] },
+			// gl1 was linked into the unified binary for a while and
+			// confirmed working on real hardware, but Emscripten's
+			// LEGACY_GL_EMULATION (needed for gl1's fixed-function
+			// pipeline) is a whole-binary setting, not scoped to just
+			// gl1's own code -- it forced every GLES3 GL call through
+			// that same emulation layer too, whether gl3 was even the
+			// active renderer or not, causing real overhead and
+			// stutters. build.sh no longer links gl1 into the default
+			// unified build for this reason (INCLUDE_GL1=1 opts back in
+			// for one-off testing) -- not offered here since a default
+			// build genuinely doesn't have it, and picking it would just
+			// silently fall back to Software.
 			{ label: 'GLES3', values: ['gles3'] }
 		],
 		def: 0
