@@ -63,6 +63,13 @@ COMMON_FLAGS=(
 # of new theories without disturbing the shipped soft build.
 if [ "$RENDERER" = "gl1" ]; then
 	COMMON_FLAGS+=(-s LEGACY_GL_EMULATION=1)
+	# gl1 only ever uses the fixed-function pipeline (no GLSL shaders
+	# anywhere in this renderer) -- GL_FFP_ONLY tells the emulation
+	# layer it never needs to support the programmable path, which per
+	# Emscripten's own docs lets it skip some of LEGACY_GL_EMULATION's
+	# overhead. Untested on real hardware yet; cheap to try given the
+	# confirmed ~700-poly FPS cliff smells like per-GL-call overhead.
+	COMMON_FLAGS+=(-s GL_FFP_ONLY=1)
 fi
 
 GL1_FLAGS=(
