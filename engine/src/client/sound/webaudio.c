@@ -115,18 +115,34 @@ WA_Init(void)
 			ka.rawNextTime = 0;
 
 			/* AudioContext starts (or resumes after a tab switch)
-			 * suspended until a user gesture -- this is a KaiOS phone,
-			 * every session starts with a keypress or touch, so just
-			 * resume opportunistically on the first few of either
-			 * instead of gating actual gameplay input on it. */
+			 * suspended until a user gesture on most engines -- this is
+			 * a KaiOS phone, every session starts with a keypress or
+			 * touch, so just resume opportunistically on the first few
+			 * of either instead of gating actual gameplay input on it.
+			 * Logging the rejection reason (instead of swallowing it)
+			 * and guarding resume's existence -- this engine (GL_VENDOR
+			 * "Mozilla", an old Gecko/B2G build per this session's other
+			 * findings) may predate resume() being in the spec at all,
+			 * in which case calling it would throw a TypeError instead
+			 * of returning a rejectable promise. */
 			var resume = function() {
-				if (ka.ctx.state !== 'running') {
-					ka.ctx.resume().catch(function(){});
+				if (ka.ctx.state !== 'running' && typeof ka.ctx.resume === 'function') {
+					try {
+						ka.ctx.resume().catch(function(e) {
+							console.log('[kaios] webaudio: resume() rejected: ' + e);
+						});
+					} catch (e) {
+						console.log('[kaios] webaudio: resume() threw: ' + e);
+					}
 				}
 			};
 			document.addEventListener('keydown', resume);
 			document.addEventListener('touchstart', resume);
 			resume();
+
+			console.log('[kaios] webaudio: init ok, sampleRate=' + ka.ctx.sampleRate +
+				', state=' + ka.ctx.state + ', hasResume=' + (typeof ka.ctx.resume === 'function') +
+				', hasStereoPanner=' + (typeof ka.ctx.createStereoPanner === 'function'));
 
 			Module.kaiosAudio = ka;
 			return ka.ctx.sampleRate;
@@ -573,10 +589,36 @@ WA_Update(void)
 	 * the input layer actually lets through to document. */
 	EM_ASM({
 		var ka = Module.kaiosAudio;
-		if (ka && ka.ctx.state !== 'running') {
-			ka.ctx.resume().catch(function(){});
+		if (ka && ka.ctx.state !== 'running' && typeof ka.ctx.resume === 'function') {
+			try {
+				ka.ctx.resume().catch(function(e) {
+					console.log('[kaios] webaudio: resume() rejected: ' + e);
+				});
+			} catch (e) {
+				console.log('[kaios] webaudio: resume() threw: ' + e);
+			}
 		}
 	});
+
+	/* Once-a-second diagnostic (same cadence as cl_screen.c's
+	 * KAIOS_STATS) -- ctx.currentTime advancing confirms the graph is
+	 * genuinely producing audio output, not just reporting a 'running'
+	 * state while actually muted at some OS/browser level outside the
+	 * Web Audio spec's own visibility (KaiOS's B2G/Gecko heritage has
+	 * its own audio-channel/focus concepts that a plain AudioContext
+	 * might not automatically satisfy). */
+	if ((wa_framecount % 30) == 0)
+	{
+		EM_ASM({
+			var ka = Module.kaiosAudio;
+			if (ka) {
+				console.log('KAIOS_WA_STATE: ctxState=' + ka.ctx.state +
+					' currentTime=' + ka.ctx.currentTime.toFixed(2) +
+					' destChannels=' + ka.ctx.destination.channelCount +
+					' baseLatency=' + (ka.ctx.baseLatency !== undefined ? ka.ctx.baseLatency : 'n/a'));
+			}
+		});
+	}
 
 	if (s_underwater->modified || (wa_framecount == 0))
 	{
