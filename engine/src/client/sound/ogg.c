@@ -70,6 +70,19 @@ static struct {
 	int numsamples;
 } ogg_saved_state;
 
+#ifdef __EMSCRIPTEN__
+/* Set whenever the *current* track is playing through WA_PlayMusic()
+ * (webaudio.c, a plain <audio> element) instead of this file's usual
+ * stb_vorbis decode -> S_RawSamples() chunking -- see
+ * OGG_StartNative()'s comment for why the webaudio backend needs its
+ * own path here at all. Guards OGG_Stop()/OGG_TogglePlayback() from
+ * touching `ogg_file` (never opened for a native track) and from
+ * needing to be reached every frame from OGG_Stream() the way the
+ * chunked backends do (the <audio> element loops and streams on its
+ * own once started). */
+static qboolean ogg_wa_native = false;
+#endif
+
 static void
 OGG_TogglePlayback(void);
 
@@ -362,10 +375,10 @@ OGG_Stream(void)
 				OGG_Read();
 			}
 		}
-		else /* using SDL or WebAudio -- both stream through S_RawSamples() */
+		else /* using SDL */
 #endif
 		{
-			if (sound_started == SS_SDL || sound_started == SS_WEBAUDIO)
+			if (sound_started == SS_SDL)
 			{
 				/* Read that number samples into the buffer, that
 				   were played since the last call to this function.
@@ -376,6 +389,19 @@ OGG_Stream(void)
 					OGG_Read();
 				}
 			}
+#ifdef __EMSCRIPTEN__
+			else if (sound_started == SS_WEBAUDIO && ogg_wa_native)
+			{
+				/* Nothing to feed frame-by-frame here -- the <audio>
+				 * element (OGG_StartNative(), WA_PlayMusic()) already
+				 * has the whole track and loops on its own. Volume/mute
+				 * still need pushing every frame the same way the
+				 * chunked backends' per-sample volume calc (OGG_Read())
+				 * would have, since ogg_volume/ogg_mutemusic can change
+				 * mid-track. */
+				WA_SetMusicVolume((ogg_mutemusic == true) ? 0.0f : ogg_volume->value);
+			}
+#endif
 		}
 	}
 
@@ -399,6 +425,68 @@ OGG_Stream(void)
 }
 
 // --------
+
+#ifdef __EMSCRIPTEN__
+/*
+ * Reads the whole already-open ogg file into memory and hands the raw
+ * (still-compressed) bytes to WA_PlayMusic() (webaudio.c), which plays
+ * it through a plain <audio> element -- a dedicated stream/pipeline of
+ * its own, deliberately kept separate from WA_RawSamples()'s
+ * WebAudio-graph-based chunked path used for sfx and cinematics,
+ * rather than mixing the two. See WA_PlayMusic()'s doc comment for why
+ * this replaced an AudioContext.decodeAudioData()-based approach.
+ *
+ * Always closes f (success or failure) since the caller no longer
+ * needs it either way -- unlike the stb_vorbis path, there's no
+ * decoder object here to keep the FILE* alive for.
+ */
+static qboolean
+OGG_StartNative(FILE *f)
+{
+	byte *data;
+	long len;
+
+	if (fseek(f, 0, SEEK_END) != 0)
+	{
+		fclose(f);
+		return false;
+	}
+
+	len = ftell(f);
+
+	if ((len <= 0) || (fseek(f, 0, SEEK_SET) != 0))
+	{
+		fclose(f);
+		return false;
+	}
+
+	data = malloc(len);
+
+	if (!data)
+	{
+		fclose(f);
+		return false;
+	}
+
+	if (fread(data, 1, len, f) != (size_t)len)
+	{
+		fclose(f);
+		free(data);
+		return false;
+	}
+
+	fclose(f);
+
+	/* WA_PlayMusic() copies the bytes out (a fresh Uint8Array) before
+	 * ever returning -- safe to free right away. */
+	WA_PlayMusic(data, (int)len);
+	free(data);
+
+	ogg_wa_native = true;
+
+	return true;
+}
+#endif
 
 /*
  * play the ogg file that corresponds to the CD track with the given number
@@ -446,6 +534,23 @@ OGG_PlayTrack(const char *track, qboolean cdtrack, qboolean immediate)
 		{
 			OGG_Stop();
 		}
+
+#ifdef __EMSCRIPTEN__
+		if (sound_started == SS_WEBAUDIO)
+		{
+			if (!OGG_StartNative(f))
+			{
+				Com_Printf("%s: '%s' could not be read.\n", __func__, name);
+				return;
+			}
+
+			ogg_curfile = 0;
+			ogg_numsamples = 0;
+			ogg_status = PLAY;
+
+			return;
+		}
+#endif
 
 		// fclose is not required on error with close_on_free=true
 		ogg_file = stb_vorbis_open_file(f, true, &res, NULL);
@@ -603,6 +708,23 @@ OGG_PlayTrack(const char *track, qboolean cdtrack, qboolean immediate)
 		return;
 	}
 
+#ifdef __EMSCRIPTEN__
+	if (sound_started == SS_WEBAUDIO)
+	{
+		if (!OGG_StartNative(f))
+		{
+			Com_Printf("%s: '%s' could not be read.\n", __func__, ogg_tracks[trackNo]);
+			return;
+		}
+
+		ogg_curfile = trackNo;
+		ogg_numsamples = 0;
+		ogg_status = PLAY;
+
+		return;
+	}
+#endif
+
 	int res = 0;
 
 	// fclose is not required on error with close_on_free=true
@@ -690,7 +812,19 @@ OGG_Stop(void)
 	}
 #endif
 
-	stb_vorbis_close(ogg_file);
+#ifdef __EMSCRIPTEN__
+	if (ogg_wa_native)
+	{
+		/* ogg_file was never opened for this track (OGG_StartNative()) --
+		 * stop the browser-side <audio> element instead of touching it. */
+		WA_StopMusic();
+		ogg_wa_native = false;
+	}
+	else
+#endif
+	{
+		stb_vorbis_close(ogg_file);
+	}
 
 	ogg_status = STOP;
 	ogg_numbufs = 0;
@@ -713,10 +847,24 @@ OGG_TogglePlayback(void)
 			AL_UnqueueRawSamples();
 		}
 #endif
+
+#ifdef __EMSCRIPTEN__
+		if (ogg_wa_native)
+		{
+			WA_PauseMusic(true);
+		}
+#endif
 	}
 	else if (ogg_status == PAUSE)
 	{
 		ogg_status = PLAY;
+
+#ifdef __EMSCRIPTEN__
+		if (ogg_wa_native)
+		{
+			WA_PauseMusic(false);
+		}
+#endif
 	}
 }
 

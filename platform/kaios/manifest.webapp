@@ -23,6 +23,9 @@
     },
     "power": {
       "description": "Keep the screen and CPU awake during gameplay"
+    },
+    "audio-channel-content": {
+      "description": "Play game music through the content audio channel"
     }
   }
 }
