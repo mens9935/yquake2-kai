@@ -116,6 +116,10 @@ extern cvar_t *allow_download_models;
 extern cvar_t *allow_download_sounds;
 extern cvar_t *allow_download_maps;
 
+#ifdef __EMSCRIPTEN__
+extern int kaios_snd_ms_this_frame;
+#endif
+
 void
 CL_ClearEntities(void)
 {
@@ -1002,7 +1006,15 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 #endif
 
 		/* update audio */
+#ifdef __EMSCRIPTEN__
+		{
+			int kaios_snd_before = Sys_Milliseconds();
+			S_Update(cl.refdef.vieworg, cl.v_forward, cl.v_right, cl.v_up);
+			kaios_snd_ms_this_frame = Sys_Milliseconds() - kaios_snd_before;
+		}
+#else
 		S_Update(cl.refdef.vieworg, cl.v_forward, cl.v_right, cl.v_up);
+#endif
 
 		/* advance local effects for next frame */
 		CL_RunDLights();

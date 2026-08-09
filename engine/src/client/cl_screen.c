@@ -1723,6 +1723,11 @@ SCR_Framecounter(void)
  * not part of any cross-platform renderer/sound abstraction. */
 extern int kaios_sounds_started_this_frame;
 extern int kaios_effects_started_this_frame;
+extern int kaios_snd_ms_this_frame;
+/* Finer breakdown of kaios_snd_ms_this_frame, set in sdl.c's
+ * SDL_Update() -- see its comment there for what each half covers. */
+extern int kaios_snd_spatialize_ms_this_frame;
+extern int kaios_snd_paint_ms_this_frame;
 /* r_polycount lives in the software renderer (sw_main.c/sw_rast.c), not
  * behind the refexport_t table -- reached directly the same way, and
  * only safe because this KaiOS build only ever links the soft renderer
@@ -1754,6 +1759,9 @@ SCR_DrawKaiosStats(void)
 	static int polys_sum = 0;
 	static int sounds_sum = 0;
 	static int effects_sum = 0;
+	static int snd_ms_sum = 0;
+	static int snd_spatialize_ms_sum = 0;
+	static int snd_paint_ms_sum = 0;
 
 	struct mallinfo mi = mallinfo();
 	size_t heap_size = emscripten_get_heap_size();
@@ -1773,6 +1781,9 @@ SCR_DrawKaiosStats(void)
 	polys_sum += r_polycount;
 	sounds_sum += kaios_sounds_started_this_frame;
 	effects_sum += kaios_effects_started_this_frame;
+	snd_ms_sum += kaios_snd_ms_this_frame;
+	snd_spatialize_ms_sum += kaios_snd_spatialize_ms_this_frame;
+	snd_paint_ms_sum += kaios_snd_paint_ms_this_frame;
 
 	kaios_sounds_started_this_frame = 0;
 	kaios_effects_started_this_frame = 0;
@@ -1784,12 +1795,16 @@ SCR_DrawKaiosStats(void)
 
 	if ((cls.realtime - window_start_ms >= 1000) && (frames_in_window > 0))
 	{
-		char line[128];
+		char line[192];
 
 		Com_sprintf(line, sizeof(line),
-			"KAIOS_STATS: CPU:%.0f%% RAM:%.0f%% FPS:%d polys:%d sounds:%d effects:%d\n",
+			"KAIOS_STATS: CPU:%.0f%% RAM:%.0f%% FPS:%d polys:%d sounds:%d effects:%d "
+			"sndms:%.1f (spatialize:%.1f paint:%.1f)\n",
 			cpu_pct_sum / frames_in_window, ram_pct_sum / frames_in_window,
-			frames_in_window, polys_sum / frames_in_window, sounds_sum, effects_sum);
+			frames_in_window, polys_sum / frames_in_window, sounds_sum, effects_sum,
+			(float)snd_ms_sum / frames_in_window,
+			(float)snd_spatialize_ms_sum / frames_in_window,
+			(float)snd_paint_ms_sum / frames_in_window);
 		Sys_ConsoleOutput(line);
 
 		window_start_ms = cls.realtime;
@@ -1799,6 +1814,9 @@ SCR_DrawKaiosStats(void)
 		polys_sum = 0;
 		sounds_sum = 0;
 		effects_sum = 0;
+		snd_ms_sum = 0;
+		snd_spatialize_ms_sum = 0;
+		snd_paint_ms_sum = 0;
 	}
 }
 #endif

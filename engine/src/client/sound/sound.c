@@ -125,6 +125,19 @@ qboolean s_active;
  * sound-trigger activity alongside FPS/polycount for correlating frame
  * dips with gameplay events (weapon fire, explosions, ...). */
 int kaios_sounds_started_this_frame = 0;
+
+/* Wall-clock ms the last S_Update() call took, set by cl_main.c around
+ * its call site. Real-device A/B testing (demo1.dm2, gl3) showed
+ * s_initsound 0 roughly halves CPU% and nearly doubles FPS versus sound
+ * on at matched polys:, but dropping s_khz to the lowest rate (11025Hz
+ * mono) while leaving sound on recovered none of that -- meaning the
+ * cost isn't the mixing/resampling math scaling with sample rate, it's
+ * something closer to fixed-per-call overhead in S_Update/SDL_Update
+ * (most likely Emscripten's SDL_LockAudio/UnlockAudio emulation, or the
+ * spatialization loop itself). This line exists to see exactly how many
+ * ms S_Update eats per frame directly, instead of guessing further from
+ * CPU% deltas alone. */
+int kaios_snd_ms_this_frame = 0;
 #endif
 
 qboolean snd_is_underwater;

@@ -78,6 +78,20 @@ static const float lpf_default_gain_hf = 0.25F;
 static LpfContext lpf_context;
 static qboolean lpf_is_enabled;
 
+#ifdef __EMSCRIPTEN__
+/* Finer breakdown of kaios_snd_ms_this_frame (cl_main.c/cl_screen.c),
+ * set here every SDL_Update() call to find out which half of it costs
+ * the CPU: the per-channel respatialization loop, or the
+ * lock/paint/unlock block that actually mixes samples. Real-device
+ * testing already showed dropping s_khz to the lowest rate available
+ * didn't recover any of the CPU cost sound-on has over sound-off, which
+ * argues against the mixing/resampling math itself being the culprit --
+ * these two numbers exist to find out what is, instead of guessing
+ * further. */
+int kaios_snd_spatialize_ms_this_frame = 0;
+int kaios_snd_paint_ms_this_frame = 0;
+#endif
+
 static void
 lpf_initialize(LpfContext* lpf_context, float gain_hf, int target_frequency)
 {
@@ -1153,6 +1167,9 @@ SDL_Update(void)
 
 	/* update spatialization
 	   for dynamic sounds */
+#ifdef __EMSCRIPTEN__
+	int kaios_spatialize_before = Sys_Milliseconds();
+#endif
 	ch = channels;
 
 	for (i = 0; i < s_numchannels; i++, ch++)
@@ -1182,6 +1199,9 @@ SDL_Update(void)
 
 	/* add loopsounds */
 	SDL_AddLoopSounds();
+#ifdef __EMSCRIPTEN__
+	kaios_snd_spatialize_ms_this_frame = Sys_Milliseconds() - kaios_spatialize_before;
+#endif
 
 	/* debugging output */
 	if (s_show->value)
@@ -1213,6 +1233,9 @@ SDL_Update(void)
 	}
 
 	/* Mix the samples */
+#ifdef __EMSCRIPTEN__
+	int kaios_paint_before = Sys_Milliseconds();
+#endif
 #ifndef USE_SDL3
 	SDL_LockAudio();
 #endif
@@ -1222,6 +1245,9 @@ SDL_Update(void)
 
 	if (!soundtime)
 	{
+#ifdef __EMSCRIPTEN__
+		kaios_snd_paint_ms_this_frame = Sys_Milliseconds() - kaios_paint_before;
+#endif
 		return;
 	}
 
@@ -1247,6 +1273,9 @@ SDL_Update(void)
 	SDL_PaintChannels(endtime);
 #ifndef USE_SDL3
 	SDL_UnlockAudio();
+#endif
+#ifdef __EMSCRIPTEN__
+	kaios_snd_paint_ms_this_frame = Sys_Milliseconds() - kaios_paint_before;
 #endif
 }
 
