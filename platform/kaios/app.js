@@ -992,11 +992,27 @@ function hideAllScreens() {
 function mainMenuItems() {
 	var items = [];
 	if (isBaseq2Confirmed()) {
-		items.push({ label: 'Play', action: startBaseq2Scan });
+		items.push({ label: 'Play', action: playFast });
 	}
 	items.push({ label: 'Find baseq2', action: startBaseq2Scan });
 	items.push({ label: 'Settings', action: showSettingsGroups });
+	items.push({ label: 'Exit', action: exitApp });
 	return items;
+}
+
+/* Same approach as the in-game "quit" command's Sys_Quit() (see
+ * engine/src/backends/unix/system.c) -- window.close() is the
+ * documented way for a privileged packaged KaiOS app to close itself,
+ * honored from the app's own top-level document even though a plain
+ * browser tab would normally refuse it. Needed here too since the
+ * launcher menu (this file) runs before the engine ever boots, so
+ * Sys_Quit() itself isn't reachable yet from "Exit" on the main menu. */
+function exitApp() {
+	try {
+		window.close();
+	} catch (e) {
+		console.log('[kaios] window.close() failed: ' + e);
+	}
 }
 
 function showMainMenu() {
@@ -1066,7 +1082,7 @@ function showBootSkipTimer() {
 		if (toMenu) {
 			showMainMenu();
 		} else {
-			startBaseq2Scan();
+			playFast();
 		}
 	}
 
@@ -1107,6 +1123,64 @@ function showErrorWithBack(text) {
 	activeMenuKeyHandler = onKeyDown;
 }
 
+// Remembered after a scan+copy has genuinely succeeded once (see
+// proceedWithChoice() below) so subsequent "Play" presses don't have
+// to re-enumerate the *entire* SD card just to find the same folder
+// again -- see playFast()'s comment for the actual fast path this
+// enables.
+var BASEQ2_PATH_KEY = 'kaios_baseq2_path';
+
+function getCachedBaseq2Choice() {
+	var raw = localStorage.getItem(BASEQ2_PATH_KEY);
+	if (!raw) {
+		return null;
+	}
+	try {
+		var choice = JSON.parse(raw);
+		if (choice && typeof choice.root === 'string' && typeof choice.dirName === 'string') {
+			return choice;
+		}
+	} catch (e) {
+		/* corrupt/foreign value -- treat as no cache */
+	}
+	return null;
+}
+
+function setCachedBaseq2Choice(choice) {
+	localStorage.setItem(BASEQ2_PATH_KEY, JSON.stringify({
+		root: choice.root,
+		dirName: choice.dirName
+	}));
+}
+
+// Shared tail end of both the full scan (startBaseq2Scan) and the fast
+// cached-path retry (playFast) below -- `files` only needs to cover
+// the baseq2 folder's own subtree (copyBaseq2() filters it down to
+// that anyway), not the whole SD card.
+function proceedWithChoice(files, choice) {
+	setStatus('Loading engine...', 0);
+	loadEngineScripts().then(function () {
+		// Pull in last session's config.cfg (if any) before baseq2 is
+		// populated or the engine boots -- see mountPersistentConfig()'s
+		// comment for why this needs to happen here rather than after
+		// autoexec.cfg is written.
+		return mountPersistentConfig();
+	}).then(function () {
+		setStatus('Copying baseq2...', 0);
+		return copyBaseq2(files, choice);
+	}).then(function () {
+		// Only marked once a copy has actually completed -- see
+		// mainMenuItems()/showBootSkipTimer()'s comment for why this
+		// specifically gates both the "Play" menu entry and the
+		// boot-time skip timer.
+		localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
+		setCachedBaseq2Choice(choice);
+		bootEngine();
+	}, function (err) {
+		showErrorWithBack('Copy failed: ' + describeError(err));
+	});
+}
+
 function startBaseq2Scan() {
 	hideAllScreens();
 
@@ -1129,26 +1203,7 @@ function startBaseq2Scan() {
 		}
 
 		function proceed(choice) {
-			setStatus('Loading engine...', 0);
-			loadEngineScripts().then(function () {
-				// Pull in last session's config.cfg (if any) before
-				// baseq2 is populated or the engine boots -- see
-				// mountPersistentConfig()'s comment for why this needs
-				// to happen here rather than after autoexec.cfg is written.
-				return mountPersistentConfig();
-			}).then(function () {
-				setStatus('Copying baseq2...', 0);
-				return copyBaseq2(files, choice);
-			}).then(function () {
-				// Only marked once a copy has actually completed --
-				// see mainMenuItems()/showBootSkipTimer()'s comment for
-				// why this specifically gates both the "Play" menu
-				// entry and the boot-time skip timer.
-				localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
-				bootEngine();
-			}, function (err) {
-				showErrorWithBack('Copy failed: ' + describeError(err));
-			});
+			proceedWithChoice(files, choice);
 		}
 
 		if (candidates.length === 1) {
@@ -1160,6 +1215,55 @@ function startBaseq2Scan() {
 		}
 	}, function (err) {
 		showErrorWithBack('Could not scan SD card: ' + describeError(err));
+	});
+}
+
+// "Play" from the main menu -- baseq2 was already found and confirmed
+// on some earlier launch (that's the only way "Play" ever shows up at
+// all, see mainMenuItems()), so re-enumerating the *whole* SD card
+// again just to rediscover the exact same folder is pure waste on a
+// slow SD-card read. Scope the enumerate() to the cached folder's own
+// path instead of the card root -- lists only that subtree, not every
+// unrelated file elsewhere on the card. Falls back to a full
+// startBaseq2Scan() (which also refreshes the cache) if there's no
+// cached path yet, or the scoped listing comes back without a valid
+// pak0.pak in it (folder renamed/removed, card swapped, etc.) --
+// exactly the "rescan on error" behavior asked for.
+function playFast() {
+	var cached = getCachedBaseq2Choice();
+
+	if (!cached || !navigator.getDeviceStorage) {
+		startBaseq2Scan();
+		return;
+	}
+
+	hideAllScreens();
+
+	var storage = navigator.getDeviceStorage('sdcard');
+	var scopedPath = (cached.root ? cached.root + '/' : '') + cached.dirName;
+	setStatus('Loading baseq2...');
+
+	enumerateStorage(storage, scopedPath).then(function (files) {
+		var candidates = findBaseq2Candidates(files);
+		var match = null;
+
+		for (var i = 0; i < candidates.length; i++) {
+			if (candidates[i].root === cached.root && candidates[i].dirName === cached.dirName) {
+				match = candidates[i];
+				break;
+			}
+		}
+
+		if (!match) {
+			startBaseq2Scan();
+			return;
+		}
+
+		proceedWithChoice(files, match);
+	}, function () {
+		// Cached path no longer resolves (renamed/removed/card swapped)
+		// -- fall back to the full rescan rather than a dead end.
+		startBaseq2Scan();
 	});
 }
 
