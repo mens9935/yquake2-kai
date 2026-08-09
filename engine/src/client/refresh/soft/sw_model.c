@@ -38,8 +38,22 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 static void
 Kaios_LogHeapUsage(const char *label)
 {
-	struct mallinfo mi = mallinfo();
-	size_t heap_size = emscripten_get_heap_size();
+	struct mallinfo mi;
+	size_t heap_size;
+	static cvar_t *kaios_debug_mem;
+
+	if (!kaios_debug_mem)
+	{
+		kaios_debug_mem = ri.Cvar_Get("kaios_debug_mem", "0", CVAR_ARCHIVE);
+	}
+
+	if (!kaios_debug_mem->value)
+	{
+		return;
+	}
+
+	mi = mallinfo();
+	heap_size = emscripten_get_heap_size();
 
 	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%)\n",
 		label, (unsigned)mi.uordblks, (unsigned)heap_size,
@@ -695,7 +709,19 @@ Mod_LoadBrushModel(model_t *mod, void *buffer, int modfilelen)
 	hunkSize += 1048576; // 1MB extra just in case
 
 #ifdef __EMSCRIPTEN__
-	Com_Printf("KAIOS_MEM: %s BSP hunkSize=%d bytes\n", mod->name, hunkSize);
+	{
+		static cvar_t *kaios_debug_mem2;
+
+		if (!kaios_debug_mem2)
+		{
+			kaios_debug_mem2 = ri.Cvar_Get("kaios_debug_mem", "0", CVAR_ARCHIVE);
+		}
+
+		if (kaios_debug_mem2->value)
+		{
+			Com_Printf("KAIOS_MEM: %s BSP hunkSize=%d bytes\n", mod->name, hunkSize);
+		}
+	}
 	Kaios_LogHeapUsage(va("before Hunk_Begin(%s, %d)", mod->name, hunkSize));
 #endif
 

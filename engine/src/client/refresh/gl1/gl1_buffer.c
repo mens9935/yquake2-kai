@@ -92,7 +92,15 @@ R_ApplyGLBuffer(void)
 	 * fine, but real game content still doesn't -- trace the first
 	 * real (non-empty) call only, so this doesn't flood the log on
 	 * every one of the many calls per frame afterward. */
-	qboolean kaios_trace = (!kaios_buf_traced && vtx_ptr != 0 && idx_ptr != 0) ? true : false;
+	static cvar_t *kaios_debug_gl1buf;
+	qboolean kaios_trace;
+
+	if (!kaios_debug_gl1buf)
+	{
+		kaios_debug_gl1buf = ri.Cvar_Get("kaios_debug_gl1buf", "0", CVAR_ARCHIVE);
+	}
+
+	kaios_trace = (kaios_debug_gl1buf->value && !kaios_buf_traced && vtx_ptr != 0 && idx_ptr != 0) ? true : false;
 #define KAIOS_BUF_TRACE(x) \
 	do { \
 		if (kaios_trace) { Com_Printf("KAIOS_BUF_TRACE: before " #x "\n"); } \

@@ -1356,7 +1356,11 @@ var DEBUG_ITEMS = [
 	toggleItem('debugframespike', 'Log: frame spikes', 'kaios_debug_framespike', false),
 	toggleItem('debugwastate', 'Log: audio state (1/s)', 'kaios_debug_wa_state', false),
 	toggleItem('debugunderwater', 'Log: underwater FBO', 'kaios_debug_underwater', false),
-	toggleItem('debugwebaudiotrace', 'Log: audio trace', 'kaios_debug_webaudio_trace', false)
+	toggleItem('debugwebaudiotrace', 'Log: audio trace', 'kaios_debug_webaudio_trace', false),
+	toggleItem('debugmem', 'Log: heap usage', 'kaios_debug_mem', false),
+	toggleItem('debugswbuf', 'Log: soft buf stats', 'kaios_debug_swbuf', false),
+	toggleItem('debuggl1buf', 'Log: GL1 buffer trace', 'kaios_debug_gl1buf', false),
+	toggleItem('debuggl1occl', 'Log: GL1 occlusion stats', 'kaios_debug_gl1occl', false)
 ];
 
 var SETTINGS_GROUPS = [

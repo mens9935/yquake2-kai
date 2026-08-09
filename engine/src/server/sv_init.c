@@ -41,8 +41,22 @@
 static void
 Kaios_LogHeapUsage(const char *label)
 {
-	struct mallinfo mi = mallinfo();
-	size_t heap_size = emscripten_get_heap_size();
+	struct mallinfo mi;
+	size_t heap_size;
+	static cvar_t *kaios_debug_mem;
+
+	if (!kaios_debug_mem)
+	{
+		kaios_debug_mem = Cvar_Get("kaios_debug_mem", "0", CVAR_ARCHIVE);
+	}
+
+	if (!kaios_debug_mem->value)
+	{
+		return;
+	}
+
+	mi = mallinfo();
+	heap_size = emscripten_get_heap_size();
 
 	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%)\n",
 		label, (unsigned)mi.uordblks, (unsigned)heap_size,

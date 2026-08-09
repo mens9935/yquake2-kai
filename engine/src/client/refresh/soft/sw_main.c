@@ -1624,22 +1624,34 @@ RE_RenderFrame(refdef_t *fd)
 	 * Also print the buffer sizes periodically regardless, since a
 	 * small steady-state r_cnumsurfs is itself a hard ceiling on
 	 * r_polycount even on frames that never technically overflow it. */
-	if (r_outofsurfaces || r_outofedges)
 	{
-		Com_Printf("KAIOS_SWBUF: outofsurfaces=%d outofedges=%d "
-			"cnumsurfs=%d numallocatededges=%d\n",
-			(int)r_outofsurfaces, (int)r_outofedges,
-			r_cnumsurfs, r_numallocatededges);
-	}
-	else
-	{
-		static int kaios_swbuf_frame;
+		static cvar_t *kaios_debug_swbuf;
 
-		if ((kaios_swbuf_frame++ % 60) == 0)
+		if (!kaios_debug_swbuf)
 		{
-			Com_Printf("KAIOS_SWBUF: cnumsurfs=%d numallocatededges=%d "
-				"(no overflow this frame)\n",
-				r_cnumsurfs, r_numallocatededges);
+			kaios_debug_swbuf = ri.Cvar_Get("kaios_debug_swbuf", "0", CVAR_ARCHIVE);
+		}
+
+		if (kaios_debug_swbuf->value)
+		{
+			if (r_outofsurfaces || r_outofedges)
+			{
+				Com_Printf("KAIOS_SWBUF: outofsurfaces=%d outofedges=%d "
+					"cnumsurfs=%d numallocatededges=%d\n",
+					(int)r_outofsurfaces, (int)r_outofedges,
+					r_cnumsurfs, r_numallocatededges);
+			}
+			else
+			{
+				static int kaios_swbuf_frame;
+
+				if ((kaios_swbuf_frame++ % 60) == 0)
+				{
+					Com_Printf("KAIOS_SWBUF: cnumsurfs=%d numallocatededges=%d "
+						"(no overflow this frame)\n",
+						r_cnumsurfs, r_numallocatededges);
+				}
+			}
 		}
 	}
 #endif
