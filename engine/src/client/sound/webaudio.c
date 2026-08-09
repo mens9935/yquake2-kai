@@ -235,6 +235,8 @@ WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
 		try {
 			var buf = ka.ctx.createBuffer(chans, frames, rate);
 
+			var peak = 0;
+
 			for (var c = 0; c < chans; c++) {
 				var out = buf.getChannelData(c);
 
@@ -248,6 +250,22 @@ WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
 						out[i] = HEAP16[base + i * chans + c] / 32768.0;
 					}
 				}
+
+				for (var i = 0; i < frames; i++) {
+					var a = Math.abs(out[i]);
+					if (a > peak) {
+						peak = a;
+					}
+				}
+			}
+
+			ka.uploadLogCount = (ka.uploadLogCount || 0);
+			if (ka.uploadLogCount < 8) {
+				ka.uploadLogCount++;
+				console.log('[kaios] webaudio: upload#' + ka.uploadLogCount +
+					' frames=' + frames + ' width=' + width + ' chans=' + chans +
+					' rate=' + rate + ' peak=' + peak.toFixed(4) +
+					' duration=' + buf.duration.toFixed(3));
 			}
 
 			ka.buffers.push(buf);
@@ -349,31 +367,47 @@ WA_PlayChannel(channel_t *ch)
 		var gain = $2;
 		var pan = $3;
 		var loop = $4;
-		var s = ka && ka.slots[slot];
-		var buf = ka && ka.buffers[bufnum];
-		if (!s || !buf) {
-			return;
-		}
-		if (s.src) {
-			try { s.src.stop(); } catch (e) {}
-			s.src.disconnect();
-			s.src = null;
-		}
-		var src = ka.ctx.createBufferSource();
-		src.buffer = buf;
-		src.loop = !!loop;
-		src.connect(s.gain);
-		s.gain.gain.value = gain;
-		if (s.pan) {
-			s.pan.pan.value = pan;
-		}
-		src.start(0);
-		s.src = src;
-		src.onended = function() {
-			if (s.src === src) {
+
+		try {
+			var s = ka && ka.slots[slot];
+			var buf = ka && ka.buffers[bufnum];
+
+			ka.playLogCount = (ka.playLogCount || 0);
+			if (ka.playLogCount < 8) {
+				ka.playLogCount++;
+				console.log('[kaios] webaudio: play#' + ka.playLogCount +
+					' slot=' + slot + ' bufnum=' + bufnum + ' hasSlot=' + !!s +
+					' hasBuf=' + !!buf + ' gain=' + gain.toFixed(3) + ' pan=' + pan.toFixed(3) +
+					' loop=' + loop + ' ctxState=' + ka.ctx.state +
+					' masterGain=' + ka.master.gain.value);
+			}
+
+			if (!s || !buf) {
+				return;
+			}
+			if (s.src) {
+				try { s.src.stop(); } catch (e) {}
+				s.src.disconnect();
 				s.src = null;
 			}
-		};
+			var src = ka.ctx.createBufferSource();
+			src.buffer = buf;
+			src.loop = !!loop;
+			src.connect(s.gain);
+			s.gain.gain.value = gain;
+			if (s.pan) {
+				s.pan.pan.value = pan;
+			}
+			src.start(0);
+			s.src = src;
+			src.onended = function() {
+				if (s.src === src) {
+					s.src = null;
+				}
+			};
+		} catch (e) {
+			console.log('[kaios] webaudio: WA_PlayChannel threw: ' + e);
+		}
 	}, slot, sc->wa_bufnum,
 		(ch->leftvol + ch->rightvol) / (2.0f * 255.0f),
 		((ch->leftvol + ch->rightvol) > 0) ?
@@ -628,6 +662,8 @@ WA_Update(void)
 			var ka = Module.kaiosAudio;
 			if (ka) {
 				ka.underwaterFilter.frequency.value = $0;
+				console.log('[kaios] webaudio: underwaterFilter.frequency=' + $0 +
+					' filterType=' + ka.underwaterFilter.type);
 			}
 		}, (snd_is_underwater && s_underwater->value) ?
 			(200.0f + s_underwater_gain_hf->value * 2000.0f) : 22050.0f);
