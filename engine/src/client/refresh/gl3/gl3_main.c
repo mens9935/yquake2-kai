@@ -1539,7 +1539,20 @@ SetupGL(void)
 		}
 	}
 #endif
-	if (gl3_usefbo->value && gl3state.ppFBO != 0
+#ifdef __EMSCRIPTEN__
+	/* Force this off entirely here, not just via gl3_usefbo's default
+	 * value above -- CVAR_ARCHIVE means a config.cfg saved by an
+	 * earlier build (back when the default was "1") would silently
+	 * keep the FBO postprocess pass on across reloads via this port's
+	 * IDBFS config persistence, regardless of what the current
+	 * default is. See gl3_usefbo's Cvar_Get comment for why this
+	 * pass isn't reliable on this device's WebGL1 implementation. */
+	qboolean fboUsable = false;
+#else
+	qboolean fboUsable = gl3_usefbo->value != 0;
+#endif
+
+	if (fboUsable && gl3state.ppFBO != 0
 		&& (r_newrefdef.rdflags & (RDF_NOWORLDMODEL|RDF_UNDERWATER)) == RDF_UNDERWATER)
 	{
 		glBindFramebuffer(GL_FRAMEBUFFER, gl3state.ppFBO);
