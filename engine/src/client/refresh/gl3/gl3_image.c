@@ -108,6 +108,23 @@ GL3_TextureMode(char *string)
 
 		GL3_SelectTMU(GL_TEXTURE0);
 		GL3_Bind(glt->texnum);
+#ifdef YQ2_GL3_GLES2_WEB
+		// See GL3_Upload32()'s comment -- no mipmaps and always
+		// CLAMP_TO_EDGE on this platform, regardless of texture type,
+		// to stay NPOT-safe under WebGL1's stricter completeness rules.
+		if (nolerp)
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		}
+		else
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_max);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
+		}
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+#else
 		if ((glt->type != it_pic) && (glt->type != it_sky)) /* mipmapped texture */
 		{
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_min);
@@ -135,6 +152,7 @@ GL3_TextureMode(char *string)
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
 			}
 		}
+#endif
 	}
 }
 
@@ -212,6 +230,22 @@ GL3_Upload32(unsigned *data, int width, int height, qboolean mipmap)
 
 	res = (samples == gl3_alpha_format);
 
+#ifdef YQ2_GL3_GLES2_WEB
+	// WebGL1/GLES2 requires CLAMP_TO_EDGE wrap and non-mipmapped
+	// filtering for any non-power-of-two texture, or it's considered
+	// "incomplete" and samples as solid black -- confirmed on a real
+	// device (world/lightmap textures, which are always POT, rendered
+	// fine; alias model skins and HUD pics, which are frequently NPOT,
+	// came out solid black). Wrap mode was never set at all here before
+	// (defaulting to GL_REPEAT, itself NPOT-unsafe), and mipmapping hit
+	// the same NPOT restriction. Always clamp and skip mipmaps -- a
+	// minor minification-quality tradeoff, but guarantees correctness
+	// for every texture regardless of its dimensions.
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_max);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
+#else
 	if (mipmap)
 	{
 		// TODO: some hardware may require mipmapping disabled for NPOT textures!
@@ -229,6 +263,7 @@ GL3_Upload32(unsigned *data, int width, int height, qboolean mipmap)
 	{
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, Q_max(gl_anisotropic->value, 1.f));
 	}
+#endif
 
 	return res;
 }
