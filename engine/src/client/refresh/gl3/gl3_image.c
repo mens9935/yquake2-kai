@@ -45,6 +45,20 @@ glmode_t modes[] = {
 int gl_filter_min = GL_LINEAR_MIPMAP_NEAREST;
 int gl_filter_max = GL_LINEAR;
 
+#ifdef YQ2_GL3_GLES2_WEB
+// WebGL1/GLES2 only allows GL_REPEAT (the default, and what world/wall
+// textures need for tiling surfaces whose texture coordinates go well
+// beyond [0,1]) on power-of-two textures -- an NPOT texture used with
+// GL_REPEAT or mipmapping is "incomplete" and samples as solid black.
+// Forcing CLAMP_TO_EDGE on *every* texture (an earlier version of this
+// fix) broke tiling on POT world textures instead. Decide per-texture.
+static qboolean
+GL3_ES2_IsPOT(int x)
+{
+	return x > 0 && (x & (x - 1)) == 0;
+}
+#endif
+
 gl3image_t gl3textures[MAX_GL3TEXTURES];
 int numgl3textures = 0;
 static int image_max = 0;
@@ -109,21 +123,34 @@ GL3_TextureMode(char *string)
 		GL3_SelectTMU(GL_TEXTURE0);
 		GL3_Bind(glt->texnum);
 #ifdef YQ2_GL3_GLES2_WEB
-		// See GL3_Upload32()'s comment -- no mipmaps and always
-		// CLAMP_TO_EDGE on this platform, regardless of texture type,
-		// to stay NPOT-safe under WebGL1's stricter completeness rules.
+		// See GL3_Upload32()'s comment -- only genuinely NPOT textures
+		// get clamped; POT ones (world/wall textures) keep GL_REPEAT so
+		// tiling across surfaces still works. gl_filter_min (possibly
+		// GL_*_MIPMAP_*) is only safe for POT textures, which are the
+		// only ones that got real mipmaps generated in GL3_Upload32().
+		qboolean isPOT = GL3_ES2_IsPOT(glt->width) && GL3_ES2_IsPOT(glt->height);
+
 		if (nolerp)
 		{
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		}
+		else if (isPOT && (glt->type != it_pic) && (glt->type != it_sky))
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_min);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
 		}
 		else
 		{
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_max);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
 		}
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		if (!isPOT)
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		}
 #else
 		if ((glt->type != it_pic) && (glt->type != it_sky)) /* mipmapped texture */
 		{
@@ -233,18 +260,29 @@ GL3_Upload32(unsigned *data, int width, int height, qboolean mipmap)
 #ifdef YQ2_GL3_GLES2_WEB
 	// WebGL1/GLES2 requires CLAMP_TO_EDGE wrap and non-mipmapped
 	// filtering for any non-power-of-two texture, or it's considered
-	// "incomplete" and samples as solid black -- confirmed on a real
-	// device (world/lightmap textures, which are always POT, rendered
-	// fine; alias model skins and HUD pics, which are frequently NPOT,
-	// came out solid black). Wrap mode was never set at all here before
-	// (defaulting to GL_REPEAT, itself NPOT-unsafe), and mipmapping hit
-	// the same NPOT restriction. Always clamp and skip mipmaps -- a
-	// minor minification-quality tradeoff, but guarantees correctness
-	// for every texture regardless of its dimensions.
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_max);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
+	// "incomplete" and samples as solid black. But world/wall textures
+	// (always POT) rely on GL_REPEAT for tiling across surfaces whose
+	// texture coordinates go well beyond [0,1] -- clamping those broke
+	// tiling and made map textures render stretched/smeared (confirmed
+	// on a real device). Only clamp+skip-mipmaps for genuinely NPOT
+	// textures (common for alias skins and HUD pics); POT textures keep
+	// the default GL_REPEAT wrap and get real mipmaps as before.
+	if (mipmap && GL3_ES2_IsPOT(width) && GL3_ES2_IsPOT(height))
+	{
+		glGenerateMipmap(GL_TEXTURE_2D);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_min);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
+	}
+	else
+	{
+		if (!GL3_ES2_IsPOT(width) || !GL3_ES2_IsPOT(height))
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		}
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_max);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
+	}
 #else
 	if (mipmap)
 	{
