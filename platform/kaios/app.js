@@ -40,11 +40,21 @@ var canvasEl = document.getElementById('canvas');
 // marks the selected one (styled in index.html's <style> block, a
 // cursor glyph + text color rather than a solid highlight block, to
 // read closer to Quake II's own menu convention), and scrolls it into
-// view. The scrollIntoView() call is what actually makes a list
-// longer than the screen (the Debug settings screen has 13+ rows)
-// navigable at all -- index.html's CSS makes the <ul> scrollable, but
-// without this, ArrowDown past the visible rows would move the
-// selection somewhere the player can't see or confirm.
+// view by hand. That's what actually makes a list longer than the
+// screen (the Debug settings screen has 13+ rows) navigable at all --
+// index.html's CSS makes the <ul> scrollable, but without this,
+// ArrowDown past the visible rows would move the selection somewhere
+// the player can't see or confirm.
+//
+// Deliberately NOT Element.scrollIntoView({block: 'nearest'}) -- that
+// options-object form is a newer addition to the DOM spec than this
+// device's Gecko-48-class engine (every call site here runs on every
+// keypress, and every show*() function below calls render() once
+// *before* assigning activeMenuKeyHandler, so a single throw here
+// during that first call would silently leave the whole screen
+// keyboard-dead, matching a real-device report of exactly that after
+// this scrolling behavior was added). Plain scrollTop arithmetic has
+// no API-version risk at all.
 function renderMenuItems(listEl, labels, selectedIndex) {
 	listEl.innerHTML = '';
 	for (var i = 0; i < labels.length; i++) {
@@ -55,9 +65,23 @@ function renderMenuItems(listEl, labels, selectedIndex) {
 		}
 		listEl.appendChild(li);
 	}
-	var selectedEl = listEl.children[selectedIndex];
-	if (selectedEl && selectedEl.scrollIntoView) {
-		selectedEl.scrollIntoView({ block: 'nearest' });
+
+	try {
+		var selectedEl = listEl.children[selectedIndex];
+		if (selectedEl) {
+			if (selectedEl.offsetTop < listEl.scrollTop) {
+				listEl.scrollTop = selectedEl.offsetTop;
+			} else {
+				var bottom = selectedEl.offsetTop + selectedEl.offsetHeight;
+				if (bottom > listEl.scrollTop + listEl.clientHeight) {
+					listEl.scrollTop = bottom - listEl.clientHeight;
+				}
+			}
+		}
+	} catch (e) {
+		// Scrolling is a nicety, not worth ever taking the whole menu
+		// down with it -- see this function's comment.
+		console.log('[kaios] renderMenuItems: scroll-into-view failed: ' + e);
 	}
 }
 
