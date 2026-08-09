@@ -124,18 +124,25 @@ int		r_polycount;
 int		r_drawnpolycount;
 
 #ifdef __EMSCRIPTEN__
+#ifndef YQ2_KAIOS_UNIFIED_RENDERERS
 /* Always-off stub matching gl1_main.c's real kaios_cube_test_active/
  * RI_KaiosCubeTestFrame() -- frame.c (shared by both renderers)
  * references these unconditionally, so the shipped soft build needs
  * them defined too, just inert. See frame.c's extern declaration
  * comment and gl1_main.c for the real (RENDERER=gl1 diagnostic build
- * only) implementation. */
+ * only) implementation.
+ *
+ * RENDERER=unified links gl1's real implementation into the same
+ * binary as this file's -- nothing else in sw_main.c references
+ * either name, so there's nothing to declare here at all in that
+ * case, just don't define a second, competing copy. */
 qboolean kaios_cube_test_active = false;
 
 void
 RI_KaiosCubeTestFrame(void)
 {
 }
+#endif
 #endif
 
 int		*pfrustum_indexes[4];

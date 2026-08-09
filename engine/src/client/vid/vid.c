@@ -421,21 +421,22 @@ VID_LoadRenderer(void)
 	{
 		extern refexport_t SoftGetRefAPI(refimport_t) asm("SoftGetRefAPI");
 		extern refexport_t GL3GetRefAPI(refimport_t) asm("GL3GetRefAPI");
+		extern refexport_t GL1GetRefAPI(refimport_t) asm("GL1GetRefAPI");
 
 		if ((strcmp(vid_renderer->string, "gl3") == 0) ||
 			(strcmp(vid_renderer->string, "gles3") == 0))
 		{
 			GetRefAPI = GL3GetRefAPI;
 		}
+		else if ((strcmp(vid_renderer->string, "gl1") == 0) ||
+			(strcmp(vid_renderer->string, "gles1") == 0))
+		{
+			GetRefAPI = GL1GetRefAPI;
+		}
 		else
 		{
 			if (strcmp(vid_renderer->string, "soft") != 0)
 			{
-				/* gl1/gles1 asked for but not (yet) linked into the
-				 * unified build -- see sources.mk.sh's REFGL1_SRCS
-				 * comment. Fall back instead of leaving vid_renderer
-				 * pointing at a renderer this binary can't actually
-				 * run. */
 				Com_Printf("Renderer \"%s\" isn't built into this binary, "
 					"falling back to soft.\n", vid_renderer->string);
 				Cvar_Set("vid_renderer", "soft");

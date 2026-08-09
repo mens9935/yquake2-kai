@@ -53,8 +53,18 @@ int c_brush_polys, c_alias_polys;
  * so a gl1 build (RENDERER=gl1, see build.sh) links at all, and kept
  * up to date every frame (RE_RenderFrame below, after R_Flash()) from
  * gl1's own poly counters, c_brush_polys/c_alias_polys above, so
- * KAIOS_STATS shows real numbers here too instead of always 0. */
+ * KAIOS_STATS shows real numbers here too instead of always 0.
+ *
+ * RENDERER=unified links sw_main.c's own r_polycount into the same
+ * binary as this file's -- extern to that single copy instead of
+ * defining a second, competing one; still kept up to date for real
+ * below regardless of which #branch defined the storage. Standalone
+ * RENDERER=gl1 (soft not linked at all) still needs its own copy. */
+#ifdef YQ2_KAIOS_UNIFIED_RENDERERS
+extern int r_polycount;
+#else
 int r_polycount;
+#endif
 
 /* Spinning-cube-plus-frame-counter sanity check, drawn directly with
  * this exact GL1 context right after it's created and fully
@@ -943,7 +953,18 @@ cvar_t *gl1_stereo_convergence;
 static cvar_t *gl_znear;
 static cvar_t *gl1_waterwarp;
 
+/* RENDERER=unified links sw_main.c's own `refimport_t ri;` into the
+ * same binary as this file's -- extern to that single copy instead of
+ * defining a second, competing one (ref.h's `extern refimport_t ri;`
+ * is what every renderer's own code, and client/refresh/files/, reach
+ * it through either way). GetRefAPI() below still assigns `ri = imp;`
+ * on load same as always. Standalone RENDERER=gl1 (soft not linked at
+ * all) still needs its own copy. */
+#if defined(__EMSCRIPTEN__) && defined(YQ2_KAIOS_UNIFIED_RENDERERS)
+extern refimport_t ri;
+#else
 refimport_t ri;
+#endif
 
 void LM_FreeLightmapBuffers(void);
 void Scrap_Init(void);
@@ -2183,10 +2204,17 @@ R_Register(void)
 	 * BSP faces are always convex. Still conservative on the projection
 	 * side: anything that can't be safely projected (behind the near
 	 * plane) is skipped rather than guessed at, so a wrong result can
-	 * only cost performance, never drop visible geometry. CVAR_ARCHIVE
-	 * and console/menu toggleable with no rebuild if it ever needs to
-	 * be turned off again. */
-	r_occlusion_cull = ri.Cvar_Get("r_occlusion_cull", "1", CVAR_ARCHIVE);
+	 * only cost performance, never drop visible geometry.
+	 *
+	 * That fix flipped the default back to "1" at the time, but its own
+	 * commit message says so itself: "still not verified on real
+	 * hardware yet" -- and gl1 as a whole went unbuilt/unshipped after
+	 * that (see build.sh's "gl1 shelved for now"), so this never
+	 * actually got the real-device confirmation it was waiting on.
+	 * Defaulting back to "0" now that gl1 is being wired back in
+	 * (RENDERER=unified, build.sh) until it gets that confirmation for
+	 * real -- CVAR_ARCHIVE and console/menu toggleable either way. */
+	r_occlusion_cull = ri.Cvar_Get("r_occlusion_cull", "0", CVAR_ARCHIVE);
 
 #ifdef __EMSCRIPTEN__
 	/* Static world-geometry vertex cache -- see the block comment above

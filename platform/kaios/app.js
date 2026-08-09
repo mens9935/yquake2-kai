@@ -1214,16 +1214,16 @@ var VIDEO_ITEMS = [
 		cvars: ['vid_renderer'],
 		choices: [
 			{ label: 'Software', values: ['soft'] },
-			// gl1's WebGL context creation has never succeeded on real
-			// KaiOS hardware in this project (see build.sh's "gl1
-			// shelved for now" comment) -- listed anyway since the
-			// unified binary (RENDERER=unified, build.sh) doesn't even
-			// link gl1 in yet, and vid.c's own runtime fallback
-			// (VID_LoadRenderer, YQ2_KAIOS_UNIFIED_RENDERERS branch)
-			// would silently revert to Software if it were ever picked
-			// regardless -- this label says so up front instead of
-			// letting the player find out the hard way.
-			{ label: 'GL1 (недоступно)', values: ['gl1'] },
+			// gl1 is genuinely linked into the unified binary now (see
+			// build.sh's GL1_UNIFIED_FLAGS) and its WebGL/GLES1-emulation
+			// context creation succeeds in headless testing -- but the
+			// real KaiOS device's much older Gecko-48-class WebGL
+			// implementation is what actually matters here, and that has
+			// not been confirmed since gl1 last shipped (see git history
+			// around the occlusion-culling regression). "экспериментально"
+			// instead of a flat "available" label until that real-device
+			// confirmation comes back.
+			{ label: 'GL1 (экспериментально)', values: ['gl1'] },
 			{ label: 'GLES3', values: ['gles3'] }
 		],
 		def: 0

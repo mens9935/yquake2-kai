@@ -77,19 +77,17 @@ if [ "$RENDERER" = "unified" ]; then
 	COMMON_FLAGS+=(-DYQ2_KAIOS_UNIFIED_RENDERERS)
 fi
 
-# gl1 shelved by default (see autoexec.cfg's comment: real-device WebGL
-# context creation has failed every attempt so far, even bypassing SDL
-# entirely and matching a known-working reference implementation's exact
-# context attributes) -- RENDERER=gl1 brings it back for one-off testing
-# of new theories without disturbing the shipped soft build.
-if [ "$RENDERER" = "gl1" ]; then
+# gl1 needs Emscripten's GLES1-via-WebGL1 fixed-function emulation
+# layer, on by default for RENDERER=unified (gl1 is one of the three
+# renderers linked into it) and still available standalone via
+# RENDERER=gl1 for one-off testing of just that renderer.
+if [ "$RENDERER" = "gl1" ] || [ "$RENDERER" = "unified" ]; then
 	COMMON_FLAGS+=(-s LEGACY_GL_EMULATION=1)
 	# gl1 only ever uses the fixed-function pipeline (no GLSL shaders
 	# anywhere in this renderer) -- GL_FFP_ONLY tells the emulation
 	# layer it never needs to support the programmable path, which per
 	# Emscripten's own docs lets it skip some of LEGACY_GL_EMULATION's
-	# overhead. Untested on real hardware yet; cheap to try given the
-	# confirmed ~700-poly FPS cliff smells like per-GL-call overhead.
+	# overhead.
 	COMMON_FLAGS+=(-s GL_FFP_ONLY=1)
 fi
 
@@ -195,6 +193,110 @@ GL3_UNIFIED_FLAGS=(
 	-Dvup=gl3_vup
 )
 
+# RENDERER=unified only: gl1, same treatment as GL3_UNIFIED_FLAGS above
+# -- GetRefAPI plus every OTHER non-static global gl1's own files happen
+# to share a name with in soft and/or gl3 (found the same way: linking
+# all three together and diffing `llvm-nm -g --defined-only` across all
+# three object sets). gl1 shares a lot more surface with both than gl3
+# and soft share with each other (full renderer-internal functions like
+# Mod_Init/R_InitImages/R_DrawAliasModel, not just cvars/small globals)
+# since all three forked from the same upstream renderer lineage -- each
+# was checked the same way as GL3_UNIFIED_FLAGS' list to rule out an
+# actual outside reference before renaming. The same four symbols
+# genuinely reached from outside a renderer (`ri`, `r_polycount`,
+# `kaios_cube_test_active`/`RI_KaiosCubeTestFrame`) are NOT in this list
+# either, for the same reason -- gl1_main.c externs to soft's single
+# real definition instead (see its YQ2_KAIOS_UNIFIED_RENDERERS block).
+GL1_UNIFIED_FLAGS=(
+	"${GL1_FLAGS[@]}"
+	-DGetRefAPI=GL1GetRefAPI
+	-DDraw_InitLocal=gl1_Draw_InitLocal
+	-DIsHighDPIaware=gl1_IsHighDPIaware
+	-DMod_ClusterPVS=gl1_Mod_ClusterPVS
+	-DMod_Free=gl1_Mod_Free
+	-DMod_FreeAll=gl1_Mod_FreeAll
+	-DMod_Init=gl1_Mod_Init
+	-DMod_Modellist_f=gl1_Mod_Modellist_f
+	-DR_BuildLightMap=gl1_R_BuildLightMap
+	-DR_DrawAliasModel=gl1_R_DrawAliasModel
+	-DR_DrawAlphaSurfaces=gl1_R_DrawAlphaSurfaces
+	-DR_DrawParticles=gl1_R_DrawParticles
+	-DR_FindImage=gl1_R_FindImage
+	-DR_FreeUnusedImages=gl1_R_FreeUnusedImages
+	-DR_ImageHasFreeSpace=gl1_R_ImageHasFreeSpace
+	-DR_ImageList_f=gl1_R_ImageList_f
+	-DR_InitImages=gl1_R_InitImages
+	-DR_LightPoint=gl1_R_LightPoint
+	-DR_PushDlights=gl1_R_PushDlights
+	-DR_SetupFrame=gl1_R_SetupFrame
+	-DR_ShutdownImages=gl1_R_ShutdownImages
+	-Dc_alias_polys=gl1_c_alias_polys
+	-Dc_brush_polys=gl1_c_brush_polys
+	-Dc_sky=gl1_c_sky
+	-Dc_visible_lightmaps=gl1_c_visible_lightmaps
+	-Dc_visible_textures=gl1_c_visible_textures
+	-Dd_8to24table=gl1_d_8to24table
+	-Ddraw_chars=gl1_draw_chars
+	-Dfrustum=gl1_frustum
+	-Dgl_anisotropic=gl1_gl_anisotropic
+	-Dgl_drawbuffer=gl1_gl_drawbuffer
+	-Dgl_filter_max=gl1_gl_filter_max
+	-Dgl_filter_min=gl1_gl_filter_min
+	-Dgl_finish=gl1_gl_finish
+	-Dgl_lefthand=gl1_gl_lefthand
+	-Dgl_lightmap=gl1_gl_lightmap
+	-Dgl_msaa_samples=gl1_gl_msaa_samples
+	-Dgl_nobind=gl1_gl_nobind
+	-Dgl_nolerp_list=gl1_gl_nolerp_list
+	-Dgl_polyblend=gl1_gl_polyblend
+	-Dgl_shadows=gl1_gl_shadows
+	-Dgl_texturemode=gl1_gl_texturemode
+	-Dgl_zfix=gl1_gl_zfix
+	-Dlightspot=gl1_lightspot
+	-Dr_2D_unfiltered=gl1_r_2D_unfiltered
+	-Dr_alpha_surfaces=gl1_r_alpha_surfaces
+	-Dr_clear=gl1_r_clear
+	-Dr_cull=gl1_r_cull
+	-Dr_customheight=gl1_r_customheight
+	-Dr_customwidth=gl1_r_customwidth
+	-Dr_distcull_dist=gl1_r_distcull_dist
+	-Dr_dlightframecount=gl1_r_dlightframecount
+	-Dr_drawentities=gl1_r_drawentities
+	-Dr_drawworld=gl1_r_drawworld
+	-Dr_farsee=gl1_r_farsee
+	-Dr_fixsurfsky=gl1_r_fixsurfsky
+	-Dr_framecount=gl1_r_framecount
+	-Dr_fullbright=gl1_r_fullbright
+	-Dr_gunfov=gl1_r_gunfov
+	-Dr_lerp_list=gl1_r_lerp_list
+	-Dr_lerpmodels=gl1_r_lerpmodels
+	-Dr_lightlevel=gl1_r_lightlevel
+	-Dr_lockpvs=gl1_r_lockpvs
+	-Dr_mode=gl1_r_mode
+	-Dr_modulate=gl1_r_modulate
+	-Dr_norefresh=gl1_r_norefresh
+	-Dr_novis=gl1_r_novis
+	-Dr_oldviewcluster=gl1_r_oldviewcluster
+	-Dr_origin=gl1_r_origin
+	-Dr_retexturing=gl1_r_retexturing
+	-Dr_scale8bittextures=gl1_r_scale8bittextures
+	-Dr_speeds=gl1_r_speeds
+	-Dr_validation=gl1_r_validation
+	-Dr_videos_unfiltered=gl1_r_videos_unfiltered
+	-Dr_viewcluster=gl1_r_viewcluster
+	-Dr_visframecount=gl1_r_visframecount
+	-Dr_vsync=gl1_r_vsync
+	-Dr_worldmodel=gl1_r_worldmodel
+	-Dregistration_sequence=gl1_registration_sequence
+	-Dskyaxis=gl1_skyaxis
+	-Dskyclip=gl1_skyclip
+	-Dst_to_vec=gl1_st_to_vec
+	-Dvec_to_st=gl1_vec_to_st
+	-Dvpn=gl1_vpn
+	-Dvright=gl1_vright
+	-Dvup=gl1_vup
+)
+
 # The "baseq2" game code is normally built as its own game.so, with its
 # own private cvar_t* cache pointers that happen to share names with
 # globals of the same purpose in the client/server (maxclients,
@@ -280,6 +382,8 @@ elif [ "$RENDERER" = "unified" ]; then
 	compile_group refsoft SOFT_UNIFIED_FLAGS REFSOFT_ONLY_SRCS
 	echo "==> Compiling gl3/GLES2 renderer (${#REFGL3_ONLY_SRCS[@]} files)"
 	compile_group refgl3 GL3_UNIFIED_FLAGS REFGL3_ONLY_SRCS
+	echo "==> Compiling gl1/GLES1 renderer (${#REFGL1_ONLY_SRCS[@]} files)"
+	compile_group refgl1 GL1_UNIFIED_FLAGS REFGL1_ONLY_SRCS
 else
 	echo "==> Compiling software renderer (${#REFSOFT_SRCS[@]} files)"
 	compile_group refsoft NO_EXTRA REFSOFT_SRCS
