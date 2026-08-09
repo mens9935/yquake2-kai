@@ -16,7 +16,7 @@
 		font-size: 13px;
 		overflow: hidden;
 	}
-	#picker, #status {
+	#menu, #picker, #settings, #status {
 		box-sizing: border-box;
 		position: absolute;
 		top: 0;
@@ -27,27 +27,27 @@
 		padding: 8px;
 		background: #000;
 	}
-	#picker h1 {
+	#menu h1, #picker h1, #settings h1 {
 		font-size: 15px;
 		margin: 0 0 8px 0;
 		color: #fff;
 	}
-	#picker ul {
+	#menu ul, #picker ul, #settings ul {
 		list-style: none;
 		margin: 0;
 		padding: 0;
 	}
-	#picker li {
+	#menu li, #picker li, #settings li {
 		padding: 4px 4px;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	#picker li.selected {
+	#menu li.selected, #picker li.selected, #settings li.selected {
 		background: #35c;
 		color: #fff;
 	}
-	#picker .hint, #status .hint {
+	#menu .hint, #picker .hint, #settings .hint, #status .hint {
 		position: absolute;
 		bottom: 6px;
 		left: 8px;
@@ -55,7 +55,7 @@
 		font-size: 11px;
 		color: #888;
 	}
-	#status {
+	#picker, #settings, #status {
 		display: none;
 	}
 	#status .bar {
@@ -90,10 +90,22 @@
 </head>
 <body>
 
+<div id="menu">
+	<h1>Quake II</h1>
+	<ul id="menu-list"></ul>
+	<div class="hint">OK: select</div>
+</div>
+
 <div id="picker">
 	<h1>Select baseq2 folder</h1>
 	<ul id="picker-list"></ul>
-	<div class="hint">OK: select&nbsp;&nbsp;RSK: rescan</div>
+	<div class="hint">OK: select&nbsp;&nbsp;RSK: back</div>
+</div>
+
+<div id="settings">
+	<h1>Настройки</h1>
+	<ul id="settings-list"></ul>
+	<div class="hint">OK: toggle&nbsp;&nbsp;RSK: back</div>
 </div>
 
 <div id="status">

@@ -23,10 +23,13 @@
 'use strict';
 
 var GAMEDIR = 'baseq2';
-var PAK_MARKER = '/' + GAMEDIR + '/pak0.pak';
 
+var menuEl = document.getElementById('menu');
+var menuListEl = document.getElementById('menu-list');
 var pickerEl = document.getElementById('picker');
 var pickerListEl = document.getElementById('picker-list');
+var settingsEl = document.getElementById('settings');
+var settingsListEl = document.getElementById('settings-list');
 var statusEl = document.getElementById('status');
 var statusTextEl = document.getElementById('status-text');
 var statusBarEl = document.getElementById('status-bar');
@@ -136,6 +139,22 @@ var PREVENT_DEFAULT = {
 
 var engineStarted = false;
 
+// The pre-boot menu/picker/settings screens (see the "Main menu" section
+// below) need their own keydown handling for navigation, but they can't
+// just add a second, independent window keydown listener the way a
+// normal page could: the stopImmediatePropagation() below (needed to
+// keep a short Enter press from also reaching the OS's own long-press
+// Assistant gesture recognizer) stops *every* other keydown listener on
+// window from ever firing for that event, capture or bubble, including
+// ones registered later -- which silently ate Enter/arrow presses aimed
+// at those screens (discovered via the main menu never responding to OK
+// at all; showPicker() had the exact same latent bug, just never
+// exercised before since every real test/build so far only ever hit its
+// single-candidate auto-proceed path). Routing pre-boot navigation
+// through this one already-tuned capture-phase pipeline instead of a
+// second listener sidesteps that entirely.
+var activeMenuKeyHandler = null;
+
 function installKeyHandlers() {
 	function handle(down) {
 		return function (ev) {
@@ -151,6 +170,10 @@ function installKeyHandlers() {
 				if (ev.key === 'Enter') {
 					ev.stopImmediatePropagation();
 				}
+			}
+
+			if (down && activeMenuKeyHandler) {
+				activeMenuKeyHandler(ev);
 			}
 
 			if (!engineStarted) {
@@ -516,16 +539,34 @@ function enumerateStorage(storage, path) {
 	});
 }
 
+// Case-insensitive on both the folder name ("BaseQ2", "BASEQ2", ... all
+// match) and the pak file name -- matched by basename instead of a fixed
+// lowercase path string, so the actual on-disk casing of the baseq2
+// folder (dirName below) can be recovered and reused as-is by
+// copyBaseq2() instead of assuming it matches GAMEDIR's casing exactly.
+var PAK0_RE = /\/pak0\.pak$/i;
+
 function findBaseq2Candidates(files) {
 	var candidates = [];
+	var seen = {};
 	for (var i = 0; i < files.length; i++) {
 		var name = files[i].name || '';
 		var normalized = '/' + name.replace(/^\/+/, '');
-		if (normalized.toLowerCase().indexOf(PAK_MARKER.toLowerCase()) !== -1) {
-			var root = normalized.slice(0,
-				normalized.toLowerCase().lastIndexOf(PAK_MARKER.toLowerCase()));
-			candidates.push({ root: root, file: files[i] });
+		if (!PAK0_RE.test(normalized)) {
+			continue;
 		}
+		var parts = normalized.split('/');
+		var dirName = parts[parts.length - 2] || '';
+		if (dirName.toLowerCase() !== GAMEDIR) {
+			continue;
+		}
+		var root = parts.slice(0, parts.length - 2).join('/');
+		var key = root + '/' + dirName;
+		if (seen[key]) {
+			continue;
+		}
+		seen[key] = true;
+		candidates.push({ root: root, dirName: dirName, file: files[i] });
 	}
 	return candidates;
 }
@@ -541,7 +582,7 @@ function showPicker(candidates, onChosen) {
 		pickerListEl.innerHTML = '';
 		for (var i = 0; i < candidates.length; i++) {
 			var li = document.createElement('li');
-			li.textContent = candidates[i].root || '/';
+			li.textContent = (candidates[i].root || '') + '/' + candidates[i].dirName;
 			if (i === selected) {
 				li.className = 'selected';
 			}
@@ -557,13 +598,16 @@ function showPicker(candidates, onChosen) {
 			selected = Math.min(candidates.length - 1, selected + 1);
 			render();
 		} else if (ev.key === 'Enter') {
-			window.removeEventListener('keydown', onKeyDown);
+			activeMenuKeyHandler = null;
 			onChosen(candidates[selected]);
+		} else if (ev.key === 'SoftRight') {
+			activeMenuKeyHandler = null;
+			showMainMenu();
 		}
 	}
 
 	render();
-	window.addEventListener('keydown', onKeyDown);
+	activeMenuKeyHandler = onKeyDown;
 }
 
 // ---------------------------------------------------------------------
@@ -592,13 +636,21 @@ function mkdirTreeFor(path) {
 // start() -- no need to enumerate() the storage a second time, that's
 // one more thing that can fail for no benefit, we already have exactly
 // the data we need.
-function copyBaseq2(files, root) {
+//
+// `choice` is one of findBaseq2Candidates()'s entries: {root, dirName}.
+// dirName is the folder's *actual* on-disk casing (e.g. "BaseQ2"), not
+// GAMEDIR's fixed lowercase spelling -- matching against GAMEDIR here
+// instead would silently filter toCopy down to nothing whenever the
+// card's folder isn't spelled exactly "baseq2", since file.name below
+// carries the real casing from the storage listing.
+function copyBaseq2(files, choice) {
+	var root = choice.root;
 	// `root` is baseq2's *parent* directory, and is "" when baseq2 sits
 	// right at the SD card root -- root + '/' would then be just "/",
 	// which every single path on the card starts with, copying the
 	// whole card instead of just the baseq2 folder. Scope explicitly to
-	// ".../baseq2/" instead, which is correct whether root is empty or not.
-	var srcPrefix = root + '/' + GAMEDIR + '/';
+	// ".../<dirName>/" instead, which is correct whether root is empty or not.
+	var srcPrefix = root + '/' + choice.dirName + '/';
 
 	// save/ and scrnshot/ are pure engine *output* -- the engine
 	// creates them itself under its writable config dir, they're never
@@ -610,10 +662,10 @@ function copyBaseq2(files, root) {
 
 	var toCopy = files.filter(function (f) {
 		var norm = '/' + f.name.replace(/^\/+/, '');
-		if (norm.indexOf(srcPrefix) !== 0) {
+		if (norm.toLowerCase().indexOf(srcPrefix.toLowerCase()) !== 0) {
 			return false;
 		}
-		var rel = norm.slice(srcPrefix.length);
+		var rel = norm.slice(srcPrefix.length).toLowerCase();
 		for (var i = 0; i < SKIP_PREFIXES.length; i++) {
 			if (rel.indexOf(SKIP_PREFIXES[i]) === 0) {
 				return false;
@@ -628,7 +680,18 @@ function copyBaseq2(files, root) {
 			return Promise.resolve();
 		}
 		var file = toCopy[i];
-		var rel = ('/' + file.name.replace(/^\/+/, '')).slice(srcPrefix.length);
+		// Lowercased on purpose: the bsp/model/sound data referenced from
+		// inside pak0.pak (and the engine's own hardcoded "pak%d.pak" scan,
+		// filesystem.c) is always lowercase by id Software's own
+		// convention, but the SD card's actual on-disk casing can be
+		// anything (some card readers/OSes normalize case, some preserve
+		// whatever the source zip/archive had) -- normalizing every
+		// destination path here is what makes "case insensitive to the
+		// folder and files inside" (not just the top-level baseq2 folder
+		// itself) actually true, and is what lets installLazyPakFile()'s
+		// PAK_FILE_RE match below land pak0.pak at the exact lowercase
+		// path FS_SetGamedir() (filesystem.c) goes looking for.
+		var rel = (('/' + file.name.replace(/^\/+/, '')).slice(srcPrefix.length)).toLowerCase();
 		var dest = '/' + GAMEDIR + '/' + rel;
 
 		if (PAK_FILE_RE.test(rel)) {
@@ -777,6 +840,13 @@ function writeAutoexec() {
 		if (!text) {
 			return;
 		}
+		// Appended last so it wins over whatever the static file itself
+		// sets for the same cvars -- see buildLauncherSettingsCfg()'s
+		// comment for why only explicitly-toggled entries end up here.
+		var overrides = buildLauncherSettingsCfg();
+		if (overrides) {
+			text += '\n\n// KaiOS launcher settings screen overrides\n' + overrides + '\n';
+		}
 		// Write to the gamedir (read search path) and to the engine's
 		// writable config dir (~/.yq2/baseq2 under Emscripten's
 		// synthesized HOME) so it's found regardless of which one
@@ -865,10 +935,6 @@ function bootEngine() {
 	});
 }
 
-// ---------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------
-
 // NOTE: baseq2's loose files are copied fresh into plain (non-persistent)
 // MEMFS on every launch, not cached across launches -- but those are
 // small (a few KB of configs), so redoing that copy each launch is
@@ -886,15 +952,78 @@ function bootEngine() {
 // wasn't ours to chunk. Pulled back out at the time to prioritize a
 // build that reliably boots at all; moot now that the file it choked
 // on is never copied in the first place.
-function start() {
-	// Temporary diagnostic, see the note by bootEngine().
-	console.log('[kaios] start() called, document.readyState=' + document.readyState);
 
-	installKeyHandlers();
-	installWakeLock();
+// ---------------------------------------------------------------------
+// Main menu (shown first, on every launch): find baseq2 / settings.
+// ---------------------------------------------------------------------
+
+var MENU_ITEMS = ['Найти baseq2', 'Настройки'];
+
+function hideAllScreens() {
+	menuEl.style.display = 'none';
+	pickerEl.style.display = 'none';
+	settingsEl.style.display = 'none';
+	statusEl.style.display = 'none';
+}
+
+function showMainMenu() {
+	var selected = 0;
+
+	function render() {
+		menuListEl.innerHTML = '';
+		for (var i = 0; i < MENU_ITEMS.length; i++) {
+			var li = document.createElement('li');
+			li.textContent = MENU_ITEMS[i];
+			if (i === selected) {
+				li.className = 'selected';
+			}
+			menuListEl.appendChild(li);
+		}
+	}
+
+	function onKeyDown(ev) {
+		if (ev.key === 'ArrowUp') {
+			selected = (selected - 1 + MENU_ITEMS.length) % MENU_ITEMS.length;
+			render();
+		} else if (ev.key === 'ArrowDown') {
+			selected = (selected + 1) % MENU_ITEMS.length;
+			render();
+		} else if (ev.key === 'Enter') {
+			activeMenuKeyHandler = null;
+			if (selected === 0) {
+				startBaseq2Scan();
+			} else {
+				showSettingsScreen();
+			}
+		}
+	}
+
+	hideAllScreens();
+	menuEl.style.display = 'block';
+	render();
+	activeMenuKeyHandler = onKeyDown;
+}
+
+// Like setStatus(), but for a dead-end (scan/copy failure) that would
+// otherwise strand the player on the status screen with no way back --
+// RSK returns to the main menu instead of leaving the app inert.
+function showErrorWithBack(text) {
+	setStatus(text + '\n\nRSK: back to menu');
+
+	function onKeyDown(ev) {
+		if (ev.key === 'SoftRight') {
+			activeMenuKeyHandler = null;
+			showMainMenu();
+		}
+	}
+	activeMenuKeyHandler = onKeyDown;
+}
+
+function startBaseq2Scan() {
+	hideAllScreens();
 
 	if (!navigator.getDeviceStorage) {
-		setStatus('No Device Storage API on this browser.\n' +
+		showErrorWithBack('No Device Storage API on this browser.\n' +
 			'This shell needs to run as a packaged KaiOS app.');
 		return;
 	}
@@ -906,7 +1035,7 @@ function start() {
 		var candidates = findBaseq2Candidates(files);
 
 		if (candidates.length === 0) {
-			setStatus('No baseq2/pak0.pak found on the SD card.\n' +
+			showErrorWithBack('No baseq2/pak0.pak found on the SD card.\n' +
 				'Copy your baseq2 folder to the SD card and reopen the app.');
 			return;
 		}
@@ -921,9 +1050,9 @@ function start() {
 				return mountPersistentConfig();
 			}).then(function () {
 				setStatus('Copying baseq2...', 0);
-				return copyBaseq2(files, choice.root);
+				return copyBaseq2(files, choice);
 			}).then(bootEngine, function (err) {
-				setStatus('Copy failed: ' + describeError(err));
+				showErrorWithBack('Copy failed: ' + describeError(err));
 			});
 		}
 
@@ -935,8 +1064,107 @@ function start() {
 			showPicker(candidates, proceed);
 		}
 	}, function (err) {
-		setStatus('Could not scan SD card: ' + describeError(err));
+		showErrorWithBack('Could not scan SD card: ' + describeError(err));
 	});
+}
+
+// ---------------------------------------------------------------------
+// Settings screen -- pre-boot cvar toggles, applied via an override
+// appended to autoexec.cfg (see buildLauncherSettingsCfg()/writeAutoexec()).
+//
+// Mirrors a subset of the in-game KaiOS Tuning options menu (menu.c) --
+// the cvar names and defaults below are kept identical to that menu's
+// (and to the matching Cvar_Get() defaults in cl_main.c/sound.c) on
+// purpose, so a value picked here and one picked in-game mean the same
+// thing. `def` here is only the fallback shown/applied when the player
+// has never touched that entry from *this* screen -- see
+// buildLauncherSettingsCfg() for why an untouched entry writes nothing.
+// ---------------------------------------------------------------------
+
+var SETTINGS = [
+	{ cvar: 's_initsound',  label: 'Sound',               def: true },
+	{ cvar: 'r_lerpmodels', label: 'Model interpolation', def: true },
+	{ cvar: 'cl_lights',    label: 'Dynamic lights',      def: false },
+	{ cvar: 'cl_particles', label: 'Particles',           def: false }
+];
+
+function settingStorageKey(cvar) {
+	return 'kaios_setting_' + cvar;
+}
+
+function getSettingValue(entry) {
+	var raw = localStorage.getItem(settingStorageKey(entry.cvar));
+	if (raw === null) {
+		return entry.def;
+	}
+	return raw === '1';
+}
+
+function setSettingValue(entry, value) {
+	localStorage.setItem(settingStorageKey(entry.cvar), value ? '1' : '0');
+}
+
+// Only cvars the player actually toggled from this screen are written
+// out -- an entry nobody touched leaves config.cfg (and the engine's
+// own Cvar_Get default) in charge, so this can't silently fight the
+// in-game KaiOS Tuning menu over the same cvar on the next launch.
+function buildLauncherSettingsCfg() {
+	var lines = [];
+	for (var i = 0; i < SETTINGS.length; i++) {
+		var entry = SETTINGS[i];
+		if (localStorage.getItem(settingStorageKey(entry.cvar)) === null) {
+			continue;
+		}
+		lines.push('set ' + entry.cvar + ' ' + (getSettingValue(entry) ? '1' : '0'));
+	}
+	return lines.join('\n');
+}
+
+function showSettingsScreen() {
+	var selected = 0;
+
+	function render() {
+		settingsListEl.innerHTML = '';
+		for (var i = 0; i < SETTINGS.length; i++) {
+			var li = document.createElement('li');
+			li.textContent = SETTINGS[i].label + ': ' + (getSettingValue(SETTINGS[i]) ? 'On' : 'Off');
+			if (i === selected) {
+				li.className = 'selected';
+			}
+			settingsListEl.appendChild(li);
+		}
+	}
+
+	function onKeyDown(ev) {
+		if (ev.key === 'ArrowUp') {
+			selected = (selected - 1 + SETTINGS.length) % SETTINGS.length;
+			render();
+		} else if (ev.key === 'ArrowDown') {
+			selected = (selected + 1) % SETTINGS.length;
+			render();
+		} else if (ev.key === 'Enter') {
+			setSettingValue(SETTINGS[selected], !getSettingValue(SETTINGS[selected]));
+			render();
+		} else if (ev.key === 'SoftRight') {
+			activeMenuKeyHandler = null;
+			showMainMenu();
+		}
+	}
+
+	hideAllScreens();
+	settingsEl.style.display = 'block';
+	render();
+	activeMenuKeyHandler = onKeyDown;
+}
+
+function start() {
+	// Temporary diagnostic, see the note by bootEngine().
+	console.log('[kaios] start() called, document.readyState=' + document.readyState);
+
+	installKeyHandlers();
+	installWakeLock();
+
+	showMainMenu();
 }
 
 // Wait for the full 'load' event, not just DOMContentLoaded/'interactive'.
