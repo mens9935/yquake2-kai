@@ -343,6 +343,54 @@ extern gl3state_t gl3state;
 extern int gl3_visframecount; /* bumped when going to a new PVS */
 extern int gl3_framecount; /* used for dlight push checking */
 
+#ifdef __EMSCRIPTEN__
+/* Per-frame glBufferData()+glDrawArrays() timing, accumulated across
+ * every GL3_BufferAndDraw3D() call (world surfaces, particles) and
+ * every alias-mesh buffer call (gl3_mesh.c) -- reset in
+ * GL3_BeginFrame(), printed and reset again in GL3_EndFrame(). Off by
+ * default (kaios_debug_gl3vbo). This is the per-draw-call
+ * glBufferData() pattern gl3_main.c's own comment already flags as a
+ * known stall risk on some drivers (see GL3_BufferAndDraw3D) -- never
+ * actually measured on this platform until now. */
+extern long long gl3_debug_vbo_us;
+extern long long gl3_debug_vbo_max_us;
+extern int gl3_debug_vbo_calls;
+extern cvar_t *kaios_debug_gl3vbo;
+
+/* static inline, not a normal function -- included from multiple .c
+ * files (gl3_main.c, gl3_mesh.c), each gets its own copy, no linkage
+ * conflict. Call GL3_DebugVBOTick() right before a glBufferData()/
+ * glDrawArrays() pair and pass its result to GL3_DebugVBOTock()
+ * right after. kaios_debug_gl3vbo is assumed already looked up (done
+ * once per frame in GL3_BeginFrame(), which always runs before any
+ * draw call). */
+static inline long long
+GL3_DebugVBOTick(void)
+{
+	return (kaios_debug_gl3vbo && kaios_debug_gl3vbo->value) ? Sys_Microseconds() : 0;
+}
+
+static inline void
+GL3_DebugVBOTock(long long t0)
+{
+	long long dt;
+
+	if (!kaios_debug_gl3vbo || !kaios_debug_gl3vbo->value)
+	{
+		return;
+	}
+
+	dt = Sys_Microseconds() - t0;
+	gl3_debug_vbo_us += dt;
+	gl3_debug_vbo_calls++;
+
+	if (dt > gl3_debug_vbo_max_us)
+	{
+		gl3_debug_vbo_max_us = dt;
+	}
+}
+#endif
+
 extern int gl3_viewcluster, gl3_viewcluster2, gl3_oldviewcluster, gl3_oldviewcluster2;
 
 extern int c_brush_polys, c_alias_polys;

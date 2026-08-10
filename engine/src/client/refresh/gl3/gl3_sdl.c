@@ -137,6 +137,15 @@ DebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei le
  */
 void GL3_EndFrame(void)
 {
+#ifdef __EMSCRIPTEN__
+	if (kaios_debug_gl3vbo && kaios_debug_gl3vbo->value && gl3_debug_vbo_calls > 0)
+	{
+		Com_Printf("KAIOS_GL3_VBO: calls=%d total=%dms max=%dms\n",
+			gl3_debug_vbo_calls, (int)(gl3_debug_vbo_us / 1000),
+			(int)(gl3_debug_vbo_max_us / 1000));
+	}
+#endif
+
 	if(gl3config.useBigVBO)
 	{
 		// I think this is a good point to orphan the VBO and get a fresh one

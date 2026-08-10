@@ -80,6 +80,17 @@ int gl3_framecount; /* used for dlight push checking */
 int c_brush_polys, c_alias_polys;
 
 #ifdef __EMSCRIPTEN__
+/* See header/local.h's comment -- per-frame glBufferData() timing,
+ * reset in GL3_BeginFrame(), added to from every GL3_BufferAndDraw3D()
+ * call in this file and every alias-mesh buffer call in gl3_mesh.c,
+ * printed and reset in GL3_EndFrame() (gl3_sdl.c). */
+long long gl3_debug_vbo_us;
+long long gl3_debug_vbo_max_us;
+int gl3_debug_vbo_calls;
+cvar_t *kaios_debug_gl3vbo;
+#endif
+
+#ifdef __EMSCRIPTEN__
 /* cl_screen.c's KAIOS_STATS diagnostic (SCR_DrawKaiosStats) references
  * r_polycount directly (extern int r_polycount;), and frame.c
  * (shared by all renderers) references kaios_cube_test_active/
@@ -798,8 +809,15 @@ GL3_BufferAndDraw3D(const gl3_3D_vtx_t* verts, int numVerts, GLenum drawMode)
 	// gl3config.useBigVBO only ever gets set true by AMD-desktop-driver
 	// detection or the gl3_usebigvbo cvar (both irrelevant/unset on
 	// this platform), so just always take the plain path.
-	glBufferData( GL_ARRAY_BUFFER, sizeof(gl3_3D_vtx_t)*numVerts, verts, GL_STREAM_DRAW );
-	glDrawArrays( drawMode, 0, numVerts );
+	// YQ2_GL3_GLES2_WEB is only ever defined for the Emscripten/KaiOS
+	// build (see build.sh's -DYQ2_GL3_GLES2_WEB), so __EMSCRIPTEN__ is
+	// always also defined here -- no need for a separate guard.
+	{
+		long long vbo_t0 = GL3_DebugVBOTick();
+		glBufferData( GL_ARRAY_BUFFER, sizeof(gl3_3D_vtx_t)*numVerts, verts, GL_STREAM_DRAW );
+		glDrawArrays( drawMode, 0, numVerts );
+		GL3_DebugVBOTock(vbo_t0);
+	}
 #else
 	if(!gl3config.useBigVBO)
 	{
@@ -1169,8 +1187,17 @@ GL3_DrawParticles(void)
 		GL3_BindVAO(gl3state.vaoParticle);
 		GL3_BindVBO(gl3state.vboParticle);
 #endif
+#ifdef __EMSCRIPTEN__
+		{
+			long long vbo_t0 = GL3_DebugVBOTick();
+			glBufferData(GL_ARRAY_BUFFER, sizeof(part_vtx)*numParticles, buf, GL_STREAM_DRAW);
+			glDrawArrays(GL_POINTS, 0, numParticles);
+			GL3_DebugVBOTock(vbo_t0);
+		}
+#else
 		glBufferData(GL_ARRAY_BUFFER, sizeof(part_vtx)*numParticles, buf, GL_STREAM_DRAW);
 		glDrawArrays(GL_POINTS, 0, numParticles);
+#endif
 
 		glDisable(GL_BLEND);
 		glDepthMask(GL_TRUE);
@@ -2037,6 +2064,17 @@ GL3_Clear(void)
 void
 GL3_BeginFrame(float camera_separation)
 {
+#ifdef __EMSCRIPTEN__
+	if (!kaios_debug_gl3vbo)
+	{
+		kaios_debug_gl3vbo = Cvar_Get("kaios_debug_gl3vbo", "0", CVAR_ARCHIVE);
+	}
+
+	gl3_debug_vbo_us = 0;
+	gl3_debug_vbo_max_us = 0;
+	gl3_debug_vbo_calls = 0;
+#endif
+
 #if 0 // TODO: stereo stuff
 	gl_state.camera_separation = camera_separation;
 	// force a vid_restart if gl1_stereo has been modified.
