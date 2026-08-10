@@ -150,7 +150,7 @@ window.addEventListener('unhandledrejection', kaiosLogRingFlush);
 
 			if (gap > 400 || duration > 400) {
 				var line = '[kaios] KAIOS_JS_TICK: gap=' + gap.toFixed(1) +
-					'ms duration=' + duration.toFixed(1) + 'ms';
+					'ms duration=' + duration.toFixed(1) + 'ms wall=' + Date.now();
 				console.log(line);
 				kaiosLogRingPush(line);
 			}
@@ -191,7 +191,7 @@ window.addEventListener('unhandledrejection', kaiosLogRingFlush);
 		lastBeat = now;
 
 		if (gap > 400) {
-			var line = '[kaios] KAIOS_HEARTBEAT_GAP: gap=' + gap.toFixed(1) + 'ms';
+			var line = '[kaios] KAIOS_HEARTBEAT_GAP: gap=' + gap.toFixed(1) + 'ms wall=' + Date.now();
 			console.log(line);
 			kaiosLogRingPush(line);
 		}
@@ -213,7 +213,7 @@ window.addEventListener('unhandledrejection', kaiosLogRingFlush);
 // with real timestamps on both sides.
 document.addEventListener('visibilitychange', function () {
 	var line = '[kaios] KAIOS_VISIBILITY: state=' + document.visibilityState +
-		' t=' + performance.now().toFixed(1);
+		' t=' + performance.now().toFixed(1) + ' wall=' + Date.now();
 	console.log(line);
 	kaiosLogRingPush(line);
 });
@@ -239,7 +239,7 @@ document.addEventListener('visibilitychange', function () {
 			for (var i = 0; i < entries.length; i++) {
 				var e = entries[i];
 				var line = '[kaios] KAIOS_LONGTASK: duration=' + e.duration.toFixed(1) +
-					'ms start=' + e.startTime.toFixed(1);
+					'ms start=' + e.startTime.toFixed(1) + ' wall=' + Date.now();
 				console.log(line);
 				kaiosLogRingPush(line);
 			}
