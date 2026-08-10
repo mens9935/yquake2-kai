@@ -1003,11 +1003,20 @@ Qcommon_Frame(int usec)
 			 * (module-init.js) shows as a pure browser-side gap (small
 			 * duration, big gap -- nothing in the engine's own timers
 			 * explains it) be correlated against what was actually on
-			 * screen instead of shrugged off as generic OS noise. */
+			 * screen instead of shrugged off as generic OS noise.
+			 * movedist (cl_view.c): world units the camera moved since
+			 * the previous rendered frame -- a demo1.dm2 autoplay run
+			 * with entities=0 throughout still showed frequent gap-
+			 * dominated stalls, which continuous camera traversal
+			 * (new geometry/PVS clusters entering view every frame)
+			 * could explain where entity count alone can't; this line
+			 * lets that be checked against real data instead of
+			 * guessed at. */
 			Com_Printf("KAIOS_FRAMESPIKE_BREAKDOWN: all=%dms sv=%dms gm=%dms cl=%dms rf=%dms "
-				"entities=%d particles=%d dlights=%d\n",
+				"entities=%d particles=%d dlights=%d movedist=%.0f\n",
 				all, sv, gm, cl, rf, kaios_debug_last_numentities,
-				kaios_debug_last_numparticles, kaios_debug_last_numdlights);
+				kaios_debug_last_numparticles, kaios_debug_last_numdlights,
+				kaios_debug_last_movedist);
 		}
 #endif
 	}

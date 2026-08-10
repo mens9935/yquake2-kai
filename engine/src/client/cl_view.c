@@ -100,6 +100,20 @@ static particle_t r_particles[MAX_PARTICLES];
 int kaios_debug_last_numentities;
 int kaios_debug_last_numparticles;
 int kaios_debug_last_numdlights;
+
+/* Distance the camera moved since the previous rendered frame -- a
+ * demo1.dm2 autoplay run with zero entities on screen still showed
+ * frequent gap-dominated KAIOS_JS_TICK stalls (real-device evidence),
+ * which the entity count alone can't explain but continuous camera
+ * movement/traversal (new geometry, new PVS clusters entering view
+ * every frame) plausibly could -- this makes that testable instead of
+ * guessed at. Cheap enough (one VectorSubtract+VectorLength per frame)
+ * to compute unconditionally rather than gating behind its own cvar,
+ * unlike the Com_Printf calls this feeds into (see kaios_debug_
+ * framespike's own comment for why those are gated).*/
+float kaios_debug_last_movedist;
+static vec3_t kaios_debug_prev_vieworg;
+static qboolean kaios_debug_prev_vieworg_valid;
 #endif
 
 static lightstyle_t r_lightstyles[MAX_LIGHTSTYLES];
@@ -769,6 +783,21 @@ V_RenderView(float stereo_separation)
 		kaios_debug_last_numentities = r_numentities;
 		kaios_debug_last_numparticles = r_numparticles;
 		kaios_debug_last_numdlights = r_numdlights;
+
+		if (kaios_debug_prev_vieworg_valid)
+		{
+			vec3_t delta;
+
+			VectorSubtract(cl.refdef.vieworg, kaios_debug_prev_vieworg, delta);
+			kaios_debug_last_movedist = VectorLength(delta);
+		}
+		else
+		{
+			kaios_debug_last_movedist = 0;
+			kaios_debug_prev_vieworg_valid = true;
+		}
+
+		VectorCopy(cl.refdef.vieworg, kaios_debug_prev_vieworg);
 #endif
 
 		cl.refdef.rdflags = cl.frame.playerstate.rdflags;

@@ -920,6 +920,7 @@ void StringList_Add(stringlist_t *sl, const char *s);
 extern int kaios_debug_last_numentities;
 extern int kaios_debug_last_numparticles;
 extern int kaios_debug_last_numdlights;
+extern float kaios_debug_last_movedist;
 #endif
 
 #endif
