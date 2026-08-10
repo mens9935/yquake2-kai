@@ -158,6 +158,99 @@ window.addEventListener('unhandledrejection', kaiosLogRingFlush);
 	};
 })();
 
+// ---------------------------------------------------------------------
+// setInterval heartbeat -- independent of requestAnimationFrame
+// ---------------------------------------------------------------------
+// Every render-cost hypothesis this engine's own timers could reach
+// (texture upload, VBO, WA_PLAY, entity/particle/dlight counts, camera
+// movement) has been checked against real KAIOS_FRAMESPIKE events and
+// ruled out one by one, including with sound entirely off -- the gap
+// itself (KAIOS_JS_TICK: small duration, huge gap) is real but nothing
+// inside the engine or the render path explains it. What's left is
+// genuinely outside anything content-dependent: either the whole JS
+// thread stalls (GC, OS-level preemption -- something unrelated to
+// rendering at all) or specifically requestAnimationFrame gets
+// deprioritized while the thread itself stays free (a
+// rendering/compositor-side throttle). Only a timer that has nothing
+// to do with rendering can tell those apart. setInterval is scheduled
+// by the browser's ordinary timer queue, not tied to paint/compositing
+// the way requestAnimationFrame is -- if IT stalls in lockstep with
+// KAIOS_JS_TICK's gaps, the whole thread was blocked and this has
+// nothing to do with GL3/WebGL at all; if it stays smooth while
+// KAIOS_JS_TICK still shows huge gaps, the browser is specifically
+// deprioritizing frame callbacks and the thread itself was free the
+// whole time. Same 400ms threshold as the others so every line lines
+// up 1:1 across all three.
+(function () {
+	var lastBeat = null;
+	var nominalInterval = 200;
+
+	setInterval(function () {
+		var now = performance.now();
+		var gap = (lastBeat !== null) ? (now - lastBeat) : nominalInterval;
+		lastBeat = now;
+
+		if (gap > 400) {
+			var line = '[kaios] KAIOS_HEARTBEAT_GAP: gap=' + gap.toFixed(1) + 'ms';
+			console.log(line);
+			kaiosLogRingPush(line);
+		}
+	}, nominalInterval);
+})();
+
+// ---------------------------------------------------------------------
+// Tab visibility changes
+// ---------------------------------------------------------------------
+// A stutter that lines up with the app losing the foreground (an
+// incoming call, a KaiOS system notification, the user pressing the
+// home/end key) would explain "works fine here, terrible there" as
+// session-specific interruptions rather than anything about the scene
+// being rendered -- exactly the kind of randomness that's otherwise
+// impossible to distinguish from GPU/compositor backpressure using
+// only the timers above. Logged immediately (a discrete, rare event,
+// not a per-frame cost like the two timers above), so this can be
+// cross-referenced against KAIOS_JS_TICK/KAIOS_HEARTBEAT_GAP lines
+// with real timestamps on both sides.
+document.addEventListener('visibilitychange', function () {
+	var line = '[kaios] KAIOS_VISIBILITY: state=' + document.visibilityState +
+		' t=' + performance.now().toFixed(1);
+	console.log(line);
+	kaiosLogRingPush(line);
+});
+
+// ---------------------------------------------------------------------
+// Long Tasks API (best-effort)
+// ---------------------------------------------------------------------
+// Standard way modern browsers self-report "the main thread was blocked
+// for this long, starting here" without needing our own polling --
+// strictly more precise than KAIOS_HEARTBEAT_GAP when it's available.
+// KaiOS 2.5's Gecko-48-class engine predates this API in most Firefox
+// releases, so this is feature-detected and silently skipped if
+// PerformanceObserver or the 'longtask' entry type isn't there --
+// never assume support, just take it if offered.
+(function () {
+	if (typeof PerformanceObserver === 'undefined') {
+		return;
+	}
+
+	try {
+		var obs = new PerformanceObserver(function (list) {
+			var entries = list.getEntries();
+			for (var i = 0; i < entries.length; i++) {
+				var e = entries[i];
+				var line = '[kaios] KAIOS_LONGTASK: duration=' + e.duration.toFixed(1) +
+					'ms start=' + e.startTime.toFixed(1);
+				console.log(line);
+				kaiosLogRingPush(line);
+			}
+		});
+		obs.observe({ entryTypes: ['longtask'] });
+	} catch (e) {
+		// 'longtask' entry type not supported on this engine -- expected
+		// on KaiOS 2.5, not worth logging as a real error.
+	}
+})();
+
 var Module = {
 	canvas: document.getElementById('canvas'),
 	noInitialRun: true,
