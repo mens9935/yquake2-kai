@@ -96,6 +96,68 @@ window.addEventListener('unhandledrejection', kaiosLogRingFlush);
 	}
 })();
 
+// ---------------------------------------------------------------------
+// Outer JS tick timing
+// ---------------------------------------------------------------------
+// Texture-upload, VBO, and audio-play timing (gl3_image.c/gl3_main.c/
+// webaudio.c) have all been measured directly against real
+// KAIOS_FRAMESPIKE events and ruled out -- none of them account for
+// more than a few ms while the spike's renderdelta-minus-breakdown gap
+// runs into the hundreds or low thousands. Whatever's eating that time
+// is not inside any C-side timer this engine has, which leaves exactly
+// two possibilities, and only JS can tell them apart: either it's
+// happening *inside* this frame's own callback (something our C code
+// calls into JS for that nothing wraps -- GC pressure from our own
+// allocations, Emscripten's own glue overhead) or *between* callbacks
+// entirely (the browser simply not running requestAnimationFrame
+// promptly -- OS scheduling, tab throttling) -- neither is visible
+// from inside the engine at all, no matter how many more Com_Printf
+// timers get added there.
+//
+// Browser.requestAnimationFrame (Emscripten's own runtime, baked into
+// quake2-kaios.js) looks up the bare `requestAnimationFrame` global
+// fresh on every single call rather than caching a reference once --
+// confirmed by reading the generated glue -- so patching
+// window.requestAnimationFrame here, before quake2-kaios.js is even
+// loaded, reliably wraps every engine frame's callback for the whole
+// session, with nothing on the emscripten side needing to change.
+//
+// gap = wall time since the *previous* callback started -- the JS-side
+// equivalent of cl_main.c's renderdelta, but measured with
+// performance.now() outside the engine entirely, so it can't miss
+// anything the C side's own clock might. duration = how long *this*
+// callback's own synchronous execution took, start to finish -- if
+// this comes back close to renderdelta while KAIOS_FRAMESPIKE_
+// BREAKDOWN's `all` stays small, the missing time is inside our own
+// code's execution somewhere unwrapped; if duration stays small while
+// gap is huge, the engine was never even running during the gap and
+// it's genuinely a browser/OS-level stall no amount of internal timing
+// could ever have caught. Threshold matches KAIOS_FRAMESPIKE's own
+// 400ms exactly so every line here lines up 1:1 with one there.
+(function () {
+	var lastTickStart = null;
+	var origRAF = window.requestAnimationFrame.bind(window);
+
+	window.requestAnimationFrame = function (cb) {
+		return origRAF(function (ts) {
+			var callStart = performance.now();
+			var gap = (lastTickStart !== null) ? (callStart - lastTickStart) : 0;
+			lastTickStart = callStart;
+
+			cb(ts);
+
+			var duration = performance.now() - callStart;
+
+			if (gap > 400 || duration > 400) {
+				var line = '[kaios] KAIOS_JS_TICK: gap=' + gap.toFixed(1) +
+					'ms duration=' + duration.toFixed(1) + 'ms';
+				console.log(line);
+				kaiosLogRingPush(line);
+			}
+		});
+	};
+})();
+
 var Module = {
 	canvas: document.getElementById('canvas'),
 	noInitialRun: true,
