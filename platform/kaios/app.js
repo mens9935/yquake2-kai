@@ -1673,7 +1673,8 @@ var DEBUG_ITEMS = [
 	toggleItem('debuggl1occl', 'Log: GL1 occlusion stats', 'kaios_debug_gl1occl', false),
 	toggleItem('debugprepframe', 'Log: level load phases', 'kaios_debug_prepframe', false),
 	toggleItem('debuggl3upload', 'Log: GL3 texture upload', 'kaios_debug_gl3upload', false),
-	toggleItem('debuggl3vbo', 'Log: GL3 VBO timing', 'kaios_debug_gl3vbo', false)
+	toggleItem('debuggl3vbo', 'Log: GL3 VBO timing', 'kaios_debug_gl3vbo', false),
+	toggleItem('debugwaplay', 'Log: WA play timing', 'kaios_debug_waplay', false)
 ];
 
 var SETTINGS_GROUPS = [

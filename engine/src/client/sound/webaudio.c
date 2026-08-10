@@ -435,12 +435,31 @@ WA_PushParams(int slot, int leftvol, int rightvol)
 	}, slot, gain, pan);
 }
 
+#ifdef __EMSCRIPTEN__
+/* Per-frame timing for WA_PlayChannel's createBufferSource()+start()
+ * EM_ASM call -- reset/printed once per WA_Update() (see there), same
+ * idea as gl3's kaios_debug_gl3vbo/gl3_debug_vbo_us. A firefight with
+ * several nearby monsters plus the player's own weapon can issue many
+ * of these in one frame (each is a fresh AudioBufferSourceNode + an
+ * onended closure, see WA_PlayChannel below); this is the one
+ * WA_PlayChannel-adjacent cost that neither the GL3 texture-upload
+ * nor VBO timing could ever have caught, since it's a completely
+ * separate code path. Off by default (kaios_debug_waplay). */
+static long long wa_debug_play_us;
+static long long wa_debug_play_max_us;
+static int wa_debug_play_calls;
+static cvar_t *kaios_debug_waplay;
+#endif
+
 void
 WA_PlayChannel(channel_t *ch)
 {
 	sfxcache_t *sc = ch->sfx->cache;
 	int slot = ch - channels;
 	static cvar_t *kaios_debug_webaudio_trace;
+#ifdef __EMSCRIPTEN__
+	long long play_t0;
+#endif
 
 	if (!kaios_debug_webaudio_trace)
 	{
@@ -456,6 +475,10 @@ WA_PlayChannel(channel_t *ch)
 	/* Spatialize before starting playback so it doesn't audibly begin
 	 * at whatever stale gain/pan the slot last had. */
 	SDL_Spatialize(ch);
+
+#ifdef __EMSCRIPTEN__
+	play_t0 = (kaios_debug_waplay && kaios_debug_waplay->value) ? Sys_Microseconds() : 0;
+#endif
 
 	EM_ASM({
 		var ka = Module.kaiosAudio;
@@ -514,6 +537,21 @@ WA_PlayChannel(channel_t *ch)
 			((float)(ch->rightvol - ch->leftvol) / (float)(ch->leftvol + ch->rightvol)) : 0.0f,
 		ch->autosound ? 1 : 0,
 		kaios_debug_webaudio_trace->value);
+
+#ifdef __EMSCRIPTEN__
+	if (kaios_debug_waplay && kaios_debug_waplay->value)
+	{
+		long long dt = Sys_Microseconds() - play_t0;
+
+		wa_debug_play_us += dt;
+		wa_debug_play_calls++;
+
+		if (dt > wa_debug_play_max_us)
+		{
+			wa_debug_play_max_us = dt;
+		}
+	}
+#endif
 
 	ch->end = paintedtime + sc->length;
 }
@@ -708,6 +746,17 @@ WA_Update(void)
 
 	paintedtime = cls.realtime;
 
+#ifdef __EMSCRIPTEN__
+	if (!kaios_debug_waplay)
+	{
+		kaios_debug_waplay = Cvar_Get("kaios_debug_waplay", "0", CVAR_ARCHIVE);
+	}
+
+	wa_debug_play_us = 0;
+	wa_debug_play_max_us = 0;
+	wa_debug_play_calls = 0;
+#endif
+
 	/* Browsers keep a fresh AudioContext 'suspended' until a user
 	 * gesture -- WA_Init's own resume() attempt doesn't count (it's not
 	 * itself running inside a gesture handler), and the keydown/
@@ -856,6 +905,15 @@ WA_Update(void)
 	OGG_Stream();
 
 	WA_IssuePlaysounds();
+
+#ifdef __EMSCRIPTEN__
+	if (kaios_debug_waplay->value && wa_debug_play_calls > 0)
+	{
+		Com_Printf("KAIOS_WA_PLAY: calls=%d total=%dms max=%dms\n",
+			wa_debug_play_calls, (int)(wa_debug_play_us / 1000),
+			(int)(wa_debug_play_max_us / 1000));
+	}
+#endif
 }
 
 /*
