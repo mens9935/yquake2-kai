@@ -93,6 +93,15 @@ static entity_t r_entities[MAX_ENTITIES];
 static int r_numparticles;
 static particle_t r_particles[MAX_PARTICLES];
 
+#ifdef __EMSCRIPTEN__
+/* See common.h's comment -- non-static copies of this frame's
+ * entity/particle/dlight counts, for frame.c's KAIOS_FRAMESPIKE_
+ * BREAKDOWN to read back. */
+int kaios_debug_last_numentities;
+int kaios_debug_last_numparticles;
+int kaios_debug_last_numdlights;
+#endif
+
 static lightstyle_t r_lightstyles[MAX_LIGHTSTYLES];
 
 char cl_weaponmodels[MAX_CLIENTWEAPONMODELS][MAX_QPATH];
@@ -755,6 +764,12 @@ V_RenderView(float stereo_separation)
 		cl.refdef.num_dlights = r_numdlights;
 		cl.refdef.dlights = r_dlights;
 		cl.refdef.lightstyles = r_lightstyles;
+
+#ifdef __EMSCRIPTEN__
+		kaios_debug_last_numentities = r_numentities;
+		kaios_debug_last_numparticles = r_numparticles;
+		kaios_debug_last_numdlights = r_numdlights;
+#endif
 
 		cl.refdef.rdflags = cl.frame.playerstate.rdflags;
 

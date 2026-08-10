@@ -998,8 +998,16 @@ Qcommon_Frame(int usec)
 #ifdef __EMSCRIPTEN__
 		else
 		{
-			Com_Printf("KAIOS_FRAMESPIKE_BREAKDOWN: all=%dms sv=%dms gm=%dms cl=%dms rf=%dms\n",
-				all, sv, gm, cl, rf);
+			/* entities/particles/dlights: scene complexity for the
+			 * frame just rendered -- lets a stutter that KAIOS_JS_TICK
+			 * (module-init.js) shows as a pure browser-side gap (small
+			 * duration, big gap -- nothing in the engine's own timers
+			 * explains it) be correlated against what was actually on
+			 * screen instead of shrugged off as generic OS noise. */
+			Com_Printf("KAIOS_FRAMESPIKE_BREAKDOWN: all=%dms sv=%dms gm=%dms cl=%dms rf=%dms "
+				"entities=%d particles=%d dlights=%d\n",
+				all, sv, gm, cl, rf, kaios_debug_last_numentities,
+				kaios_debug_last_numparticles, kaios_debug_last_numdlights);
 		}
 #endif
 	}

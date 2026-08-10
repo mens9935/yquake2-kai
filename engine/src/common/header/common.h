@@ -904,4 +904,22 @@ void StringList_Add(stringlist_t *sl, const char *s);
 #define StringList_Len(sl) (sl)->n
 #define StringList_Elem(sl, i) (sl)->lst[i]
 
+#ifdef __EMSCRIPTEN__
+/* Set once per frame in cl_view.c's V_RenderView() (right after it
+ * copies r_numentities/r_numparticles/r_numdlights into cl.refdef,
+ * the earliest point those counts are all known for the frame about
+ * to render) -- read back in frame.c's KAIOS_FRAMESPIKE_BREAKDOWN so
+ * a stutter that's genuinely a browser-side gap between
+ * requestAnimationFrame calls (see module-init.js's KAIOS_JS_TICK)
+ * can be correlated against scene complexity instead of guessed at.
+ * Declared here rather than in a client-only header since frame.c
+ * (common code, also built for dedicated servers) is what reads them
+ * -- safe under __EMSCRIPTEN__ only because this target is always a
+ * client build, never dedicated-server-only, so cl_view.c (which
+ * defines them) is always linked in whenever this is. */
+extern int kaios_debug_last_numentities;
+extern int kaios_debug_last_numparticles;
+extern int kaios_debug_last_numdlights;
+#endif
+
 #endif
