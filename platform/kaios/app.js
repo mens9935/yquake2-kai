@@ -1670,7 +1670,9 @@ var DEBUG_ITEMS = [
 	toggleItem('debugmem', 'Log: heap usage', 'kaios_debug_mem', false),
 	toggleItem('debugswbuf', 'Log: soft buf stats', 'kaios_debug_swbuf', false),
 	toggleItem('debuggl1buf', 'Log: GL1 buffer trace', 'kaios_debug_gl1buf', false),
-	toggleItem('debuggl1occl', 'Log: GL1 occlusion stats', 'kaios_debug_gl1occl', false)
+	toggleItem('debuggl1occl', 'Log: GL1 occlusion stats', 'kaios_debug_gl1occl', false),
+	toggleItem('debugprepframe', 'Log: level load phases', 'kaios_debug_prepframe', false),
+	toggleItem('debuggl3upload', 'Log: GL3 texture upload', 'kaios_debug_gl3upload', false)
 ];
 
 var SETTINGS_GROUPS = [

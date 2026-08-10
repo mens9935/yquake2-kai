@@ -358,6 +358,27 @@ CL_PrepRefresh(void)
 	char *name;
 	float rotate;
 	vec3_t axis;
+#ifdef __EMSCRIPTEN__
+	/* CL_PrepRefresh runs entirely outside CL_Frame()'s own sv/gm/cl/rf
+	 * timing (it's a single call from CL_Precache_f, not something
+	 * that timing wraps per-frame) and calls SCR_UpdateScreen() --
+	 * itself a real R_BeginFrame()/render pass -- between every phase
+	 * below, so none of this function's cost has ever shown up
+	 * anywhere: KAIOS_FRAMESPIKE_BREAKDOWN only ever sees whatever the
+	 * *next* ordinary frame does. This times each phase directly
+	 * instead, off by default (kaios_debug_prepframe) same as every
+	 * other KAIOS_* diagnostic. */
+	static cvar_t *kaios_debug_prepframe;
+	int t_start, t_beginreg, t_pics, t_models, t_images, t_clients,
+		t_sky, t_endreg, t_music;
+
+	if (!kaios_debug_prepframe)
+	{
+		kaios_debug_prepframe = Cvar_Get("kaios_debug_prepframe", "0", CVAR_ARCHIVE);
+	}
+
+	t_start = kaios_debug_prepframe->value ? Sys_Milliseconds() : 0;
+#endif
 
 #ifdef __EMSCRIPTEN__
 	Kaios_LogHeapUsage("CL_PrepRefresh entry");
@@ -380,6 +401,10 @@ CL_PrepRefresh(void)
 	SCR_UpdateScreen();
 	R_BeginRegistration (mapname);
 
+#ifdef __EMSCRIPTEN__
+	t_beginreg = kaios_debug_prepframe->value ? Sys_Milliseconds() : 0;
+#endif
+
 	/* precache status bar pics */
 	Com_Printf("pics\r");
 	SCR_UpdateScreen();
@@ -389,6 +414,10 @@ CL_PrepRefresh(void)
 
 	num_cl_weaponmodels = 1;
 	strcpy(cl_weaponmodels[0], "weapon.md2");
+
+#ifdef __EMSCRIPTEN__
+	t_pics = kaios_debug_prepframe->value ? Sys_Milliseconds() : 0;
+#endif
 
 	Com_Printf("models\r");
 	SCR_UpdateScreen();
@@ -419,6 +448,10 @@ CL_PrepRefresh(void)
 		}
 	}
 
+#ifdef __EMSCRIPTEN__
+	t_models = kaios_debug_prepframe->value ? Sys_Milliseconds() : 0;
+#endif
+
 	Com_Printf("images\r");
 	SCR_UpdateScreen();
 
@@ -426,6 +459,10 @@ CL_PrepRefresh(void)
 	{
 		cl.image_precache[i] = Draw_FindPic(cl.configstrings[CS_IMAGES + i]);
 	}
+
+#ifdef __EMSCRIPTEN__
+	t_images = kaios_debug_prepframe->value ? Sys_Milliseconds() : 0;
+#endif
 
 	Com_Printf("clients\r");
 	SCR_UpdateScreen();
@@ -440,6 +477,10 @@ CL_PrepRefresh(void)
 
 	CL_LoadClientinfo(&cl.baseclientinfo, "unnamed\\male/grunt");
 
+#ifdef __EMSCRIPTEN__
+	t_clients = kaios_debug_prepframe->value ? Sys_Milliseconds() : 0;
+#endif
+
 	/* set sky textures and speed */
 	Com_Printf("sky\r");
 	SCR_UpdateScreen();
@@ -449,8 +490,16 @@ CL_PrepRefresh(void)
 
 	Com_Printf("                                     \r");
 
+#ifdef __EMSCRIPTEN__
+	t_sky = kaios_debug_prepframe->value ? Sys_Milliseconds() : 0;
+#endif
+
 	/* the renderer can now free unneeded stuff */
 	R_EndRegistration();
+
+#ifdef __EMSCRIPTEN__
+	t_endreg = kaios_debug_prepframe->value ? Sys_Milliseconds() : 0;
+#endif
 
 	/* clear any lines of console text */
 	Con_ClearNotify();
@@ -461,6 +510,19 @@ CL_PrepRefresh(void)
 
 	/* start the cd track */
 	OGG_PlayTrack(cl.configstrings[CS_CDTRACK], true, true);
+
+#ifdef __EMSCRIPTEN__
+	t_music = kaios_debug_prepframe->value ? Sys_Milliseconds() : 0;
+
+	if (kaios_debug_prepframe->value)
+	{
+		Com_Printf("KAIOS_PREP_BREAKDOWN: beginreg=%dms pics=%dms models=%dms "
+			"images=%dms clients=%dms sky=%dms endreg=%dms music=%dms total=%dms\n",
+			t_beginreg - t_start, t_pics - t_beginreg, t_models - t_pics,
+			t_images - t_models, t_clients - t_images, t_sky - t_clients,
+			t_endreg - t_sky, t_music - t_endreg, t_music - t_start);
+	}
+#endif
 }
 
 float

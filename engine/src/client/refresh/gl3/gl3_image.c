@@ -549,6 +549,30 @@ GL3_LoadPic(char *name, byte *pic, int width, int realwidth,
 	GL3_SelectTMU(GL_TEXTURE0);
 	GL3_Bind(texNum);
 
+#ifdef __EMSCRIPTEN__
+	/* Off by default (kaios_debug_gl3upload), same pattern as
+	 * sound.c's per-S_LoadSound KAIOS_MEM line -- GL3_Upload8/32
+	 * (glTexImage2D + glGenerateMipmap) run the *first* time any
+	 * given texture is seen, whether that's from CL_PrepRefresh's
+	 * precache loop (see cl_view.c's kaios_debug_prepframe) or from
+	 * an ordinary mid-frame Draw_FindPic()/skin registration -- this
+	 * is the only place both of those paths funnel through, so timing
+	 * it here catches first-seen-texture cost regardless of which one
+	 * triggered it. Declared here (covering both the 8-bit and 32-bit
+	 * branches below) rather than inside either one -- they're
+	 * sibling if/else blocks, not nested, so a declaration inside one
+	 * wouldn't be visible in the other. */
+	static cvar_t *kaios_debug_gl3upload;
+	int upload_t0, upload_ms;
+
+	if (!kaios_debug_gl3upload)
+	{
+		kaios_debug_gl3upload = Cvar_Get("kaios_debug_gl3upload", "0", CVAR_ARCHIVE);
+	}
+
+	upload_t0 = kaios_debug_gl3upload->value ? Sys_Milliseconds() : 0;
+#endif
+
 	if (bits == 8)
 	{
 		// resize 8bit images only when we forced such logic
@@ -582,11 +606,29 @@ GL3_LoadPic(char *name, byte *pic, int width, int realwidth,
 						(image->type != it_pic && image->type != it_sky),
 						image->type == it_sky);
 		}
+
+#ifdef __EMSCRIPTEN__
+		if (kaios_debug_gl3upload->value)
+		{
+			upload_ms = Sys_Milliseconds() - upload_t0;
+			Com_Printf("KAIOS_GL3_UPLOAD: %s %dx%d (8-bit) upload=%dms\n",
+				name, width, height, upload_ms);
+		}
+#endif
 	}
 	else
 	{
 		image->has_alpha = GL3_Upload32((unsigned *)pic, width, height,
 					(image->type != it_pic && image->type != it_sky));
+
+#ifdef __EMSCRIPTEN__
+		if (kaios_debug_gl3upload->value)
+		{
+			upload_ms = Sys_Milliseconds() - upload_t0;
+			Com_Printf("KAIOS_GL3_UPLOAD: %s %dx%d (32-bit) upload=%dms\n",
+				name, width, height, upload_ms);
+		}
+#endif
 	}
 
 	if (realwidth && realheight)
