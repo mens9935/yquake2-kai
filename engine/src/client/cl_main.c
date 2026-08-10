@@ -525,7 +525,13 @@ byte *precache_model;
 void CL_ResetPrecacheCheck (void)
 {
 	precache_check = CS_MODELS;
-	precache_model = 0;
+
+	if (precache_model)
+	{
+		FS_FreeFile(precache_model);
+		precache_model = 0;
+	}
+
 	precache_model_skin = 0;
 }
 
@@ -550,7 +556,13 @@ CL_Precache_f(void)
 	precache_check = CS_MODELS;
 
 	precache_spawncount = (int)strtol(Cmd_Argv(1), (char **)NULL, 10);
-	precache_model = 0;
+
+	if (precache_model)
+	{
+		FS_FreeFile(precache_model);
+		precache_model = 0;
+	}
+
 	precache_model_skin = 0;
 
 	CL_RequestNextDownload();

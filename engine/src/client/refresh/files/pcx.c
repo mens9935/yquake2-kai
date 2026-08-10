@@ -446,6 +446,12 @@ PCX_Decode(const char *name, const byte *raw, int len, byte **pic, byte **palett
 			__func__, name);
 		free(*pic);
 		*pic = NULL;
+
+		if (palette && *palette)
+		{
+			free(*palette);
+			*palette = NULL;
+		}
 	}
 
 	if (image_issues)

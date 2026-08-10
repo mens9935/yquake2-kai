@@ -201,6 +201,8 @@ CL_RequestNextDownload(void)
 
 					if (LittleLong(pheader->version) != ALIAS_VERSION)
 					{
+						FS_FreeFile(precache_model);
+						precache_model = 0;
 						precache_check++;
 						precache_model_skin = 0;
 						continue; /* couldn't load it */

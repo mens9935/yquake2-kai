@@ -3820,6 +3820,25 @@ Mods_NamesFinish(void)
 }
 
 static void
+Mods_DisplayNamesFinish(void)
+{
+	char **displaynames = (char **)s_mods_list.itemnames;
+
+	if (displaynames)
+	{
+		int i;
+
+		for (i = 0; displaynames[i]; i++)
+		{
+			free(displaynames[i]);
+		}
+
+		free(displaynames);
+		s_mods_list.itemnames = NULL;
+	}
+}
+
+static void
 Mods_NamesInit(void)
 {
 	/* initialize list of mods once, reuse it afterwards */
@@ -3883,6 +3902,7 @@ Mods_MenuInit(void)
 	char modname[MAX_QPATH]; /* TG626 */
 	char **displaynames;
 
+	Mods_DisplayNamesFinish();
 	Mods_NamesInit();
 
 	/* create array of bracketed display names from folder names - TG626 */
