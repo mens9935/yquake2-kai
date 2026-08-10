@@ -1674,7 +1674,35 @@ var DEBUG_ITEMS = [
 	toggleItem('debugprepframe', 'Log: level load phases', 'kaios_debug_prepframe', false),
 	toggleItem('debuggl3upload', 'Log: GL3 texture upload', 'kaios_debug_gl3upload', false),
 	toggleItem('debuggl3vbo', 'Log: GL3 VBO timing', 'kaios_debug_gl3vbo', false),
-	toggleItem('debugwaplay', 'Log: WA play timing', 'kaios_debug_waplay', false)
+	toggleItem('debugwaplay', 'Log: WA play timing', 'kaios_debug_waplay', false),
+	// A/B switch for the mid-gameplay stutter investigation: cl_entities
+	// (stock client cvar, cl_main.c) zeroes r_numentities in V_RenderView
+	// when off, so monsters/items still exist and think server-side but
+	// draw nothing. Flip this Off and replay the same fight to see
+	// whether the frame spikes track entity count or not, with no other
+	// variable changed. Left On by default -- this is a diagnostic knob,
+	// not something a normal playthrough should run with.
+	toggleItem('addentities', 'Render entities (A/B test)', 'cl_entities', true),
+	// See kaios_startcmd's own comment in frame.c/autoexec.cfg -- queued
+	// once, right after SV_Init()/CL_Init() register map/demomap, so it
+	// can hold a full "demomap <name>" console command. Picking a demo
+	// here reruns that same mechanism the very next launch instead of
+	// requiring a manual autoexec.cfg edit, giving a repeatable,
+	// hands-off way to reproduce combat (and therefore entity load)
+	// identically run after run for the A/B toggle above. Off leaves
+	// kaios_startcmd empty, same as normal play.
+	{
+		id: 'demoautoplay',
+		label: 'Autoplay demo',
+		cvars: ['kaios_startcmd'],
+		choices: [
+			{ label: 'Off', values: [''] },
+			{ label: 'demo1', values: ['demomap demo1.dm2'] },
+			{ label: 'demo2', values: ['demomap demo2.dm2'] },
+			{ label: 'demo3', values: ['demomap demo3.dm2'] }
+		],
+		def: 0
+	}
 ];
 
 var SETTINGS_GROUPS = [
@@ -1718,7 +1746,17 @@ function buildLauncherSettingsCfg() {
 			}
 			var choice = item.choices[getItemIndex(item)];
 			for (var c = 0; c < item.cvars.length; c++) {
-				lines.push('set ' + item.cvars[c] + ' ' + choice.values[c]);
+				var value = choice.values[c];
+				// Cvar_Set_f (cvar.c) requires exactly one token for the
+				// value -- "set kaios_startcmd demomap demo1.dm2" tokenizes
+				// to 4 args and demo1.dm2 gets mistaken for the trailing
+				// [u/s] archive flag, silently dropped from the value.
+				// Quoting keeps a multi-word value (e.g. a full console
+				// command string) as the single token "set" expects.
+				if (value.indexOf(' ') !== -1) {
+					value = '"' + value + '"';
+				}
+				lines.push('set ' + item.cvars[c] + ' ' + value);
 			}
 		}
 	}
