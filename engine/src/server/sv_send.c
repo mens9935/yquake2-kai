@@ -480,6 +480,63 @@ SV_DemoCompleted(void)
 		sv.demofile = 0;
 	}
 
+#ifdef __EMSCRIPTEN__
+	/* kaios_democycle: space-separated demo file list (e.g. "demo1.dm2
+	 * demo2.dm2 demo3.dm2"), set once via kaios_startcmd/autoexec.cfg or
+	 * the launcher's debug menu. Mirrors kaios_mapcycle's cvar-list-plus-
+	 * static-index approach in frame.c, but advances here, on demo
+	 * completion, instead of on a fixed timer -- each demo's own runtime
+	 * length isn't known ahead of time, unlike a level left running
+	 * idle. Loops back to the start once the list is exhausted (unlike
+	 * kaios_mapcycle, which stops) so an unattended run keeps cycling
+	 * through every demo's own map/texture set indefinitely for
+	 * longer-duration memory/perf comparisons. SV_Nextserver() below
+	 * reads and clears the "nextserver" cvar we set here -- the same
+	 * cvar/mechanism sv_init.c's "map foo+bar" syntax and cl_cin.c's
+	 * end-of-cinematic "nextserver" already use, so no new dispatch path
+	 * is needed. */
+	{
+		static cvar_t *kaios_democycle = NULL;
+		static int kaios_democycle_index = 0;
+
+		if (!kaios_democycle)
+		{
+			kaios_democycle = Cvar_Get("kaios_democycle", "", 0);
+		}
+
+		if (kaios_democycle->string[0])
+		{
+			char list[256];
+			char *saveptr, *tok;
+			int i;
+
+			Q_strlcpy(list, kaios_democycle->string, sizeof(list));
+			tok = strtok_r(list, " ", &saveptr);
+
+			for (i = 0; tok && i < kaios_democycle_index; i++)
+			{
+				tok = strtok_r(NULL, " ", &saveptr);
+			}
+
+			if (!tok)
+			{
+				/* exhausted -- loop back to the first entry */
+				kaios_democycle_index = 0;
+				Q_strlcpy(list, kaios_democycle->string, sizeof(list));
+				tok = strtok_r(list, " ", &saveptr);
+			}
+
+			if (tok)
+			{
+				Com_Printf("KAIOS_DEMOCYCLE: [%d] demomap %s\n",
+					kaios_democycle_index, tok);
+				Cvar_Set("nextserver", va("demomap %s", tok));
+				kaios_democycle_index++;
+			}
+		}
+	}
+#endif
+
 	SV_Nextserver();
 }
 

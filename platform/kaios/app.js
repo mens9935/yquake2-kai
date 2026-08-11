@@ -1691,15 +1691,23 @@ var DEBUG_ITEMS = [
 	// hands-off way to reproduce combat (and therefore entity load)
 	// identically run after run for the A/B toggle above. Off leaves
 	// kaios_startcmd empty, same as normal play.
+	//
+	// "Cycle demo1>2>3" additionally sets kaios_democycle (read by
+	// SV_DemoCompleted() in sv_send.c) so each completed demo advances
+	// to the next one and loops, instead of stopping after one -- the
+	// three stock demos hit deliberately different map/texture sets, so
+	// looping through all of them unattended gathers much more memory/
+	// perf comparison data per session than repeating a single one.
 	{
 		id: 'demoautoplay',
 		label: 'Autoplay demo',
-		cvars: ['kaios_startcmd'],
+		cvars: ['kaios_startcmd', 'kaios_democycle'],
 		choices: [
-			{ label: 'Off', values: [''] },
-			{ label: 'demo1', values: ['demomap demo1.dm2'] },
-			{ label: 'demo2', values: ['demomap demo2.dm2'] },
-			{ label: 'demo3', values: ['demomap demo3.dm2'] }
+			{ label: 'Off', values: ['', ''] },
+			{ label: 'demo1', values: ['demomap demo1.dm2', ''] },
+			{ label: 'demo2', values: ['demomap demo2.dm2', ''] },
+			{ label: 'demo3', values: ['demomap demo3.dm2', ''] },
+			{ label: 'Cycle demo1>2>3', values: ['demomap demo1.dm2', 'demo1.dm2 demo2.dm2 demo3.dm2'] }
 		],
 		def: 0
 	}
