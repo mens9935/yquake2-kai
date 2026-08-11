@@ -333,7 +333,7 @@ CL_KaiosPrewarmSurfaceCache(const vec3_t origin, const vec3_t angles)
 
 	if (!kaios_prewarm_cache)
 	{
-		kaios_prewarm_cache = Cvar_Get("kaios_prewarm_cache", "1", CVAR_ARCHIVE);
+		kaios_prewarm_cache = Cvar_Get("kaios_prewarm_cache", "0", CVAR_ARCHIVE);
 	}
 
 	if (!kaios_prewarm_cache->value || !cl.refresh_prepped)

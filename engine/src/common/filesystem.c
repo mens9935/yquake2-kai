@@ -2022,6 +2022,50 @@ extern qboolean menu_startdemoloop;
 void CL_WriteConfiguration(void);
 #endif
 
+#ifdef __EMSCRIPTEN__
+/* fs_rawPath->path (the generic "last dir added" case FS_BuildGameSpecificSearchPath
+ * and FS_InitFilesystem would otherwise both fall back to) resolves to
+ * "/" on this port -- Sys_GetBinaryDir()'s /proc/self/exe readlink has
+ * nothing to read on Emscripten, so it falls back to the process cwd,
+ * and datadir defaults to the same "." -- both realpath() to MEMFS's
+ * root, which is plain in-memory storage wiped on every reload. This
+ * fills `out` with the actual persistent homedir instead (IDBFS-mounted
+ * by platform/kaios/app.js's mountPersistentConfig(), synced out on
+ * every CL_WriteConfiguration()/SV_Save()), same as every other
+ * platform's "$HOME/.yq2/baseq2" convention -- otherwise config.cfg and
+ * savegames alike would silently vanish on the next launch. Already one
+ * of FS_BuildGenericSearchPath()'s raw dirs, so anything written here is
+ * found again on load without any other change. Returns false (out left
+ * untouched) only if Sys_GetHomeDir() itself has no HOME to work with,
+ * for the caller to fall back to fs_rawPath->path same as every other
+ * platform does unconditionally. */
+static qboolean
+FS_KaiosPersistentBaseq2Dir(char *out, size_t outsize)
+{
+	const char *homedir = Sys_GetHomeDir();
+	size_t homelen;
+
+	if (homedir == NULL)
+	{
+		return false;
+	}
+
+	homelen = strlen(homedir);
+
+	/* Sys_GetHomeDir() returns a trailing-slash path (unlike
+	 * fs_rawPath->path, already normalized by FS_AddDirToRawPath()'s
+	 * realpath() call) -- trim it so this doesn't end up with a doubled
+	 * "//" before baseq2. */
+	if (homelen > 0 && homedir[homelen - 1] == '/')
+	{
+		homelen--;
+	}
+
+	Com_sprintf(out, outsize, "%.*s/%s", (int)homelen, homedir, BASEDIRNAME);
+	return true;
+}
+#endif
+
 void
 FS_BuildGameSpecificSearchPath(const char *dir)
 {
@@ -2091,38 +2135,7 @@ FS_BuildGameSpecificSearchPath(const char *dir)
 		Cvar_FullSet("game", "", CVAR_LATCH | CVAR_SERVERINFO);
 
 #ifdef __EMSCRIPTEN__
-		/* fs_rawPath->path (the generic "last dir added" case just
-		 * below) resolves to "/" on this port -- Sys_GetBinaryDir()'s
-		 * /proc/self/exe readlink has nothing to read on Emscripten, so
-		 * it falls back to the process cwd, and datadir defaults to the
-		 * same "." -- both realpath() to MEMFS's root, which is plain
-		 * in-memory storage wiped on every reload. Force the write
-		 * target to the actual persistent homedir instead (IDBFS-mounted
-		 * by platform/kaios/app.js's mountPersistentConfig(), synced out
-		 * on every CL_WriteConfiguration()/SV_Save()), same as every
-		 * other platform's "$HOME/.yq2/baseq2" convention -- otherwise
-		 * config.cfg and savegames alike would silently vanish on the
-		 * next launch. Already one of FS_BuildGenericSearchPath()'s raw
-		 * dirs, so anything written here is found again on load without
-		 * any other change. */
-		const char *homedir = Sys_GetHomeDir();
-
-		if (homedir != NULL)
-		{
-			size_t homelen = strlen(homedir);
-
-			/* Sys_GetHomeDir() returns a trailing-slash path (unlike
-			 * fs_rawPath->path below, already normalized by
-			 * FS_AddDirToRawPath()'s realpath() call) -- trim it so
-			 * this doesn't end up with a doubled "//" before baseq2. */
-			if (homelen > 0 && homedir[homelen - 1] == '/')
-			{
-				homelen--;
-			}
-
-			Com_sprintf(path, sizeof(path), "%.*s/%s", (int)homelen, homedir, BASEDIRNAME);
-		}
-		else
+		if (!FS_KaiosPersistentBaseq2Dir(path, sizeof(path)))
 		{
 			Com_sprintf(path, sizeof(path), "%s/%s", fs_rawPath->path, BASEDIRNAME);
 		}
@@ -2334,6 +2347,41 @@ FS_InitFilesystem(void)
 	{
 		// no mod, but we still need to get the list of OGG tracks for background music
 		OGG_InitTrackList();
+	}
+#endif
+
+#ifdef __EMSCRIPTEN__
+	/* The branch above only ever calls FS_BuildGameSpecificSearchPath()
+	 * -- the one place fs_gamedir actually gets set to anything -- when
+	 * the "game" cvar is non-empty (a mod). This build never has one:
+	 * "game" stays "" for the entire session, so fs_gamedir was silently
+	 * staying at its zero-initialized "" the whole time, turning every
+	 * write through it (config.cfg, savegames) into a path rooted at
+	 * plain MEMFS "/" instead of the persistent homedir -- gone on the
+	 * very next reload despite CL_WriteConfiguration()'s FS.syncfs()
+	 * call, since syncing an IDBFS mount does nothing for a file that
+	 * was never written under it in the first place. Fill it in
+	 * directly here for exactly the case the branch above leaves
+	 * untouched. */
+	if (fs_gamedir[0] == '\0')
+	{
+		char kaiosPath[MAX_OSPATH];
+
+		if (FS_KaiosPersistentBaseq2Dir(kaiosPath, sizeof(kaiosPath)))
+		{
+			Q_strlcpy(fs_gamedir, kaiosPath, sizeof(fs_gamedir));
+
+			/* FS_BuildGameSpecificSearchPath()'s own baseq2 branch
+			 * creates fs_gamedir (and its scrnshot/ subdir) the same
+			 * way right after setting it -- needed here too, since
+			 * this whole homedir/baseq2 path may not exist yet the
+			 * very first time a fresh IDBFS-backed homedir is used,
+			 * and a plain fopen(..., "w") does not create missing
+			 * parent directories on its own. */
+			Sys_Mkdir(fs_gamedir);
+			Com_sprintf(kaiosPath, sizeof(kaiosPath), "%s/scrnshot", fs_gamedir);
+			Sys_Mkdir(kaiosPath);
+		}
 	}
 #endif
 

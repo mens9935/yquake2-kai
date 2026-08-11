@@ -2024,7 +2024,6 @@ var AUDIO_ITEMS = [
 // "Custom 1" WebAudio backend, is gone) and they'd only ever confuse a
 // player who found them, not do anything useful.
 var DEBUG_ITEMS = [
-	toggleItem('prewarm', 'Preload on map load', 'kaios_prewarm_cache', true),
 	{
 		id: 'distcull',
 		label: 'Draw distance cull',
