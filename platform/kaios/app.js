@@ -2054,7 +2054,19 @@ var DEBUG_ITEMS = [
 			{ label: 'demo2', values: ['demomap demo2.dm2'] }
 		],
 		def: 0
-	}
+	},
+	// See kaios_narrow_ui's own comment in cl_screen.c -- this screen's
+	// native 240x320 is narrower than the HUD/console/menu's 320x240
+	// reference, so SCR_ClampScale/SCR_GetDefaultScale normally shrink
+	// text and pics to a fractional scale (~0.94x) to keep them from
+	// running off the right edge. That fractional scale is what makes
+	// glyphs look soft -- Quake II's bitmap font is only crisp at
+	// integer pixel scale. On means: draw everything at native 1x
+	// instead (same crispness as setting Resolution to 320x240, without
+	// actually changing the render resolution or squishing the 3D
+	// view) -- at the cost of some HUD/console/menu elements running
+	// closer to, or past, this screen's narrower right/bottom edge.
+	toggleItem('narrowui', 'Narrow interface', 'kaios_narrow_ui', false)
 ];
 
 // Applied by the engine itself, not this launcher -- these cvars are
