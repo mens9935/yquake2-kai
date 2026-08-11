@@ -1828,10 +1828,30 @@ var DEBUG_ITEMS = [
 	}
 ];
 
+// Applied by the engine itself, not this launcher -- these cvars are
+// only ever read from G_KaiosApplyStartupCheats() (g_cmds.c), called
+// once from ClientBegin() (player/client.c) every time the local
+// player freshly spawns into a level. That's deliberate, not just
+// convenient: god/noclip/notarget are plain toggles (a typed console
+// command flips them, it doesn't set them), so applying them from here
+// instead would need to know each cheat's current on/off state to
+// avoid toggling an already-on effect back off mid-level. A fresh
+// spawn is always known-off for all three, so the engine can just
+// toggle once, unconditionally, and get a reliable "on" -- see that
+// function's own comment for the rest of the reasoning (including why
+// it can't simply be gi.AddCommandString("god\n") from the same spot).
+var CHEATS_ITEMS = [
+	toggleItem('cheatgod', 'God mode', 'kaios_cheat_god', false),
+	toggleItem('cheatnoclip', 'No clip', 'kaios_cheat_noclip', false),
+	toggleItem('cheatnotarget', 'No target', 'kaios_cheat_notarget', false),
+	toggleItem('cheatgiveall', 'Give all weapons/ammo/armor', 'kaios_cheat_giveall', false)
+];
+
 var SETTINGS_GROUPS = [
 	{ id: 'video', label: 'Video', items: VIDEO_ITEMS },
 	{ id: 'audio', label: 'Audio', items: AUDIO_ITEMS },
-	{ id: 'debug', label: 'Debug', items: DEBUG_ITEMS }
+	{ id: 'debug', label: 'Debug', items: DEBUG_ITEMS },
+	{ id: 'cheats', label: 'Cheats', items: CHEATS_ITEMS }
 ];
 
 function settingStorageKey(item) {

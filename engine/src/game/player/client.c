@@ -1791,6 +1791,15 @@ ClientBegin(edict_t *ent)
 		ent->classname = "player";
 		InitClientResp(ent->client);
 		PutClientInServer(ent);
+
+#ifdef __EMSCRIPTEN__
+		/* Only on this fresh-spawn path, not the loadgame-restore
+		 * branch above -- a restored save should come back exactly as
+		 * it was saved, not have the Debug > Cheats screen's cvars
+		 * blindly re-toggled on top of it. See g_cmds.c for why this
+		 * needs to be a direct call, not gi.AddCommandString(). */
+		G_KaiosApplyStartupCheats(ent);
+#endif
 	}
 
 	if (level.intermissiontime)

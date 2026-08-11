@@ -220,6 +220,85 @@ ValidateSelectedItem(gclient_t *cl)
 /* ================================================================================= */
 
 /*
+ * Body of "give all" -- factored out of Cmd_Give_f() so
+ * G_KaiosApplyStartupCheats() (below) can reach the exact same
+ * behavior directly, without needing a tokenized "give all" command
+ * line to read gi.args()/argv() back out of.
+ */
+static void
+Cmd_GiveAll(edict_t *ent)
+{
+	gitem_t *it;
+	gitem_armor_t *info;
+	edict_t *it_ent;
+	int i;
+
+	ent->health = ent->max_health;
+
+	for (i = 0; i < itemlist_len; i++)
+	{
+		it = itemlist + i;
+
+		if (!it->pickup || !(it->flags & IT_WEAPON))
+		{
+			continue;
+		}
+
+		ent->client->pers.inventory[i] += 1;
+	}
+
+	for (i = 0; i < itemlist_len; i++)
+	{
+		it = itemlist + i;
+
+		if (!it->pickup || !(it->flags & IT_AMMO))
+		{
+			continue;
+		}
+
+		Add_Ammo(ent, it, 1000);
+	}
+
+	it = FindItem("Jacket Armor");
+	ent->client->pers.inventory[ITEM_INDEX(it)] = 0;
+
+	it = FindItem("Combat Armor");
+	ent->client->pers.inventory[ITEM_INDEX(it)] = 0;
+
+	it = FindItem("Body Armor");
+	info = (gitem_armor_t *)it->info;
+	ent->client->pers.inventory[ITEM_INDEX(it)] = info->max_count;
+
+	it = FindItem("Power Shield");
+	it_ent = G_Spawn();
+	it_ent->classname = it->classname;
+	SpawnItem(it_ent, it);
+	Touch_Item(it_ent, ent, NULL, NULL);
+
+	if (it_ent->inuse)
+	{
+		G_FreeEdict(it_ent);
+	}
+
+	for (i = 0; i < itemlist_len; i++)
+	{
+		it = itemlist + i;
+
+		if (!it->pickup)
+		{
+			continue;
+		}
+
+		if (it->flags & (IT_ARMOR | IT_WEAPON | IT_AMMO))
+		{
+			continue;
+		}
+
+		ent->client->pers.inventory[i] = 1;
+	}
+}
+
+/*
  * Give items to a client
  */
 static void
@@ -229,7 +308,6 @@ Cmd_Give_f(edict_t *ent)
 	gitem_t *it;
 	int index;
 	int i;
-	qboolean give_all;
 	edict_t *it_ent;
 
 	if (!ent)
@@ -248,14 +326,11 @@ Cmd_Give_f(edict_t *ent)
 
 	if (Q_stricmp(name, "all") == 0)
 	{
-		give_all = true;
-	}
-	else
-	{
-		give_all = false;
+		Cmd_GiveAll(ent);
+		return;
 	}
 
-	if (give_all || (Q_stricmp(gi.argv(1), "health") == 0))
+	if (Q_stricmp(gi.argv(1), "health") == 0)
 	{
 		if (gi.argc() == 3)
 		{
@@ -267,24 +342,16 @@ Cmd_Give_f(edict_t *ent)
 			ent->health = ent->max_health;
 		}
 
-		if (!give_all)
-		{
-			return;
-		}
+		return;
 	}
 
-	if (give_all || (Q_stricmp(name, "weapons") == 0))
+	if (Q_stricmp(name, "weapons") == 0)
 	{
 		for (i = 0; i < itemlist_len; i++)
 		{
 			it = itemlist + i;
 
-			if (!it->pickup)
-			{
-				continue;
-			}
-
-			if (!(it->flags & IT_WEAPON))
+			if (!it->pickup || !(it->flags & IT_WEAPON))
 			{
 				continue;
 			}
@@ -292,24 +359,16 @@ Cmd_Give_f(edict_t *ent)
 			ent->client->pers.inventory[i] += 1;
 		}
 
-		if (!give_all)
-		{
-			return;
-		}
+		return;
 	}
 
-	if (give_all || (Q_stricmp(name, "ammo") == 0))
+	if (Q_stricmp(name, "ammo") == 0)
 	{
 		for (i = 0; i < itemlist_len; i++)
 		{
 			it = itemlist + i;
 
-			if (!it->pickup)
-			{
-				continue;
-			}
-
-			if (!(it->flags & IT_AMMO))
+			if (!it->pickup || !(it->flags & IT_AMMO))
 			{
 				continue;
 			}
@@ -317,13 +376,10 @@ Cmd_Give_f(edict_t *ent)
 			Add_Ammo(ent, it, 1000);
 		}
 
-		if (!give_all)
-		{
-			return;
-		}
+		return;
 	}
 
-	if (give_all || (Q_stricmp(name, "armor") == 0))
+	if (Q_stricmp(name, "armor") == 0)
 	{
 		gitem_armor_t *info;
 
@@ -337,13 +393,10 @@ Cmd_Give_f(edict_t *ent)
 		info = (gitem_armor_t *)it->info;
 		ent->client->pers.inventory[ITEM_INDEX(it)] = info->max_count;
 
-		if (!give_all)
-		{
-			return;
-		}
+		return;
 	}
 
-	if (give_all || (Q_stricmp(name, "Power Shield") == 0))
+	if (Q_stricmp(name, "Power Shield") == 0)
 	{
 		it = FindItem("Power Shield");
 		it_ent = G_Spawn();
@@ -354,31 +407,6 @@ Cmd_Give_f(edict_t *ent)
 		if (it_ent->inuse)
 		{
 			G_FreeEdict(it_ent);
-		}
-
-		if (!give_all)
-		{
-			return;
-		}
-	}
-
-	if (give_all)
-	{
-		for (i = 0; i < itemlist_len; i++)
-		{
-			it = itemlist + i;
-
-			if (!it->pickup)
-			{
-				continue;
-			}
-
-			if (it->flags & (IT_ARMOR | IT_WEAPON | IT_AMMO))
-			{
-				continue;
-			}
-
-			ent->client->pers.inventory[i] = 1;
 		}
 
 		return;
@@ -532,6 +560,90 @@ Cmd_Noclip_f(edict_t *ent)
 
 	gi.cprintf(ent, PRINT_HIGH, msg);
 }
+
+#ifdef __EMSCRIPTEN__
+/*
+ * KaiOS Debug > Cheats screen (kaios_cheat_* cvars, platform/kaios/
+ * app.js) -- called once per fresh spawn from ClientBegin()
+ * (player/client.c), which the engine's own comment there notes
+ * "will happen every level load", so the player doesn't have to
+ * retype console commands after every level transition just to keep
+ * testing past the first level's default blaster-only loadout.
+ *
+ * Calls straight into the same static Cmd_*_f handlers a typed
+ * console command reaches, instead of going through
+ * gi.AddCommandString()/Cbuf_AddText(): those handlers are only ever
+ * reached from ClientCommand(), which SV_ExecuteUserCommand()
+ * (sv_user.c) only calls after setting sv_player from an actual
+ * client network message in flight -- a bare Cbuf command queued
+ * from game code has no client message backing it, so it would never
+ * reach them. Calling the handlers directly with the ent already in
+ * hand here sidesteps that requirement entirely.
+ *
+ * god/noclip/notarget are plain toggles (calling them twice flips
+ * back off) -- safe to call unconditionally from a fresh spawn
+ * specifically because a fresh spawn is always known-off for all
+ * three (FL_GODMODE/FL_NOTARGET unset, movetype WALK fresh out of
+ * PutClientInServer()), so one call per enabled cvar deterministically
+ * turns each on, never off. The have-we-already-applied-this-life
+ * guards below exist only so a later mid-level call (there currently
+ * is none, but this stays correct if one's ever added) can't
+ * accidentally toggle an already-on cheat back off.
+ */
+void
+G_KaiosApplyStartupCheats(edict_t *ent)
+{
+	static cvar_t *kaios_cheat_god = NULL;
+	static cvar_t *kaios_cheat_noclip = NULL;
+	static cvar_t *kaios_cheat_notarget = NULL;
+	static cvar_t *kaios_cheat_giveall = NULL;
+
+	if (!ent || !ent->client)
+	{
+		return;
+	}
+
+	if (!kaios_cheat_god)
+	{
+		kaios_cheat_god = gi.cvar("kaios_cheat_god", "0", CVAR_ARCHIVE);
+		kaios_cheat_noclip = gi.cvar("kaios_cheat_noclip", "0", CVAR_ARCHIVE);
+		kaios_cheat_notarget = gi.cvar("kaios_cheat_notarget", "0", CVAR_ARCHIVE);
+		kaios_cheat_giveall = gi.cvar("kaios_cheat_giveall", "0", CVAR_ARCHIVE);
+	}
+
+	if (!kaios_cheat_god->value && !kaios_cheat_noclip->value &&
+		!kaios_cheat_notarget->value && !kaios_cheat_giveall->value)
+	{
+		return;
+	}
+
+	/* sv_cheats only actually gates give/god/noclip/notarget in
+	 * deathmatch/coop (see each handler's own check above) -- setting
+	 * it here too costs nothing in plain single-player and keeps this
+	 * working instead of silently no-opping if either flag is set. */
+	gi.cvar_set("cheats", "1");
+
+	if (kaios_cheat_god->value && !(ent->flags & FL_GODMODE))
+	{
+		Cmd_God_f(ent);
+	}
+
+	if (kaios_cheat_noclip->value && ent->movetype != MOVETYPE_NOCLIP)
+	{
+		Cmd_Noclip_f(ent);
+	}
+
+	if (kaios_cheat_notarget->value && !(ent->flags & FL_NOTARGET))
+	{
+		Cmd_Notarget_f(ent);
+	}
+
+	if (kaios_cheat_giveall->value)
+	{
+		Cmd_GiveAll(ent);
+	}
+}
+#endif
 
 /*
  * Use an inventory item

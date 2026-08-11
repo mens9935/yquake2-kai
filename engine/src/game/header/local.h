@@ -612,6 +612,9 @@ void ClientThink(edict_t *ent, usercmd_t *cmd);
 
 /* g_cmds.c */
 void Cmd_Help_f(edict_t *ent);
+#ifdef __EMSCRIPTEN__
+void G_KaiosApplyStartupCheats(edict_t *ent);
+#endif
 void ClientCommand(edict_t *ent);
 
 /* g_items.c */
