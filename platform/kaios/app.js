@@ -2200,9 +2200,13 @@ function showSettingsItemsScreen(group) {
 		} else if (ev.key === 'ArrowDown') {
 			selected = (selected + 1) % group.items.length;
 			render();
-		} else if (ev.key === 'Enter') {
+		} else if (ev.key === 'Enter' || ev.key === 'ArrowRight') {
 			var item = group.items[selected];
 			setItemIndex(item, (getItemIndex(item) + 1) % item.choices.length);
+			render();
+		} else if (ev.key === 'ArrowLeft') {
+			var item = group.items[selected];
+			setItemIndex(item, (getItemIndex(item) - 1 + item.choices.length) % item.choices.length);
 			render();
 		} else if (ev.key === 'SoftRight') {
 			activeMenuKeyHandler = null;

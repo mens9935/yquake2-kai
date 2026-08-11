@@ -2111,7 +2111,7 @@ SCR_ClampScale(float scale, qboolean is_crosshair)
 }
 
 static float
-SCR_GetDefaultScale(void)
+SCR_GetDefaultScale(qboolean is_hud)
 {
 #ifdef __EMSCRIPTEN__
 	/* Same narrower/shorter-than-reference carve-out as SCR_ClampScale()
@@ -2138,8 +2138,15 @@ SCR_GetDefaultScale(void)
 		 * relies on for real legibility gains, while staying under 1x
 		 * so elements positioned near the 320-reference right/bottom
 		 * edge still land just inside this port's narrower 240-wide
-		 * buffer instead of clipping outright. */
-		scale *= 1.25f;
+		 * buffer instead of clipping outright. Menu/console get a
+		 * slightly bigger bump still (35%) for the same legibility
+		 * reason. The HUD status bar (health/ammo/armor numbers, all
+		 * on one row) is the one exception -- at 0.9375x its several
+		 * fields don't all fit on this port's narrow 240px width and
+		 * wrap the trailing field onto a second line, so it stays at
+		 * the un-bumped 0.75x instead, small enough to keep the whole
+		 * row on one line. */
+		scale *= is_hud ? 1.0f : 1.35f;
 
 		if (scale < 0.1f)
 		{
@@ -2188,7 +2195,7 @@ SCR_DrawCrosshair(void)
 
 	if (crosshair_scale->value < 0)
 	{
-		scale = SCR_GetDefaultScale();
+		scale = SCR_GetDefaultScale(false);
 	}
 	else
 	{
@@ -2228,7 +2235,7 @@ SCR_GetHUDScale(void)
 #endif
 	else if (r_hudscale->value < 0)
 	{
-		scale = SCR_GetDefaultScale();
+		scale = SCR_GetDefaultScale(true);
 	}
 	else if (r_hudscale->value == 0) /* HACK: allow scale 0 to hide the HUD */
 	{
@@ -2262,7 +2269,7 @@ SCR_GetConsoleScale(void)
 #endif
 	else if (r_consolescale->value < 0)
 	{
-		scale = SCR_GetDefaultScale();
+		scale = SCR_GetDefaultScale(false);
 	}
 	else
 	{
@@ -2283,7 +2290,7 @@ SCR_GetMenuScale(void)
 	}
 	else if (r_menuscale->value < 0)
 	{
-		scale = SCR_GetDefaultScale();
+		scale = SCR_GetDefaultScale(false);
 	}
 	else
 	{

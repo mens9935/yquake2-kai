@@ -61,11 +61,21 @@
 #include "../header/client.h"
 #include "header/local.h"
 
+/* Piggybacks its .musicEl/.musicUrl/etc fields onto webaudio2.c's own
+ * Module.kaiosAudio2 object (created by WA2_Init(), holding .ctx/.master
+ * for the sfx/cinematics graph) rather than a separate global -- this
+ * used to be Module.kaiosAudio, set up by the old Custom1 backend
+ * (webaudio.c), which was removed once Custom2 became the only/default
+ * backend. That left this file's EM_ASM blocks reading a global nothing
+ * ever set again, so ka was always undefined and every call below
+ * silently no-opped -- music never played, but OGG_StartNative()
+ * (ogg.c) still paid for a full synchronous file read into memory on
+ * every track change regardless, for nothing. */
 void
 WA_PlayMusic(const byte *data, int len)
 {
 	EM_ASM({
-		var ka = Module.kaiosAudio;
+		var ka = Module.kaiosAudio2;
 		if (!ka) {
 			return;
 		}
@@ -117,7 +127,7 @@ void
 WA_StopMusic(void)
 {
 	EM_ASM({
-		var ka = Module.kaiosAudio;
+		var ka = Module.kaiosAudio2;
 		if (!ka || !ka.musicEl) {
 			return;
 		}
@@ -143,7 +153,7 @@ void
 WA_PauseMusic(qboolean pause)
 {
 	EM_ASM({
-		var ka = Module.kaiosAudio;
+		var ka = Module.kaiosAudio2;
 		if (!ka || !ka.musicEl) {
 			return;
 		}
@@ -163,7 +173,7 @@ void
 WA_SetMusicVolume(float vol)
 {
 	EM_ASM({
-		var ka = Module.kaiosAudio;
+		var ka = Module.kaiosAudio2;
 		if (!ka) {
 			return;
 		}

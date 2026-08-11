@@ -430,8 +430,8 @@ OGG_Stream(void)
 #ifdef __EMSCRIPTEN__
 /*
  * Reads the whole already-open ogg file into memory and hands the raw
- * (still-compressed) bytes to WA_PlayMusic() (webaudio.c), which plays
- * it through a plain <audio> element -- a dedicated stream/pipeline of
+ * (still-compressed) bytes to WA_PlayMusic() (webaudio_music.c), which
+ * plays it through a plain <audio> element -- a dedicated stream/pipeline of
  * its own, deliberately kept separate from WA_RawSamples()'s
  * WebAudio-graph-based chunked path used for sfx and cinematics,
  * rather than mixing the two. See WA_PlayMusic()'s doc comment for why
