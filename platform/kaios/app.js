@@ -57,6 +57,19 @@ var canvasEl = document.getElementById('canvas');
 // this scrolling behavior was added). Plain scrollTop arithmetic has
 // no API-version risk at all.
 function renderMenuItems(listEl, labels, selectedIndex, disabledFlags) {
+	// Captured before the innerHTML clear below and re-applied right
+	// after -- on this device's Gecko-48-class engine, replacing every
+	// child of a scrolled list has been seen to drop scrollTop back to 0
+	// along with them instead of preserving it the way current browsers
+	// do, which (since every render() rebuilds the whole list on every
+	// keypress) made a scrolled-down settings list snap back to the top
+	// on every toggle, stranding the actually-selected row off-screen
+	// with no way to tell it was still selected. Restoring the old value
+	// explicitly before the scroll-into-view correction below removes
+	// that dependency on however this particular engine happens to
+	// handle it.
+	var oldScrollTop = listEl.scrollTop;
+
 	listEl.innerHTML = '';
 	for (var i = 0; i < labels.length; i++) {
 		var li = document.createElement('li');
@@ -75,6 +88,8 @@ function renderMenuItems(listEl, labels, selectedIndex, disabledFlags) {
 	}
 
 	try {
+		listEl.scrollTop = oldScrollTop;
+
 		var selectedEl = listEl.children[selectedIndex];
 		if (selectedEl) {
 			if (selectedEl.offsetTop < listEl.scrollTop) {
@@ -907,13 +922,22 @@ function copyBaseq2(files, choice) {
 	// ".../<dirName>/" instead, which is correct whether root is empty or not.
 	var srcPrefix = root + '/' + choice.dirName + '/';
 
-	// save/ and scrnshot/ are pure engine *output* -- the engine
-	// creates them itself under its writable config dir, they're never
-	// something that needs to be supplied as input data. Skipping them
-	// if present on the SD card (e.g. copied back from a previous,
-	// different session) avoids wasting memory on data that isn't
-	// used for anything.
-	var SKIP_PREFIXES = ['save/', 'scrnshot/'];
+	// scrnshot/ is pure engine *output* -- the engine creates it itself
+	// under its writable config dir, never something that needs to be
+	// supplied as input data. Skipping it if present on the SD card
+	// (e.g. copied back from a previous session) avoids wasting memory
+	// on data that isn't used for anything.
+	//
+	// save/ is deliberately NOT skipped, unlike scrnshot/ -- baseq2/save/
+	// is exactly where savegames from a real PC/other-platform Quake II
+	// install live, and copying it in here is what makes the "Load Game"
+	// menu pick those up as native saves on this device too, no import
+	// step needed. New saves the engine itself writes this session land
+	// under the IDBFS-persisted homedir (see FS_BuildGameSpecificSearchPath's
+	// __EMSCRIPTEN__ branch, filesystem.c) rather than back into this
+	// MEMFS copy, so there's no double-counting/staleness between the
+	// two on the next launch.
+	var SKIP_PREFIXES = ['scrnshot/'];
 
 	// music/ is real input data (unlike save/scrnshot above) but a
 	// large one on a slow SD-card read -- not worth the time/memory if
@@ -957,6 +981,35 @@ function copyBaseq2(files, choice) {
 		// path FS_SetGamedir() (filesystem.c) goes looking for.
 		var rel = (('/' + file.name.replace(/^\/+/, '')).slice(srcPrefix.length)).toLowerCase();
 		var dest = '/' + GAMEDIR + '/' + rel;
+
+		if (rel.indexOf('save/') === 0) {
+			// menu.c's savegame browser (M_Menu_LoadGame_f et al) only
+			// ever looks under FS_Gamedir() -- forced to the
+			// IDBFS-persisted homedir on this platform (see
+			// filesystem.c's FS_BuildGameSpecificSearchPath(),
+			// __EMSCRIPTEN__ branch), not this plain MEMFS copy of
+			// baseq2. Route save/ files there instead of GAMEDIR so an
+			// existing SD-card save shows up as a native one, same
+			// destination new in-game saves already land in.
+			dest = getPersistentConfigDir() + '/' + GAMEDIR + '/' + rel;
+
+			// Never clobber a save the engine itself already wrote this
+			// homedir this session or a previous one -- the SD card is
+			// only ever an *import* source for saves, never something
+			// that should be able to overwrite further-along local
+			// progress just because a folder of the same name exists on
+			// the card too.
+			try {
+				if (FS.analyzePath(dest).exists) {
+					i++;
+					return next();
+				}
+			} catch (e) {
+				/* analyzePath itself failing is not a reason to skip the
+				 * import -- fall through and let copyFileStreaming's own
+				 * error handling deal with anything actually wrong. */
+			}
+		}
 
 		if (PAK_FILE_RE.test(rel)) {
 			// The bulk of baseq2's bytes live in here -- keep it out of
@@ -1237,6 +1290,27 @@ function isBaseq2Confirmed() {
 	return localStorage.getItem(BASEQ2_CONFIRMED_KEY) === '1';
 }
 
+// Set once, the first time the app has ever launched (see
+// autoScanOnFirstLaunch()) -- distinct from BASEQ2_CONFIRMED_KEY, which
+// only flips on a *successful* scan. This one flips regardless of
+// outcome, so a failed first-launch scan doesn't keep silently
+// re-running itself on every later launch; after the first attempt the
+// player drives it manually via the "Search baseq2" menu item instead.
+var EVER_LAUNCHED_KEY = 'kaios_ever_launched';
+
+function hasEverLaunched() {
+	return localStorage.getItem(EVER_LAUNCHED_KEY) === '1';
+}
+
+function markEverLaunched() {
+	localStorage.setItem(EVER_LAUNCHED_KEY, '1');
+}
+
+// Set by a scan (auto or manual) that comes back empty-handed or errors
+// out, surfaced as mainMenuItems()'s Play caption -- the same spot that
+// otherwise reads "pak0.pak not found". Cleared on a successful scan.
+var mainMenuError = '';
+
 // Set by showMainMenu() while (and only while) the main menu is the
 // screen on display, so autoScanOnFirstLaunch() can refresh it in
 // place if it finishes while the player is still looking at it.
@@ -1262,14 +1336,14 @@ function mainMenuItems() {
 	// launch shows *why* Play can't be used yet rather than just not
 	// offering it. autoScanOnFirstLaunch() (see start() below) is what
 	// enables it in the background without the player having to
-	// manually press "Find baseq2" first.
+	// manually press "Search baseq2" first.
 	items.push({
 		label: 'Play',
 		action: playFast,
 		disabled: !confirmed,
-		caption: confirmed ? '' : 'pak0.pak not found'
+		caption: confirmed ? '' : (mainMenuError || 'pak0.pak not found')
 	});
-	items.push({ label: 'Find baseq2', action: startBaseq2Scan });
+	items.push({ label: 'Search baseq2', action: startBaseq2Scan });
 	items.push({ label: 'Settings', action: showSettingsGroups });
 	items.push({ label: 'Exit', action: exitApp });
 	return items;
@@ -1295,7 +1369,7 @@ function showMainMenu() {
 
 	// mainMenuItems() is recomputed on every render(), not cached once
 	// at screen-entry -- autoScanOnFirstLaunch() finishing in the
-	// background (or a manual "Find baseq2" coming back to this
+	// background (or a manual "Search baseq2" coming back to this
 	// screen) needs the very next render() to pick up the now-
 	// confirmed state without a full re-entry into showMainMenu().
 	function render() {
@@ -1468,49 +1542,78 @@ function proceedWithChoice(files, choice) {
 	});
 }
 
-// Manual "Find baseq2" / rescan entry point -- searches every storage
+// Shared by both the manual "Search baseq2" menu item and the
+// first-launch-only automatic scan below -- searches every storage
 // volume (internal + any inserted SD card, see getAllDeviceStorages())
-// from scratch. This is also what the automatic first-launch scan
-// (autoScanOnFirstLaunch() below) uses under the hood, and it's the
-// right thing to reach for later too if the player adds files (music,
-// cutscenes) to baseq2/ after the fact -- a cached choice's scoped
-// re-enumerate (playFast() below) only ever looks inside baseq2/
-// itself, never rediscovers a *new* top-level candidate folder.
-function startBaseq2Scan() {
-	hideAllScreens();
+// from scratch. Deliberately does NOT copy baseq2 or boot the engine on
+// success: it only confirms a candidate exists and caches its location,
+// same as the old auto-scan-only behavior used to. "Play" (playFast())
+// is the only path that actually loads engine scripts, copies files,
+// and boots -- so a scan (auto or manual) always lands back on the main
+// menu, either with Play now enabled or with an error caption where the
+// "pak0.pak not found" text normally sits.
+//
+// `interactive` is true for the manual menu item: it takes over the
+// screen with a "Scanning..." status and (if more than one candidate
+// turns up) the folder picker. The quiet/background first-launch pass
+// does neither -- it only touches the screen at all if the main menu is
+// still what's showing when it finishes (refreshMainMenuIfShown), so it
+// never yanks the player out of Settings or wherever else they've
+// already navigated to.
+function performBaseq2Scan(interactive) {
+	function landOnMainMenu() {
+		if (interactive) {
+			showMainMenu();
+		} else if (typeof refreshMainMenuIfShown === 'function') {
+			refreshMainMenuIfShown();
+		}
+	}
 
 	var storages = getAllDeviceStorages();
 	if (storages.length === 0) {
-		showErrorWithBack('No Device Storage API on this browser.\n' +
-			'This shell needs to run as a packaged KaiOS app.');
+		if (interactive) {
+			mainMenuError = 'No Device Storage API on this browser.';
+			landOnMainMenu();
+		}
 		return;
 	}
 
-	setStatus('Scanning for baseq2...');
+	if (interactive) {
+		hideAllScreens();
+		setStatus('Scanning for baseq2...');
+	}
 
 	discoverBaseq2(storages, '').then(function (result) {
 		var candidates = result.candidates;
 
 		if (candidates.length === 0) {
-			showErrorWithBack('No baseq2/pak0.pak found on internal storage or SD card.\n' +
-				'Copy your baseq2 folder there and try again.');
+			mainMenuError = 'baseq2/pak0.pak not found';
+			landOnMainMenu();
 			return;
 		}
 
-		function proceed(choice) {
-			proceedWithChoice(result.filesByStorage[choice.storageName], choice);
+		function finish(choice) {
+			setCachedBaseq2Choice(choice);
+			localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
+			mainMenuError = '';
+			landOnMainMenu();
 		}
 
-		if (candidates.length === 1) {
-			proceed(candidates[0]);
-		} else {
+		if (interactive && candidates.length > 1) {
 			pickerEl.style.display = 'block';
 			statusEl.style.display = 'none';
-			showPicker(candidates, proceed);
+			showPicker(candidates, finish);
+		} else {
+			finish(candidates[0]);
 		}
 	}, function (err) {
-		showErrorWithBack('Could not scan storage: ' + describeError(err));
+		mainMenuError = 'Scan failed: ' + describeError(err);
+		landOnMainMenu();
 	});
+}
+
+function startBaseq2Scan() {
+	performBaseq2Scan(true);
 }
 
 // "Play" from the main menu -- baseq2 was already found and confirmed
@@ -1576,39 +1679,18 @@ function playFast() {
 	});
 }
 
-// Runs once at startup when baseq2 has never been confirmed yet (see
-// start() below) -- the whole point is letting "Play" light up
-// without the player having to manually press "Find baseq2" first on
-// their very first launch. Purely a background discovery pass: it
-// caches a found choice and flips isBaseq2Confirmed() on, exactly
-// like startBaseq2Scan() does, but deliberately stops there instead
-// of calling proceedWithChoice() -- loading the engine, copying
-// baseq2, and booting only ever happens from the "Play" button itself
-// (per spec), never automatically. If the main menu is still what's
-// on screen when this finishes, it's re-rendered so the now-enabled
-// Play row (or the "not found" caption) shows up without the player
-// having to do anything.
+// Runs at most once ever, on the very first launch of the app (see
+// EVER_LAUNCHED_KEY and start() below) -- the whole point is letting
+// "Play" light up without the player having to manually press "Search
+// baseq2" first. Every launch after that -- successful or not -- relies
+// on the player pressing that menu item themselves instead of silently
+// re-scanning the SD card in the background again.
 function autoScanOnFirstLaunch() {
-	var storages = getAllDeviceStorages();
-	if (storages.length === 0) {
+	if (hasEverLaunched()) {
 		return;
 	}
-
-	discoverBaseq2(storages, '').then(function (result) {
-		if (result.candidates.length === 0) {
-			return;
-		}
-
-		setCachedBaseq2Choice(result.candidates[0]);
-		localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
-
-		if (typeof refreshMainMenuIfShown === 'function')
-		{
-			refreshMainMenuIfShown();
-		}
-	}, function (err) {
-		console.log('[kaios] autoScanOnFirstLaunch: scan failed: ' + describeError(err));
-	});
+	markEverLaunched();
+	performBaseq2Scan(false);
 }
 
 // ---------------------------------------------------------------------
@@ -1696,7 +1778,56 @@ var VIDEO_ITEMS = [
 	toggleItem('particles', 'Particles', 'cl_particles', false),
 	toggleItem('lerp', 'Model interpolation', 'r_lerpmodels', true),
 	toggleItem('fullbright', 'Disable lighting', 'r_fullbright', false),
-	toggleItem('dynrelight', 'Dynamic light relighting', 'gl1_dynamic', false)
+	toggleItem('dynrelight', 'Dynamic light relighting', 'gl1_dynamic', false),
+	// Three separately scaled UI layers, all stock yquake2 cvars (not
+	// KaiOS-specific) -- SCR_ClampScale (cl_screen.c) already clamps
+	// each one to whatever the current resolution can actually support,
+	// so offering a value too large for a smaller custom resolution is
+	// harmless, it just clamps down instead of doing nothing. "Auto"
+	// (-1, every cvar's own engine default) leaves SCR_GetDefaultScale()
+	// picking the size, same as an untouched install.
+	{
+		id: 'menuscale',
+		label: 'Menu scale',
+		cvars: ['r_menuscale'],
+		choices: [
+			{ label: 'Auto', values: ['-1'] },
+			{ label: '0.75x', values: ['0.75'] },
+			{ label: '1x', values: ['1'] },
+			{ label: '1.25x', values: ['1.25'] },
+			{ label: '1.5x', values: ['1.5'] },
+			{ label: '2x', values: ['2'] }
+		],
+		def: 0
+	},
+	{
+		id: 'hudscale',
+		label: 'Ammo/HUD scale',
+		cvars: ['r_hudscale'],
+		choices: [
+			{ label: 'Auto', values: ['-1'] },
+			{ label: '0.75x', values: ['0.75'] },
+			{ label: '1x', values: ['1'] },
+			{ label: '1.25x', values: ['1.25'] },
+			{ label: '1.5x', values: ['1.5'] },
+			{ label: '2x', values: ['2'] }
+		],
+		def: 0
+	},
+	{
+		id: 'crosshairscale',
+		label: 'Crosshair scale',
+		cvars: ['crosshair_scale'],
+		choices: [
+			{ label: 'Auto', values: ['-1'] },
+			{ label: '1x', values: ['1'] },
+			{ label: '1.5x', values: ['1.5'] },
+			{ label: '2x', values: ['2'] },
+			{ label: '2.5x', values: ['2.5'] },
+			{ label: '3x', values: ['3'] }
+		],
+		def: 0
+	}
 ];
 
 var AUDIO_ITEMS = [
@@ -1706,26 +1837,24 @@ var AUDIO_ITEMS = [
 		cvars: ['s_backend'],
 		choices: [
 			{ label: 'OpenAL', values: ['openal'] },
+			// Default: real-device evidence this whole session tied the
+			// old "Custom 1" backend (one AudioBufferSourceNode per sound
+			// play, since removed) to constant mid-combat stutter from
+			// GC pressure -- every shot/step/monster sound was a fresh
+			// JS object. Plain SDL software mixing was confirmed clean
+			// of that stutter on the same hardware.
 			{ label: 'SDL', values: ['sdl'] },
-			// "Custom 1" (s_backend "custom", webaudio.c) -- one
-			// AudioBufferSourceNode per sound play. Real-device evidence
-			// this whole session tied its constant mid-combat stutter
-			// to exactly this: every shot/step/monster sound is a fresh
-			// JS object, real GC pressure. Kept as the default for now
-			// since it's the most-tested path, but SDL has since been
-			// confirmed clean of that stutter on the same hardware.
-			{ label: 'Custom 1', values: ['custom'] },
 			// "Custom 2" (s_backend "custom2", webaudio2.c) -- mixes
 			// every channel itself in C (like SDL does) and only touches
 			// WebAudio to queue the already-mixed result in small fixed
 			// chunks, gapless, on a schedule completely decoupled from
-			// how many sounds are actually playing. Built specifically
-			// to test whether that closes the gap with SDL while still
-			// getting playback off the main thread the way Custom 1 does.
+			// how many sounds are actually playing. Gets playback off
+			// the main thread the way the removed backend did, without
+			// its per-sound allocation cost.
 			{ label: 'Custom 2', values: ['custom2'] },
 			{ label: 'Off', values: ['none'] }
 		],
-		def: 2
+		def: 1
 	},
 	toggleItem('sound', 'Sound', 's_initsound', true),
 	{
@@ -1816,9 +1945,7 @@ var DEBUG_ITEMS = [
 	// performance cost, not just console noise.
 	toggleItem('debugstats', 'Log: perf stats (1/s)', 'kaios_debug_stats', false),
 	toggleItem('debugframespike', 'Log: frame spikes', 'kaios_debug_framespike', false),
-	toggleItem('debugwastate', 'Log: audio state (1/s)', 'kaios_debug_wa_state', false),
 	toggleItem('debugunderwater', 'Log: underwater FBO', 'kaios_debug_underwater', false),
-	toggleItem('debugwebaudiotrace', 'Log: audio trace', 'kaios_debug_webaudio_trace', false),
 	toggleItem('debugmem', 'Log: heap usage', 'kaios_debug_mem', false),
 	toggleItem('debugswbuf', 'Log: soft buf stats', 'kaios_debug_swbuf', false),
 	toggleItem('debuggl1buf', 'Log: GL1 buffer trace', 'kaios_debug_gl1buf', false),
@@ -1826,7 +1953,6 @@ var DEBUG_ITEMS = [
 	toggleItem('debugprepframe', 'Log: level load phases', 'kaios_debug_prepframe', false),
 	toggleItem('debuggl3upload', 'Log: GL3 texture upload', 'kaios_debug_gl3upload', false),
 	toggleItem('debuggl3vbo', 'Log: GL3 VBO timing', 'kaios_debug_gl3vbo', false),
-	toggleItem('debugwaplay', 'Log: WA play timing', 'kaios_debug_waplay', false),
 	// A/B switch for the mid-gameplay stutter investigation: cl_entities
 	// (stock client cvar, cl_main.c) zeroes r_numentities in V_RenderView
 	// when off, so monsters/items still exist and think server-side but
@@ -1881,7 +2007,7 @@ var CHEATS_ITEMS = [
 	toggleItem('cheatgod', 'God mode', 'kaios_cheat_god', false),
 	toggleItem('cheatnoclip', 'No clip', 'kaios_cheat_noclip', false),
 	toggleItem('cheatnotarget', 'No target', 'kaios_cheat_notarget', false),
-	toggleItem('cheatgiveall', 'Give all weapons/ammo/armor', 'kaios_cheat_giveall', false)
+	toggleItem('cheatgiveall', 'Give All', 'kaios_cheat_giveall', false)
 ];
 
 var SETTINGS_GROUPS = [

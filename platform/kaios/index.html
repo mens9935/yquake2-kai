@@ -5,13 +5,25 @@
 <meta name="viewport" content="width=240, height=320, initial-scale=1, user-scalable=no">
 <title>Quake II</title>
 <style>
+	/* Bundled "QUAKE2" display font (Fonts2u, freeware) -- used for the
+	 * main menu's logo and the selected-row cursor marker below, not for
+	 * body text: its glyph set is uppercase-only display caps (plus
+	 * digits/punctuation) except for one deliberate special case --
+	 * lowercase 'q' alone is mapped to the stylized circular Quake mark,
+	 * not a regular letterform, which is why the logo markup below
+	 * spells the word with a lowercase q ("qUAKE") rather than an
+	 * actual typo. */
+	@font-face {
+		font-family: 'Quake2';
+		src: url('quake2.ttf');
+	}
 	html, body {
 		margin: 0;
 		padding: 0;
 		width: 240px;
 		height: 320px;
 		background: #000;
-		color: #ccc;
+		color: #d8d8d0;
 		font-family: sans-serif;
 		font-size: 13px;
 		overflow: hidden;
@@ -31,6 +43,17 @@
 		font-size: 15px;
 		margin: 0 0 8px 0;
 		color: #fff;
+	}
+	/* Main menu logo -- bundled display font, uppercase, "II" picked out
+	 * in the launcher's accent blue to read as a logo mark rather than a
+	 * plain screen title (which is all #picker/#settings h1 still are). */
+	#menu h1 {
+		font-family: 'Quake2', sans-serif;
+		font-size: 22px;
+		letter-spacing: 1px;
+	}
+	#menu h1 .logo-ii {
+		color: #3DAB67;
 	}
 	#menu ul, #picker ul, #settings ul {
 		list-style: none;
@@ -54,17 +77,23 @@
 	}
 	/* Quake II's own menu marks the selected row with a cursor glyph to
 	 * its left and a distinct text color, not a solid highlight block --
-	 * same idea here, kept in this launcher's existing palette (the
-	 * accent blue already used for the status/progress bar) instead of
-	 * Quake II's yellow. */
+	 * same idea here, in the same green as the "qUAKE II" logo mark
+	 * (#3DAB67) instead of Quake II's yellow, with the cursor glyph
+	 * itself set as the bundled display font's stylized Quake mark
+	 * (mapped to lowercase 'q', see the @font-face comment above)
+	 * instead of a plain triangle. */
 	#menu li.selected, #picker li.selected, #settings li.selected {
-		color: #6cf;
+		color: #3DAB67;
 	}
 	#menu li.selected::before, #picker li.selected::before, #settings li.selected::before {
-		content: '\25B8';
+		content: 'q';
+		font-family: 'Quake2', sans-serif;
 		position: absolute;
-		left: 2px;
-		color: #6cf;
+		left: 1px;
+		top: 2px;
+		font-size: 11px;
+		line-height: 1;
+		color: #3DAB67;
 	}
 	/* Play before baseq2 has ever been found -- greyed out and
 	   non-actionable (see app.js's showMainMenu()), with #menu-caption
@@ -73,10 +102,10 @@
 		color: #555;
 	}
 	#menu li.disabled.selected {
-		color: #789;
+		color: #5c8a6d;
 	}
 	#menu li.disabled.selected::before {
-		color: #789;
+		color: #5c8a6d;
 	}
 	#menu-caption {
 		font-size: 11px;
@@ -84,13 +113,36 @@
 		padding: 2px 4px 0 16px;
 		min-height: 13px;
 	}
+	/* Three equal-width flex columns so the hint bar mirrors the phone's
+	 * own physical key layout -- left softkey / OK (center) / right
+	 * softkey, left to right -- instead of running both hints together
+	 * left-aligned. Each span gets its own text-align rather than
+	 * relying on justify-content, so the center hint lands at the true
+	 * center of the bar regardless of how long the left/right hints are
+	 * (including empty, when a screen only uses one of the three). */
 	#menu .hint, #picker .hint, #settings .hint, #status .hint {
 		position: absolute;
 		bottom: 6px;
 		left: 8px;
 		right: 8px;
+		display: flex;
 		font-size: 11px;
 		color: #888;
+	}
+	#menu .hint > span, #picker .hint > span, #settings .hint > span, #status .hint > span {
+		flex: 1;
+	}
+	#menu .hint > span:first-child, #picker .hint > span:first-child,
+	#settings .hint > span:first-child, #status .hint > span:first-child {
+		text-align: left;
+	}
+	#menu .hint > span:nth-child(2), #picker .hint > span:nth-child(2),
+	#settings .hint > span:nth-child(2), #status .hint > span:nth-child(2) {
+		text-align: center;
+	}
+	#menu .hint > span:last-child, #picker .hint > span:last-child,
+	#settings .hint > span:last-child, #status .hint > span:last-child {
+		text-align: right;
 	}
 	#picker, #settings, #status {
 		display: none;
@@ -128,22 +180,22 @@
 <body>
 
 <div id="menu">
-	<h1>Quake II</h1>
+	<h1>qUAKE<span class="logo-ii"> II</span></h1>
 	<ul id="menu-list"></ul>
 	<div id="menu-caption"></div>
-	<div class="hint">OK: select</div>
+	<div class="hint"><span></span><span>OK</span><span></span></div>
 </div>
 
 <div id="picker">
 	<h1>Select baseq2 folder</h1>
 	<ul id="picker-list"></ul>
-	<div class="hint">OK: select&nbsp;&nbsp;RSK: back</div>
+	<div class="hint"><span></span><span>OK</span><span>Back</span></div>
 </div>
 
 <div id="settings">
 	<h1>Settings</h1>
 	<ul id="settings-list"></ul>
-	<div class="hint">OK: toggle&nbsp;&nbsp;RSK: back</div>
+	<div class="hint"><span></span><span>OK</span><span>Back</span></div>
 </div>
 
 <div id="status">

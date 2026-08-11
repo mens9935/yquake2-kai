@@ -53,11 +53,6 @@ typedef struct
 	int size;
 	int bufnum;
 #endif
-#ifdef __EMSCRIPTEN__
-	/* index into the JS-side Module.kaiosAudio.buffers array (webaudio.c)
-	 * -- 0 means "no buffer", matching bufnum's role for OpenAL above. */
-	int wa_bufnum;
-#endif
 	int stereo;
 	/* effect length */
 	/* begin<->attack..fade<->end */
@@ -141,14 +136,6 @@ typedef struct
 	float oal_vol;
 	int srcnum;
 #endif
-#ifdef __EMSCRIPTEN__
-	/* same "was this loop channel refreshed this frame" bookkeeping as
-	 * OpenAL's autoframe above, used by webaudio.c's WA_Update -- kept
-	 * as a separate field since a build could have both USE_OPENAL and
-	 * __EMSCRIPTEN__ defined at once (WA_Init is tried first at runtime,
-	 * see S_Init, but both backends' code is compiled in either way). */
-	int wa_autoframe;
-#endif
 } channel_t;
 
 /*
@@ -173,7 +160,6 @@ typedef enum
 	SS_NOT = 0,    /* soundsystem not started */
 	SS_SDL,        /* soundsystem started, using SDL */
 	SS_OAL,        /* soundsystem started, using OpenAL */
-	SS_WEBAUDIO,   /* soundsystem started, one AudioBufferSourceNode per sound play (webaudio.c) */
 	SS_WEBAUDIO2   /* soundsystem started, one shared C-side mix streamed through WebAudio in fixed chunks (webaudio2.c) */
 } sndstarted_t;
 
@@ -380,110 +366,10 @@ void AL_Overwater();
 
 #ifdef __EMSCRIPTEN__
 /*
- * Web Audio backend for KaiOS/Emscripten. Real-device profiling
- * (KAIOS_STATS's sndms/spatialize/paint breakdown, cl_screen.c) showed
- * S_Update() itself costs under 1ms/frame even at full 44100Hz stereo --
- * so software mixing was never actually the expensive part of "sound
- * on". Dropping s_khz to the lowest rate available didn't recover any
- * of the CPU/FPS difference between sound on and off either. That
- * leaves Emscripten's own SDL2 audio backend: on this single-threaded
- * asm.js build (no AUDIO_WORKLET -- that needs Wasm workers/threads,
- * incompatible with this build's whole reason for targeting asm.js in
- * the first place) it fills its ring buffer via a callback that has to
- * run on the same main JS thread as the render loop, competing with it
- * for time between frames in a way our own per-frame timers can't see
- * at all, because it isn't inside our call graph.
- *
- * This backend sidesteps that entirely by handing playback to the
- * browser's native Web Audio graph instead of software-mixing samples
- * ourselves: each sfx is decoded once into an AudioBuffer, and each
- * S_StartSound connects a fresh AudioBufferSourceNode through a
- * persistent per-channel-slot GainNode (+ StereoPannerNode where
- * available) to a shared master node. Mixing and playback timing then
- * happen natively on the browser's own real-time audio thread -- no
- * continuous main-thread callback of any kind is involved, so there's
- * nothing left to steal frame time from the renderer.
- *
- * Spatialization math is NOT reimplemented here -- SDL_Spatialize()/
- * SDL_SpatializeOrigin() (sdl.c) are reused as-is (they're pure functions
- * of listener/entity state, nothing SDL-specific about the math itself)
- * to get the same tuned leftvol/rightvol behaviour, which this backend
- * then converts to a gain+pan pair instead of feeding a software mixer.
- */
-
-/*
- * Initializes the Web Audio backend. False if the browser has no
- * AudioContext (very old engines) or something else went wrong --
- * S_Init() falls back to OpenAL/SDL in that case.
- */
-qboolean WA_Init(void);
-
-/*
- * Shuts the Web Audio backend down.
- */
-void WA_Shutdown(void);
-
-/*
- * Print information about the Web Audio backend.
- */
-void WA_SoundInfo(void);
-
-/*
- * Decodes raw PCM (already parsed out of the .wav by S_LoadSound) into
- * a native AudioBuffer. Mirrors AL_UploadSfx's signature/contract.
- */
-sfxcache_t *WA_UploadSfx(sfx_t *s, wavinfo_t *s_info, byte *data, short volume,
-						 int begin_length, int end_length,
-						 int attack_length, int fade_length);
-
-/*
- * Releases the AudioBuffer backing one sfx.
- */
-void WA_DeleteSfx(sfx_t *s);
-
-/*
- * Bytes currently held by loaded sfx AudioBuffers plus the current
- * music Blob -- real browser-native memory invisible to mallinfo()/
- * emscripten_get_heap_size(), see webaudio.c's own comment. Used by
- * sound.c's KAIOS_MEM profiler.
- */
-unsigned WA_GetMemoryUsage(void);
-
-/*
- * Starts playback of a channel (frontend sense) using the slot
- * (ch - channels) as its persistent GainNode/PannerNode index.
- */
-void WA_PlayChannel(channel_t *ch);
-
-/*
- * Stops playback of a channel.
- */
-void WA_StopChannel(channel_t *ch);
-
-/*
- * Stops playback of all channels.
- */
-void WA_StopAllChannels(void);
-
-/*
- * Per-frame update: expires finished/stale channels, respatializes
- * (gain+pan only, no audio processing) active ones, and refreshes
- * looping ambient sounds.
- */
-void WA_Update(void);
-
-/*
- * Queues raw PCM for playback (cinematics audio via cl_cin.c), scheduled
- * back-to-back on the browser's own audio clock instead of through our
- * own ring buffer.
- */
-void WA_RawSamples(int samples, int rate, int width,
-		int channels, const byte *data, float volume);
-
-/*
  * Background music (ogg.c's OGG_StartNative()) -- plays via a plain
- * <audio> element + blob: URL instead of the WebAudio graph above, see
- * webaudio.c's WA_PlayMusic() doc comment for why.
+ * <audio> element + blob: URL (webaudio_music.c), independent of
+ * whichever s_backend handles sfx/cinematics; see webaudio_music.c's
+ * own doc comment for why.
  */
 void WA_PlayMusic(const byte *data, int len);
 void WA_StopMusic(void);
@@ -491,26 +377,23 @@ void WA_PauseMusic(qboolean pause);
 void WA_SetMusicVolume(float vol);
 
 /*
- * Second Web Audio backend (webaudio2.c) -- same goal as WA_* above
- * (get playback off the main thread, unlike SDL's ScriptProcessorNode),
- * different tradeoff: WA_PlayChannel's one-AudioBufferSourceNode-per-
- * sound-play approach is real, continuous GC pressure during combat
- * (confirmed on real hardware -- see the KAIOS_HEARTBEAT_GAP/
- * KAIOS_JS_TICK stutter that went away switching to plain SDL). This
- * backend mixes every active channel itself, in C, exactly the way
- * sdl.c's SDL_PaintChannels does (reusing SDL_Cache/SDL_Spatialize/
- * SDL_DriftBeginofs/SDL_RawSamples directly -- sound.c treats this
- * backend as "just like SDL" for all the channel/timing bookkeeping
- * those already handle correctly), and only touches WebAudio to queue
- * the already-mixed result as fixed-size chunks scheduled back-to-back
- * on the AudioContext's own clock -- the same gapless-chunk pattern
- * WA_RawSamples already uses for cinematics, just applied continuously
- * instead of only for cinematic audio. This still isn't literally "one
- * node for the whole session" (AudioBufferSourceNode is one-shot by
- * spec, chunks still need a new one each) -- but the chunk rate is
- * small (~milliseconds of audio per chunk) and completely decoupled
- * from how many sounds the game is actually playing, instead of
- * scaling with combat intensity the way WA_PlayChannel's approach does.
+ * Web Audio backend (webaudio2.c) -- gets sfx/cinematics playback off
+ * the main thread, unlike SDL's ScriptProcessorNode, without the
+ * one-AudioBufferSourceNode-per-sound-play approach an earlier "Custom 1"
+ * backend used (removed after real-device profiling tied it to
+ * continuous GC pressure and a recurring mid-combat stutter that went
+ * away switching to plain SDL). This backend mixes every active channel
+ * itself, in C, exactly the way sdl.c's SDL_PaintChannels does (reusing
+ * SDL_Cache/SDL_Spatialize/SDL_DriftBeginofs/SDL_RawSamples directly --
+ * sound.c treats this backend as "just like SDL" for all the channel/
+ * timing bookkeeping those already handle correctly), and only touches
+ * WebAudio to queue the already-mixed result as fixed-size chunks
+ * scheduled back-to-back on the AudioContext's own clock. This still
+ * isn't literally "one node for the whole session" (AudioBufferSourceNode
+ * is one-shot by spec, chunks still need a new one each) -- but the
+ * chunk rate is small (~milliseconds of audio per chunk) and completely
+ * decoupled from how many sounds the game is actually playing, instead
+ * of scaling with combat intensity the way the removed backend did.
  */
 qboolean WA2_Init(void);
 void WA2_Shutdown(void);

@@ -51,7 +51,6 @@ Kaios_LogHeapUsage(const char *label)
 {
 	struct mallinfo mi;
 	size_t heap_size;
-	unsigned wa_bytes;
 	static cvar_t *kaios_debug_mem;
 
 	if (!kaios_debug_mem)
@@ -66,18 +65,10 @@ Kaios_LogHeapUsage(const char *label)
 
 	mi = mallinfo();
 	heap_size = emscripten_get_heap_size();
-	/* Loaded sfx/music data on the webaudio backend lives entirely in
-	 * browser-native AudioBuffers/a Blob, never in this C heap at all
-	 * (WA_UploadSfx's own comment: the C-side cache entry is just
-	 * metadata) -- mi.uordblks alone would make every S_LoadSound
-	 * look free no matter how much real memory it actually costs.
-	 * WA_GetMemoryUsage() is 0 on any other backend. */
-	wa_bytes = WA_GetMemoryUsage();
 
-	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%) webaudio=%u bytes\n",
+	Com_Printf("KAIOS_MEM: %s heap_used=%u/%u bytes (%.1f%%)\n",
 		label, (unsigned)mi.uordblks, (unsigned)heap_size,
-		heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f,
-		wa_bytes);
+		heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f);
 }
 #endif
 
@@ -128,10 +119,13 @@ static cvar_t* s_feedback_kind;
 static cvar_t* s_kaios_skip_prefixes;
 /* Forces exactly one backend instead of the old fixed webaudio ->
  * openal -> sdl try-order -- see S_Init()'s __EMSCRIPTEN__ branch.
- * "custom" (the WebAudio backend, webaudio.c) is the default: it's the
- * one that actually offloads mixing to the browser's own audio thread
- * instead of a main-thread SDL2 callback, see webaudio.c's own doc
- * comment for the full story on why. */
+ * "sdl" is the default: real-device testing tied the old "custom"
+ * backend's one-AudioBufferSourceNode-per-sound-play design (webaudio.c,
+ * since removed) to continuous GC pressure and a recurring mid-combat
+ * stutter that SDL's plain software mixer never showed on the same
+ * hardware. "custom2" (webaudio2.c) still offloads mixing off the main
+ * thread the way the removed backend did, without that per-sound
+ * allocation cost -- worth trying, just not (yet) the safer default. */
 cvar_t* s_backend;
 #endif
 
@@ -646,15 +640,6 @@ S_LoadSound(sfx_t *s)
 		info.width, info.channels, sound_volume, &begin_length, &end_length,
 		&attack_length, &fade_length);
 
-#ifdef __EMSCRIPTEN__
-	if (sound_started == SS_WEBAUDIO)
-	{
-		sc = WA_UploadSfx(s, &info, data + info.dataofs, sound_volume,
-						  begin_length, end_length,
-						  attack_length, fade_length);
-	}
-	else
-#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1099,14 +1084,6 @@ S_PickChannel(int entnum, int entchannel)
 
 	ch = &channels[first_to_die];
 
-#ifdef __EMSCRIPTEN__
-	if ((sound_started == SS_WEBAUDIO) && ch->sfx)
-	{
-		/* Make sure the channel is dead */
-		WA_StopChannel(ch);
-	}
-#endif
-
 #if USE_OPENAL
 	if ((sound_started == SS_OAL) && ch->sfx)
 	{
@@ -1222,14 +1199,6 @@ S_IssuePlaysound(playsound_t *ps)
 	VectorCopy(ps->origin, ch->origin);
 	ch->fixed_origin = ps->fixed_origin;
 
-#ifdef __EMSCRIPTEN__
-	if (sound_started == SS_WEBAUDIO)
-	{
-		ch->master_vol = (int)ps->volume;
-		WA_PlayChannel(ch);
-	}
-	else
-#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1438,18 +1407,6 @@ S_StartSound(vec3_t origin, int entnum, int entchannel, sfx_t *sfx,
 	ps->attenuation = attenuation;
 	ps->sfx = sfx;
 
-#ifdef __EMSCRIPTEN__
-	if (sound_started == SS_WEBAUDIO)
-	{
-		/* WA_PlayChannel reuses SDL_Spatialize (sdl.c), which expects
-		 * master_vol on the same 0-255 scale SDL uses -- not OpenAL's
-		 * 0-1 gain. paintedtime is real wall-clock ms here (WA_Update
-		 * sets it from cls.realtime), same as the OpenAL branch. */
-		ps->begin = paintedtime + timeofs * 1000;
-		ps->volume = fvol * 255;
-	}
-	else
-#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1559,13 +1516,6 @@ S_StopAllSounds(void)
 		s_playsounds[i].next->prev = &s_playsounds[i];
 	}
 
-#ifdef __EMSCRIPTEN__
-	if (sound_started == SS_WEBAUDIO)
-	{
-		WA_StopAllChannels();
-	}
-	else
-#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1634,13 +1584,6 @@ S_RawSamples(int samples, int rate, int width,
 		s_rawend = paintedtime;
 	}
 
-#ifdef __EMSCRIPTEN__
-	if (sound_started == SS_WEBAUDIO)
-	{
-		WA_RawSamples(samples, rate, width, channels, data, volume);
-	}
-	else
-#endif
 #if USE_OPENAL
 	if (sound_started == SS_OAL)
 	{
@@ -1683,11 +1626,7 @@ S_Update(vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 	VectorCopy(up, listener_up);
 
 #ifdef __EMSCRIPTEN__
-	if (sound_started == SS_WEBAUDIO)
-	{
-		WA_Update();
-	}
-	else if (sound_started == SS_WEBAUDIO2)
+	if (sound_started == SS_WEBAUDIO2)
 	{
 		WA2_Update();
 	}
@@ -1829,11 +1768,7 @@ S_SoundInfo_f(void)
 	}
 
 #ifdef __EMSCRIPTEN__
-	if (sound_started == SS_WEBAUDIO)
-	{
-		WA_SoundInfo();
-	}
-	else if (sound_started == SS_WEBAUDIO2)
+	if (sound_started == SS_WEBAUDIO2)
 	{
 		WA2_SoundInfo();
 	}
@@ -1923,7 +1858,7 @@ S_Init(void)
 	 * categories get cut. */
 	s_kaios_skip_prefixes = Cvar_Get("s_kaios_skip_prefixes",
 		"world/ doors/ plats/ switches/ misc/talk", CVAR_ARCHIVE);
-	s_backend = Cvar_Get("s_backend", "custom", CVAR_ARCHIVE);
+	s_backend = Cvar_Get("s_backend", "sdl", CVAR_ARCHIVE);
 #endif
 
 	Cmd_AddCommand("play", S_Play);
@@ -1936,9 +1871,9 @@ S_Init(void)
 	 * fixed order and silently falling through to the next on failure
 	 * -- the launcher's Audio settings screen sets this explicitly, and
 	 * a forced choice that then silently fell back to something else
-	 * would defeat the point of forcing it. "custom" (webaudio.c) is
-	 * the default and, unlike the other two, is expected to always
-	 * succeed in any real browser. */
+	 * would defeat the point of forcing it. "sdl" is the default and,
+	 * unlike the other two, is expected to always succeed in any real
+	 * browser. */
 	if (strcmp(s_backend->string, "none") == 0)
 	{
 		sound_started = SS_NOT;
@@ -1952,17 +1887,13 @@ S_Init(void)
 		sound_started = SS_NOT;
 #endif
 	}
-	else if (strcmp(s_backend->string, "sdl") == 0)
-	{
-		sound_started = SDL_BackendInit() ? SS_SDL : SS_NOT;
-	}
 	else if (strcmp(s_backend->string, "custom2") == 0)
 	{
 		sound_started = WA2_Init() ? SS_WEBAUDIO2 : SS_NOT;
 	}
-	else /* "custom" (default), or an unrecognized value */
+	else /* "sdl" (default), or an unrecognized value */
 	{
-		sound_started = WA_Init() ? SS_WEBAUDIO : SS_NOT;
+		sound_started = SDL_BackendInit() ? SS_SDL : SS_NOT;
 	}
 
 	if (sound_started == SS_NOT)
@@ -2033,13 +1964,6 @@ S_Shutdown(void)
 			continue;
 		}
 
-#ifdef __EMSCRIPTEN__
-		if (sound_started == SS_WEBAUDIO)
-		{
-			WA_DeleteSfx(sfx);
-		}
-#endif
-
 #if USE_OPENAL
 		if (sound_started == SS_OAL)
 		{
@@ -2062,11 +1986,7 @@ S_Shutdown(void)
 	num_sfx = 0;
 
 #ifdef __EMSCRIPTEN__
-	if (sound_started == SS_WEBAUDIO)
-	{
-		WA_Shutdown();
-	}
-	else if (sound_started == SS_WEBAUDIO2)
+	if (sound_started == SS_WEBAUDIO2)
 	{
 		WA2_Shutdown();
 	}

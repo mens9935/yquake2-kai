@@ -72,10 +72,11 @@ static struct {
 
 #ifdef __EMSCRIPTEN__
 /* Set whenever the *current* track is playing through WA_PlayMusic()
- * (webaudio.c, a plain <audio> element) instead of this file's usual
- * stb_vorbis decode -> S_RawSamples() chunking -- see
- * OGG_StartNative()'s comment for why the webaudio backend needs its
- * own path here at all. Guards OGG_Stop()/OGG_TogglePlayback() from
+ * (webaudio_music.c, a plain <audio> element) instead of this file's
+ * usual stb_vorbis decode -> S_RawSamples() chunking -- see
+ * OGG_StartNative()'s comment for why the custom2 (webaudio2.c) sfx
+ * backend routes music through its own path here at all. Guards
+ * OGG_Stop()/OGG_TogglePlayback() from
  * touching `ogg_file` (never opened for a native track) and from
  * needing to be reached every frame from OGG_Stream() the way the
  * chunked backends do (the <audio> element loops and streams on its
@@ -390,7 +391,7 @@ OGG_Stream(void)
 				}
 			}
 #ifdef __EMSCRIPTEN__
-			else if (sound_started == SS_WEBAUDIO && ogg_wa_native)
+			else if (sound_started == SS_WEBAUDIO2 && ogg_wa_native)
 			{
 				/* Nothing to feed frame-by-frame here -- the <audio>
 				 * element (OGG_StartNative(), WA_PlayMusic()) already
@@ -536,7 +537,7 @@ OGG_PlayTrack(const char *track, qboolean cdtrack, qboolean immediate)
 		}
 
 #ifdef __EMSCRIPTEN__
-		if (sound_started == SS_WEBAUDIO)
+		if (sound_started == SS_WEBAUDIO2)
 		{
 			if (!OGG_StartNative(f))
 			{
@@ -709,7 +710,7 @@ OGG_PlayTrack(const char *track, qboolean cdtrack, qboolean immediate)
 	}
 
 #ifdef __EMSCRIPTEN__
-	if (sound_started == SS_WEBAUDIO)
+	if (sound_started == SS_WEBAUDIO2)
 	{
 		if (!OGG_StartNative(f))
 		{

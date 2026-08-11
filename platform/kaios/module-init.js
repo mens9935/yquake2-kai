@@ -27,16 +27,15 @@
 // in memory), means the tail of a crashed session's log is still
 // readable on the *next* launch even though it was lost live.
 //
-// Deliberately NOT flushed on every line -- localStorage.setItem() is
-// synchronous with a real, measurable cost, and a9f5870's own finding
-// was that plain console.log() calls alone caused 700ms+ frame spikes
-// on this hardware (see cl_main.c/frame.c's KAIOS_FRAMESPIKE
-// comments). A throttled timer instead keeps the worst case bounded
-// to one small write every couple of seconds regardless of how bursty
-// the actual logging gets. This can't catch everything -- a true
-// instant process kill leaves whatever happened since the last tick
-// unrecovered -- but it turns "nothing at all" into "everything up to
-// a couple of seconds before the crash."
+// Deliberately NOT flushed on every line -- localStorage.setItem() is a
+// real, synchronous, disk-touching cost, and a plain console.log() call
+// alone has been measured causing real frame-time spikes on this
+// hardware. A throttled timer instead keeps the worst case bounded to
+// one small write every couple of seconds regardless of how bursty the
+// actual logging gets. This can't catch everything -- a true instant
+// process kill leaves whatever happened since the last tick unrecovered
+// -- but it turns "nothing at all" into "everything up to a couple of
+// seconds before the crash."
 var KAIOS_LOG_RING_KEY = 'kaios_crash_log';
 var KAIOS_LOG_RING_MAX_LINES = 300;
 var kaiosLogRingLines = [];
@@ -50,42 +49,13 @@ function kaiosLogRingPush(line) {
 	kaiosLogRingDirty = true;
 }
 
-// Untested until now: this fires on a plain 2s timer regardless of
-// what the player is doing, and localStorage.setItem() is a real,
-// synchronous, disk-touching browser API -- never actually timed
-// despite everything else in this file being instrumented. Worth
-// checking directly: this file's own diagnostic additions (heartbeat,
-// visibility, movedist, wall clocks...) have only grown the volume of
-// lines pushed into the ring since it was first written, so the
-// crash-log system built to catch stutters may have quietly become
-// one itself. stringify and setItem are timed separately so a slow
-// flush can be told apart as "our own line volume is the cost" (CPU,
-// ours to reduce) vs "the storage write itself is slow" (device I/O,
-// not something this code can fix). Threshold is well under the
-// 400ms KAIOS_JS_TICK/KAIOS_HEARTBEAT_GAP use -- the point here is
-// seeing the whole cost distribution, not just catastrophic outliers.
 function kaiosLogRingFlush() {
 	if (!kaiosLogRingDirty) {
 		return;
 	}
 	kaiosLogRingDirty = false;
 	try {
-		var t0 = performance.now();
-		var json = JSON.stringify(kaiosLogRingLines);
-		var t1 = performance.now();
-		localStorage.setItem(KAIOS_LOG_RING_KEY, json);
-		var t2 = performance.now();
-		var stringifyMs = t1 - t0;
-		var setItemMs = t2 - t1;
-
-		if (stringifyMs + setItemMs > 50) {
-			console.log('[kaios] KAIOS_LOGFLUSH_SLOW: stringify=' + stringifyMs.toFixed(1) +
-				'ms setItem=' + setItemMs.toFixed(1) + 'ms lines=' + kaiosLogRingLines.length +
-				' bytes=' + json.length + ' wall=' + Date.now());
-			// Deliberately not kaiosLogRingPush()'d -- a line describing
-			// this flush's own cost, pushed from inside that same flush,
-			// would just grow the very buffer being characterized.
-		}
+		localStorage.setItem(KAIOS_LOG_RING_KEY, JSON.stringify(kaiosLogRingLines));
 	} catch (e) {
 		// Storage full/unavailable -- losing the crash-recovery log is
 		// a much smaller problem than taking the whole app down over it.
@@ -122,161 +92,6 @@ window.addEventListener('unhandledrejection', kaiosLogRingFlush);
 		localStorage.removeItem(KAIOS_LOG_RING_KEY);
 	} catch (e) {
 		console.log('[kaios] crash-log recovery failed: ' + e);
-	}
-})();
-
-// ---------------------------------------------------------------------
-// Outer JS tick timing
-// ---------------------------------------------------------------------
-// Texture-upload, VBO, and audio-play timing (gl3_image.c/gl3_main.c/
-// webaudio.c) have all been measured directly against real
-// KAIOS_FRAMESPIKE events and ruled out -- none of them account for
-// more than a few ms while the spike's renderdelta-minus-breakdown gap
-// runs into the hundreds or low thousands. Whatever's eating that time
-// is not inside any C-side timer this engine has, which leaves exactly
-// two possibilities, and only JS can tell them apart: either it's
-// happening *inside* this frame's own callback (something our C code
-// calls into JS for that nothing wraps -- GC pressure from our own
-// allocations, Emscripten's own glue overhead) or *between* callbacks
-// entirely (the browser simply not running requestAnimationFrame
-// promptly -- OS scheduling, tab throttling) -- neither is visible
-// from inside the engine at all, no matter how many more Com_Printf
-// timers get added there.
-//
-// Browser.requestAnimationFrame (Emscripten's own runtime, baked into
-// quake2-kaios.js) looks up the bare `requestAnimationFrame` global
-// fresh on every single call rather than caching a reference once --
-// confirmed by reading the generated glue -- so patching
-// window.requestAnimationFrame here, before quake2-kaios.js is even
-// loaded, reliably wraps every engine frame's callback for the whole
-// session, with nothing on the emscripten side needing to change.
-//
-// gap = wall time since the *previous* callback started -- the JS-side
-// equivalent of cl_main.c's renderdelta, but measured with
-// performance.now() outside the engine entirely, so it can't miss
-// anything the C side's own clock might. duration = how long *this*
-// callback's own synchronous execution took, start to finish -- if
-// this comes back close to renderdelta while KAIOS_FRAMESPIKE_
-// BREAKDOWN's `all` stays small, the missing time is inside our own
-// code's execution somewhere unwrapped; if duration stays small while
-// gap is huge, the engine was never even running during the gap and
-// it's genuinely a browser/OS-level stall no amount of internal timing
-// could ever have caught. Threshold matches KAIOS_FRAMESPIKE's own
-// 400ms exactly so every line here lines up 1:1 with one there.
-(function () {
-	var lastTickStart = null;
-	var origRAF = window.requestAnimationFrame.bind(window);
-
-	window.requestAnimationFrame = function (cb) {
-		return origRAF(function (ts) {
-			var callStart = performance.now();
-			var gap = (lastTickStart !== null) ? (callStart - lastTickStart) : 0;
-			lastTickStart = callStart;
-
-			cb(ts);
-
-			var duration = performance.now() - callStart;
-
-			if (gap > 400 || duration > 400) {
-				var line = '[kaios] KAIOS_JS_TICK: gap=' + gap.toFixed(1) +
-					'ms duration=' + duration.toFixed(1) + 'ms wall=' + Date.now();
-				console.log(line);
-				kaiosLogRingPush(line);
-			}
-		});
-	};
-})();
-
-// ---------------------------------------------------------------------
-// setInterval heartbeat -- independent of requestAnimationFrame
-// ---------------------------------------------------------------------
-// Every render-cost hypothesis this engine's own timers could reach
-// (texture upload, VBO, WA_PLAY, entity/particle/dlight counts, camera
-// movement) has been checked against real KAIOS_FRAMESPIKE events and
-// ruled out one by one, including with sound entirely off -- the gap
-// itself (KAIOS_JS_TICK: small duration, huge gap) is real but nothing
-// inside the engine or the render path explains it. What's left is
-// genuinely outside anything content-dependent: either the whole JS
-// thread stalls (GC, OS-level preemption -- something unrelated to
-// rendering at all) or specifically requestAnimationFrame gets
-// deprioritized while the thread itself stays free (a
-// rendering/compositor-side throttle). Only a timer that has nothing
-// to do with rendering can tell those apart. setInterval is scheduled
-// by the browser's ordinary timer queue, not tied to paint/compositing
-// the way requestAnimationFrame is -- if IT stalls in lockstep with
-// KAIOS_JS_TICK's gaps, the whole thread was blocked and this has
-// nothing to do with GL3/WebGL at all; if it stays smooth while
-// KAIOS_JS_TICK still shows huge gaps, the browser is specifically
-// deprioritizing frame callbacks and the thread itself was free the
-// whole time. Same 400ms threshold as the others so every line lines
-// up 1:1 across all three.
-(function () {
-	var lastBeat = null;
-	var nominalInterval = 200;
-
-	setInterval(function () {
-		var now = performance.now();
-		var gap = (lastBeat !== null) ? (now - lastBeat) : nominalInterval;
-		lastBeat = now;
-
-		if (gap > 400) {
-			var line = '[kaios] KAIOS_HEARTBEAT_GAP: gap=' + gap.toFixed(1) + 'ms wall=' + Date.now();
-			console.log(line);
-			kaiosLogRingPush(line);
-		}
-	}, nominalInterval);
-})();
-
-// ---------------------------------------------------------------------
-// Tab visibility changes
-// ---------------------------------------------------------------------
-// A stutter that lines up with the app losing the foreground (an
-// incoming call, a KaiOS system notification, the user pressing the
-// home/end key) would explain "works fine here, terrible there" as
-// session-specific interruptions rather than anything about the scene
-// being rendered -- exactly the kind of randomness that's otherwise
-// impossible to distinguish from GPU/compositor backpressure using
-// only the timers above. Logged immediately (a discrete, rare event,
-// not a per-frame cost like the two timers above), so this can be
-// cross-referenced against KAIOS_JS_TICK/KAIOS_HEARTBEAT_GAP lines
-// with real timestamps on both sides.
-document.addEventListener('visibilitychange', function () {
-	var line = '[kaios] KAIOS_VISIBILITY: state=' + document.visibilityState +
-		' t=' + performance.now().toFixed(1) + ' wall=' + Date.now();
-	console.log(line);
-	kaiosLogRingPush(line);
-});
-
-// ---------------------------------------------------------------------
-// Long Tasks API (best-effort)
-// ---------------------------------------------------------------------
-// Standard way modern browsers self-report "the main thread was blocked
-// for this long, starting here" without needing our own polling --
-// strictly more precise than KAIOS_HEARTBEAT_GAP when it's available.
-// KaiOS 2.5's Gecko-48-class engine predates this API in most Firefox
-// releases, so this is feature-detected and silently skipped if
-// PerformanceObserver or the 'longtask' entry type isn't there --
-// never assume support, just take it if offered.
-(function () {
-	if (typeof PerformanceObserver === 'undefined') {
-		return;
-	}
-
-	try {
-		var obs = new PerformanceObserver(function (list) {
-			var entries = list.getEntries();
-			for (var i = 0; i < entries.length; i++) {
-				var e = entries[i];
-				var line = '[kaios] KAIOS_LONGTASK: duration=' + e.duration.toFixed(1) +
-					'ms start=' + e.startTime.toFixed(1) + ' wall=' + Date.now();
-				console.log(line);
-				kaiosLogRingPush(line);
-			}
-		});
-		obs.observe({ entryTypes: ['longtask'] });
-	} catch (e) {
-		// 'longtask' entry type not supported on this engine -- expected
-		// on KaiOS 2.5, not worth logging as a real error.
 	}
 })();
 

@@ -39,7 +39,6 @@ CLIENT_SRCS=(
 	"src/client/sound/sdl.c"
 	"src/client/sound/sound.c"
 	"src/client/sound/wave.c"
-	"src/client/sound/webaudio.c"
 	"src/client/sound/webaudio2.c"
 	"src/client/sound/webaudio_music.c"
 	"src/client/vid/vid.c"

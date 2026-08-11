@@ -2090,9 +2090,47 @@ FS_BuildGameSpecificSearchPath(const char *dir)
 		Cvar_FullSet("gamedir", "", CVAR_SERVERINFO | CVAR_NOSET);
 		Cvar_FullSet("game", "", CVAR_LATCH | CVAR_SERVERINFO);
 
+#ifdef __EMSCRIPTEN__
+		/* fs_rawPath->path (the generic "last dir added" case just
+		 * below) resolves to "/" on this port -- Sys_GetBinaryDir()'s
+		 * /proc/self/exe readlink has nothing to read on Emscripten, so
+		 * it falls back to the process cwd, and datadir defaults to the
+		 * same "." -- both realpath() to MEMFS's root, which is plain
+		 * in-memory storage wiped on every reload. Force the write
+		 * target to the actual persistent homedir instead (IDBFS-mounted
+		 * by platform/kaios/app.js's mountPersistentConfig(), synced out
+		 * on every CL_WriteConfiguration()/SV_Save()), same as every
+		 * other platform's "$HOME/.yq2/baseq2" convention -- otherwise
+		 * config.cfg and savegames alike would silently vanish on the
+		 * next launch. Already one of FS_BuildGenericSearchPath()'s raw
+		 * dirs, so anything written here is found again on load without
+		 * any other change. */
+		const char *homedir = Sys_GetHomeDir();
+
+		if (homedir != NULL)
+		{
+			size_t homelen = strlen(homedir);
+
+			/* Sys_GetHomeDir() returns a trailing-slash path (unlike
+			 * fs_rawPath->path below, already normalized by
+			 * FS_AddDirToRawPath()'s realpath() call) -- trim it so
+			 * this doesn't end up with a doubled "//" before baseq2. */
+			if (homelen > 0 && homedir[homelen - 1] == '/')
+			{
+				homelen--;
+			}
+
+			Com_sprintf(path, sizeof(path), "%.*s/%s", (int)homelen, homedir, BASEDIRNAME);
+		}
+		else
+		{
+			Com_sprintf(path, sizeof(path), "%s/%s", fs_rawPath->path, BASEDIRNAME);
+		}
+#else
 		// fs_gamedir must be reset to the last
 		// dir of the generic search path.
 		Com_sprintf(path, sizeof(path), "%s/%s", fs_rawPath->path, BASEDIRNAME);
+#endif
 		Q_strlcpy(fs_gamedir, path, sizeof(fs_gamedir));
 	} else {
 		Cvar_FullSet("gamedir", dir, CVAR_SERVERINFO | CVAR_NOSET);
