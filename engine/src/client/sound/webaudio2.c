@@ -467,6 +467,24 @@ WA2_Update(void)
 		scheduled += (double)WA2_CHUNK_SAMPLES / (double)sound.speed;
 		chunksQueued++;
 	}
+
+	/* sdl.c/openal.c each call this themselves at the tail of their own
+	 * per-frame update -- it was never wired in here, so on this port's
+	 * actual default/active backend (Custom2, this file) OGG_Stream()
+	 * was simply never called at all. For the chunked SDL/OpenAL music
+	 * path that would mean no music (OGG_Read() never runs), but this
+	 * backend's music goes through a real <audio> element instead
+	 * (OGG_StartNative()/WA_PlayMusic(), webaudio_music.c) that loops
+	 * and streams on its own once started, so the *symptom* was subtler
+	 * than silence: OGG_Stream() is also where ogg_volume/mute changes,
+	 * ogg_shuffle, ogg_pausewithgame, and the ogg_enabled on/off toggle
+	 * all actually get pushed out or acted on every frame -- none of
+	 * that was happening either. Dragging the in-game "OGG volume"
+	 * slider (menu.c) while a track was already playing silently did
+	 * nothing audible until the next track/map change, when
+	 * OGG_StartNative() would pick up whatever ogg_volume had become by
+	 * then. */
+	OGG_Stream();
 }
 
 #endif /* __EMSCRIPTEN__ */
