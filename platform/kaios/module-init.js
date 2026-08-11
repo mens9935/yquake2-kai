@@ -50,13 +50,42 @@ function kaiosLogRingPush(line) {
 	kaiosLogRingDirty = true;
 }
 
+// Untested until now: this fires on a plain 2s timer regardless of
+// what the player is doing, and localStorage.setItem() is a real,
+// synchronous, disk-touching browser API -- never actually timed
+// despite everything else in this file being instrumented. Worth
+// checking directly: this file's own diagnostic additions (heartbeat,
+// visibility, movedist, wall clocks...) have only grown the volume of
+// lines pushed into the ring since it was first written, so the
+// crash-log system built to catch stutters may have quietly become
+// one itself. stringify and setItem are timed separately so a slow
+// flush can be told apart as "our own line volume is the cost" (CPU,
+// ours to reduce) vs "the storage write itself is slow" (device I/O,
+// not something this code can fix). Threshold is well under the
+// 400ms KAIOS_JS_TICK/KAIOS_HEARTBEAT_GAP use -- the point here is
+// seeing the whole cost distribution, not just catastrophic outliers.
 function kaiosLogRingFlush() {
 	if (!kaiosLogRingDirty) {
 		return;
 	}
 	kaiosLogRingDirty = false;
 	try {
-		localStorage.setItem(KAIOS_LOG_RING_KEY, JSON.stringify(kaiosLogRingLines));
+		var t0 = performance.now();
+		var json = JSON.stringify(kaiosLogRingLines);
+		var t1 = performance.now();
+		localStorage.setItem(KAIOS_LOG_RING_KEY, json);
+		var t2 = performance.now();
+		var stringifyMs = t1 - t0;
+		var setItemMs = t2 - t1;
+
+		if (stringifyMs + setItemMs > 50) {
+			console.log('[kaios] KAIOS_LOGFLUSH_SLOW: stringify=' + stringifyMs.toFixed(1) +
+				'ms setItem=' + setItemMs.toFixed(1) + 'ms lines=' + kaiosLogRingLines.length +
+				' bytes=' + json.length + ' wall=' + Date.now());
+			// Deliberately not kaiosLogRingPush()'d -- a line describing
+			// this flush's own cost, pushed from inside that same flush,
+			// would just grow the very buffer being characterized.
+		}
 	} catch (e) {
 		// Storage full/unavailable -- losing the crash-recovery log is
 		// a much smaller problem than taking the whole app down over it.
