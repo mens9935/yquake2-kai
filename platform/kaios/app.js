@@ -93,27 +93,29 @@ function renderMenuItems(listEl, labels, selectedIndex, disabledFlags) {
 
 		var selectedEl = listEl.children[selectedIndex];
 		if (selectedEl) {
-			// Real-device reports kept showing the selection scrolling
-			// off the *top* of a scrolled-down list and staying there --
-			// hand-rolled scrollTop = selectedEl.offsetTop arithmetic
-			// (the previous approach here) depends on offsetTop/
-			// clientHeight being exactly as trustworthy on this engine as
-			// on any other, which real-device evidence says isn't holding
-			// up. scrollIntoView(alignToTop) -- the plain boolean-argument
-			// form, not the newer {block:'nearest'} options-object form
-			// this file already avoids elsewhere -- hands the actual
-			// scroll math to the browser's own layout code instead,
-			// wherever selectedEl's ancestor chain actually needs it
-			// scrolled from. Still only called when the row is actually
-			// out of view (not on every render), so normal in-view
-			// navigation never fights a touch/manual scroll position.
-			if (selectedEl.offsetTop < listEl.scrollTop) {
-				selectedEl.scrollIntoView(true);
-			} else {
-				var bottom = selectedEl.offsetTop + selectedEl.offsetHeight;
-				if (bottom > listEl.scrollTop + listEl.clientHeight) {
-					selectedEl.scrollIntoView(false);
-				}
+			// Real-device report: Element.scrollIntoView() (the previous
+			// approach here) wasn't scoping itself to just this list --
+			// it visibly dragged the *whole screen* up instead of
+			// scrolling the list in place. Per spec, scrollIntoView()
+			// walks and adjusts every scrollable ancestor in the chain,
+			// not just the nearest one, and html/body here are
+			// `overflow: hidden` rather than truly non-scrollable, which
+			// this engine apparently doesn't treat as "leave it alone"
+			// the way it needs to. Adjusting listEl.scrollTop directly
+			// -- the one and only element this is ever supposed to touch
+			// -- sidesteps that ancestor-walking behavior entirely.
+			// getBoundingClientRect() (viewport-relative, forces a real
+			// layout read) instead of offsetTop/clientHeight math is a
+			// second, independent fix over the version before
+			// scrollIntoView: less exposed to whatever made *that*
+			// engine-specific measurement untrustworthy too.
+			var selRect = selectedEl.getBoundingClientRect();
+			var listRect = listEl.getBoundingClientRect();
+
+			if (selRect.top < listRect.top) {
+				listEl.scrollTop -= (listRect.top - selRect.top);
+			} else if (selRect.bottom > listRect.bottom) {
+				listEl.scrollTop += (selRect.bottom - listRect.bottom);
 			}
 		}
 	} catch (e) {
