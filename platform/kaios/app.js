@@ -746,7 +746,14 @@ function installLazyPakFile(dest, file) {
 	return node;
 }
 
-function enumerateStorage(storage, path) {
+// `onFile`, when given, fires once per file as the cursor delivers it
+// (DeviceStorage.enumerate() streams results one at a time, not as a
+// single bulk callback) -- the only way to show any sign of life during
+// a full, unscoped card enumerate() (discoverBaseq2()'s whole-card scan
+// below), which can take long enough on a real, populated SD card that
+// a static "Scanning..." status with no feedback at all reads as a
+// frozen/hung app rather than one still working.
+function enumerateStorage(storage, path, onFile) {
 	return new Promise(function (resolve, reject) {
 		var files = [];
 		var cursor = storage.enumerate(path || '');
@@ -758,6 +765,9 @@ function enumerateStorage(storage, path) {
 				return;
 			}
 			files.push(file);
+			if (onFile) {
+				onFile(files.length);
+			}
 			cursor.continue();
 		};
 		cursor.onerror = function () {
@@ -793,9 +803,17 @@ function getAllDeviceStorages() {
 // returns each one's own {storage, files} pair (never rejects for an
 // individual storage's failure -- one bad/missing volume shouldn't
 // abort the whole search when others might still have baseq2).
-function enumerateAllStorages(storages, path) {
+//
+// `onProgress`, when given, is called with the running total file count
+// across every storage combined every time any one of them delivers
+// another file -- see enumerateStorage()'s onFile for why.
+function enumerateAllStorages(storages, path, onProgress) {
+	var totalSoFar = 0;
 	return Promise.all(storages.map(function (storage) {
-		return enumerateStorage(storage, path).then(function (files) {
+		return enumerateStorage(storage, path, onProgress && function () {
+			totalSoFar++;
+			onProgress(totalSoFar);
+		}).then(function (files) {
 			return { storage: storage, files: files };
 		}, function (err) {
 			console.log('[kaios] enumerate failed on storage "' + storage.storageName +
@@ -830,7 +848,19 @@ function findBaseq2Candidates(files, storageName) {
 		if (dirName.toLowerCase() !== GAMEDIR) {
 			continue;
 		}
-		var root = parts.slice(0, parts.length - 2).join('/');
+		// parts[0] is always '' (normalized starts with a leading slash),
+		// so a nested baseq2's root would otherwise come out of the
+		// slice+join below as "/Games" -- a leading slash DeviceStorage's
+		// own enumerate(path) does not expect on the relative path it
+		// takes (see playFast()'s scopedPath, the actual consumer that
+		// matters: a candidate found here but never actually reachable
+		// through a scoped re-enumerate silently falls back to a full
+		// rescan on every single Play press instead of booting directly).
+		// Stripped here, at the source, so every consumer of `root` gets
+		// the same "never a leading slash" convention -- copyBaseq2()
+		// below adds its own leading slash explicitly instead of relying
+		// on one already being embedded in root.
+		var root = parts.slice(0, parts.length - 2).join('/').replace(/^\/+/, '');
 		var key = root + '/' + dirName;
 		if (seen[key]) {
 			continue;
@@ -846,8 +876,8 @@ function findBaseq2Candidates(files, storageName) {
 // storageName -> files lookup, so a caller that ends up proceeding
 // with one particular candidate can hand copyBaseq2() that SAME
 // storage's file listing without having to re-enumerate it.
-function discoverBaseq2(storages, path) {
-	return enumerateAllStorages(storages, path).then(function (perStorage) {
+function discoverBaseq2(storages, path, onProgress) {
+	return enumerateAllStorages(storages, path, onProgress).then(function (perStorage) {
 		var candidates = [];
 		var filesByStorage = {};
 
@@ -929,12 +959,13 @@ function mkdirTreeFor(path) {
 // carries the real casing from the storage listing.
 function copyBaseq2(files, choice) {
 	var root = choice.root;
-	// `root` is baseq2's *parent* directory, and is "" when baseq2 sits
-	// right at the SD card root -- root + '/' would then be just "/",
-	// which every single path on the card starts with, copying the
-	// whole card instead of just the baseq2 folder. Scope explicitly to
-	// ".../<dirName>/" instead, which is correct whether root is empty or not.
-	var srcPrefix = root + '/' + choice.dirName + '/';
+	// `root` (never leading-slashed, see findBaseq2Candidates()) is
+	// baseq2's *parent* directory, "" when baseq2 sits right at the SD
+	// card root -- the leading slash is added explicitly here instead of
+	// via root itself, so this stays correct whether root is empty or
+	// not, and matches `norm` below (built the same "always exactly one
+	// leading slash" way from the raw storage listing).
+	var srcPrefix = '/' + (root ? root + '/' : '') + choice.dirName + '/';
 
 	// scrnshot/ is pure engine *output* -- the engine creates it itself
 	// under its writable config dir, never something that needs to be
@@ -1575,7 +1606,17 @@ function performBaseq2Scan(launchOnSuccess) {
 	hideAllScreens();
 	setStatus('Scanning for baseq2...');
 
-	discoverBaseq2(storages, '').then(function (result) {
+	// A real, populated SD card can take a while to walk in full (every
+	// file on the card, not just baseq2's own -- there's no way to scope
+	// this scan down before knowing where baseq2 even is). Without any
+	// feedback, a plain static "Scanning..." status is indistinguishable
+	// from a hung app for however long that takes. DeviceStorage.enumerate()
+	// already delivers results one file at a time, so a running count is
+	// free to show -- update the status text as it climbs instead of only
+	// once at the very end.
+	discoverBaseq2(storages, '', function (count) {
+		setStatus('Scanning for baseq2... (' + count + ' files)');
+	}).then(function (result) {
 		var candidates = result.candidates;
 
 		if (candidates.length === 0) {

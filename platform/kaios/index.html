@@ -39,21 +39,43 @@
 		padding: 8px;
 		background: #000;
 	}
+	/* Quake II's actual menus are set entirely in one blocky all-caps
+	 * display face, not a plain system sans mixed in next to it -- the
+	 * bundled font only has uppercase letterforms anyway (see the
+	 * @font-face comment above), so text-transform: uppercase here is
+	 * what makes every label/value/hint in these three screens render
+	 * in it at all instead of falling back to tofu for every lowercase
+	 * letter it doesn't have. #status is deliberately excluded: it shows
+	 * raw loading/error text (including caught exception messages this
+	 * app doesn't control the content of), which needs to stay legible
+	 * in a normal typeface no matter what characters end up in it. */
+	#menu, #picker, #settings {
+		font-family: 'Quake2', sans-serif;
+		text-transform: uppercase;
+	}
 	#menu h1, #picker h1, #settings h1 {
 		font-size: 15px;
 		margin: 0 0 8px 0;
 		color: #fff;
 	}
-	/* Main menu logo -- bundled display font, uppercase, "II" picked out
-	 * in the launcher's accent blue to read as a logo mark rather than a
-	 * plain screen title (which is all #picker/#settings h1 still are). */
+	/* Main menu logo -- larger than the other two screens' plain
+	 * h1 titles, with "II" picked out in the launcher's accent green to
+	 * read as a logo mark rather than just another heading. */
 	#menu h1 {
-		font-family: 'Quake2', sans-serif;
 		font-size: 22px;
 		letter-spacing: 1px;
 	}
 	#menu h1 .logo-ii {
 		color: #3DAB67;
+	}
+	/* The parent's text-transform: uppercase above would otherwise turn
+	 * this "q" into a capital Q -- the ordinary letterform, not the
+	 * stylized mark it's deliberately lowercase to select (see the
+	 * @font-face comment). Exempted here instead of leaving the whole
+	 * logo out of the uppercase rule, so "UAKE II" still benefits from
+	 * it like every other label in these three screens. */
+	#menu h1 .logo-mark {
+		text-transform: none;
 	}
 	#menu ul, #picker ul, #settings ul {
 		list-style: none;
@@ -87,7 +109,10 @@
 	}
 	#menu li.selected::before, #picker li.selected::before, #settings li.selected::before {
 		content: 'q';
-		font-family: 'Quake2', sans-serif;
+		/* Same reasoning as .logo-mark above -- without this, the parent
+		 * list's text-transform: uppercase turns this into a plain
+		 * capital Q instead of the stylized mark lowercase 'q' selects. */
+		text-transform: none;
 		position: absolute;
 		left: 1px;
 		top: 2px;
@@ -180,7 +205,7 @@
 <body>
 
 <div id="menu">
-	<h1>qUAKE<span class="logo-ii"> II</span></h1>
+	<h1><span class="logo-mark">q</span>UAKE<span class="logo-ii"> II</span></h1>
 	<ul id="menu-list"></ul>
 	<div id="menu-caption"></div>
 	<div class="hint"><span></span><span>OK</span><span></span></div>
