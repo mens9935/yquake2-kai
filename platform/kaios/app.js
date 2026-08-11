@@ -1928,6 +1928,26 @@ var VIDEO_ITEMS = [
 			{ label: '3x', values: ['3'] }
 		],
 		def: 0
+	},
+	// Trial fix for the view weapon reading as positioned too high on
+	// this port's narrow portrait resolutions -- see kaios_gun_yoffset's
+	// own comment in cl_entities.c. Negative moves the gun down on
+	// screen. -3 (the engine's own KaiOS default) is the middle choice
+	// here so picking this item at all isn't required to get it; the
+	// rest are here to dial it in without a rebuild.
+	{
+		id: 'gunyoffset',
+		label: 'Weapon height',
+		cvars: ['kaios_gun_yoffset'],
+		choices: [
+			{ label: '0', values: ['0'] },
+			{ label: '-2', values: ['-2'] },
+			{ label: '-3', values: ['-3'] },
+			{ label: '-5', values: ['-5'] },
+			{ label: '-8', values: ['-8'] },
+			{ label: '-12', values: ['-12'] }
+		],
+		def: 2
 	}
 ];
 

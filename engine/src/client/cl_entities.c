@@ -27,6 +27,18 @@
 #include <math.h>
 #include "header/client.h"
 
+/* KaiOS-only trial fix: on this port's narrow portrait resolutions
+ * (240x320 and similar) the view weapon reads as sitting noticeably
+ * higher on screen than intended. Lets the gun's fixed world-space
+ * offset (ops/ps->gunoffset, set server-side and otherwise untouched
+ * here) be nudged along the view's own "up" vector -- negative moves it
+ * down on screen -- instead of guessing a single hardcoded value blind;
+ * see CL_AddViewWeapon() below for where it's applied. CVAR_ARCHIVE so
+ * whatever the player settles on sticks across launches. Defaults to 0
+ * (no change) everywhere except this port, where -3 is a starting
+ * guess pending real-device feedback. */
+static cvar_t *kaios_gun_yoffset;
+
 void
 CL_AddPacketEntities(frame_t *frame)
 {
@@ -644,6 +656,24 @@ CL_AddViewWeapon(player_state_t *ps, player_state_t *ops)
 			+ cl.lerpfrac * (ps->gunoffset[i] - ops->gunoffset[i]);
 		gun.angles[i] = cl.refdef.viewangles[i] + LerpAngle(ops->gunangles[i],
 			ps->gunangles[i], cl.lerpfrac);
+	}
+
+	/* See kaios_gun_yoffset's own comment at the top of this file. */
+	if (!kaios_gun_yoffset)
+	{
+#ifdef __EMSCRIPTEN__
+		kaios_gun_yoffset = Cvar_Get("kaios_gun_yoffset", "-3", CVAR_ARCHIVE);
+#else
+		kaios_gun_yoffset = Cvar_Get("kaios_gun_yoffset", "0", CVAR_ARCHIVE);
+#endif
+	}
+
+	if (kaios_gun_yoffset->value != 0)
+	{
+		for (i = 0; i < 3; i++)
+		{
+			gun.origin[i] += cl.v_up[i] * kaios_gun_yoffset->value;
+		}
 	}
 
 	if (gun_frame)
