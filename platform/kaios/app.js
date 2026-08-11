@@ -1332,31 +1332,14 @@ function bootEngine() {
 // Main menu (shown first, on every launch): find baseq2 / settings.
 // ---------------------------------------------------------------------
 
-// Set once a baseq2 scan+copy has genuinely succeeded (see proceed()
-// inside startBaseq2Scan()) -- gates both "Play" showing up on the
-// main menu at all (there's nothing to play until baseq2 has been
-// found at least once) and the boot-time skip timer below, per spec:
-// the timer only makes sense once there's something to skip *to*.
+// Set once a baseq2 scan+copy has genuinely succeeded (see
+// proceedWithChoice()) -- gates the boot-time skip timer below, per
+// spec: the timer only makes sense once there's something confirmed to
+// skip straight to.
 var BASEQ2_CONFIRMED_KEY = 'kaios_baseq2_confirmed';
 
 function isBaseq2Confirmed() {
 	return localStorage.getItem(BASEQ2_CONFIRMED_KEY) === '1';
-}
-
-// Set once, the first time the app has ever launched (see
-// autoScanOnFirstLaunch()) -- distinct from BASEQ2_CONFIRMED_KEY, which
-// only flips on a *successful* scan. This one flips regardless of
-// outcome, so a failed first-launch scan doesn't keep silently
-// re-running itself on every later launch; after the first attempt the
-// player drives it manually via the "Search baseq2" menu item instead.
-var EVER_LAUNCHED_KEY = 'kaios_ever_launched';
-
-function hasEverLaunched() {
-	return localStorage.getItem(EVER_LAUNCHED_KEY) === '1';
-}
-
-function markEverLaunched() {
-	localStorage.setItem(EVER_LAUNCHED_KEY, '1');
 }
 
 // Set by a scan (auto or manual) that comes back empty-handed or errors
@@ -1382,22 +1365,18 @@ function hideAllScreens() {
 }
 
 function mainMenuItems() {
-	var confirmed = isBaseq2Confirmed();
 	var items = [];
-	// Always shown, even before baseq2 has ever been found -- disabled
-	// (see showMainMenu()'s render(), which also surfaces `caption`
-	// underneath) instead of only appearing once confirmed, so first
-	// launch shows *why* Play can't be used yet rather than just not
-	// offering it. The first-launch scan (see start() below) is what
-	// enables it, without the player having to manually press "Search
-	// baseq2" first.
+	// Always enabled -- playFast() itself handles every case (a cached
+	// baseq2 location, none yet, or one that no longer resolves) and is
+	// the only thing that ever looks for baseq2 at all now, so there's
+	// nothing left for a separate disabled/not-yet-confirmed state to
+	// gate. `caption` only ever has anything in it after a Play press
+	// that scanned and came up empty (see performBaseq2Scan()).
 	items.push({
 		label: 'Play',
 		action: playFast,
-		disabled: !confirmed,
-		caption: confirmed ? '' : (mainMenuError || 'pak0.pak not found')
+		caption: mainMenuError
 	});
-	items.push({ label: 'Search baseq2', action: startBaseq2Scan });
 	items.push({ label: 'Settings', action: showSettingsGroups });
 	items.push({ label: 'Exit', action: exitApp });
 	return items;
@@ -1422,7 +1401,7 @@ function showMainMenu() {
 	var selected = 0;
 
 	// mainMenuItems() is recomputed on every render(), not cached once
-	// at screen-entry -- a "Search baseq2" scan finishing after the
+	// at screen-entry -- a Play-triggered scan finishing after the
 	// player cancelled back to this screen (see performBaseq2Scan()'s
 	// refreshMainMenuIfShown call) needs the very next render() to pick
 	// up the now-confirmed state without a full re-entry into
@@ -1569,7 +1548,7 @@ function setCachedBaseq2Choice(choice) {
 	}));
 }
 
-// Shared tail end of both the full scan (startBaseq2Scan) and the fast
+// Shared tail end of both the full scan (performBaseq2Scan) and the fast
 // cached-path retry (playFast) below -- `files` only needs to cover
 // the baseq2 folder's own subtree (copyBaseq2() filters it down to
 // that anyway), not the whole SD card.
@@ -1597,25 +1576,19 @@ function proceedWithChoice(files, choice) {
 	});
 }
 
-// Shared by the manual "Search baseq2" menu item and the
-// first-launch-only automatic scan (start() below) -- searches every
-// storage volume (internal + any inserted SD card, see
+// Play's own fallback when there's no cached baseq2 location yet (or it
+// no longer resolves) -- see playFast() below, the only caller. Scans
+// every storage volume (internal + any inserted SD card, see
 // getAllDeviceStorages()) from scratch, taking over the screen with a
 // visible "Scanning..." status (and, if more than one candidate turns
-// up, the folder picker) -- silently scanning in the background on
-// first launch turned out to just look like nothing was happening at
-// all.
-//
-// `launchOnSuccess` controls what a successful scan does next: true
-// (first launch only) goes straight into loading/copying/booting, same
-// as pressing Play immediately after -- first-time setup should feel
-// like one continuous action, not "scan, then go find Play yourself".
-// false (every manual "Search baseq2" press afterward) just confirms
-// the folder and returns to the main menu with Play now enabled,
-// without touching anything already installed -- re-scanning to pick up
-// a changed/reinserted card shouldn't also force a reload the player
-// didn't ask for.
-function performBaseq2Scan(launchOnSuccess) {
+// up, the folder picker), then goes straight into loading/copying/
+// booting on success -- pressing Play always means "get me into the
+// game", so a scan it triggers always ends the same way a cached fast
+// path would have. There's no separate "just find baseq2 and stop"
+// entry point anymore (no "Search baseq2" menu item, no first-launch-
+// only auto-scan) -- Play is the only thing that ever looks for it, on
+// every press that needs to.
+function performBaseq2Scan() {
 	var storages = getAllDeviceStorages();
 	if (storages.length === 0) {
 		mainMenuError = 'No Device Storage API on this browser.';
@@ -1719,22 +1692,21 @@ function performBaseq2Scan(launchOnSuccess) {
 
 		function finish(choice) {
 			mainMenuError = '';
-			if (launchOnSuccess && !cancelled) {
+			if (cancelled) {
+				// Never auto-launch into a level the player didn't
+				// press Play for anymore -- they backed out, so just
+				// confirm and land on/refresh the main menu instead,
+				// same as if this had failed to find anything.
+				setCachedBaseq2Choice(choice);
+				localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
+				landOnMainMenu();
+			} else {
 				// The cancel-scan RSK handler above has no business
 				// still being live once loading/copying/booting takes
 				// over -- that phase has no cancel of its own (never
 				// did, before this scan-progress screen existed at all).
 				activeMenuKeyHandler = null;
 				proceedWithChoice(result.filesByStorage[choice.storageName], choice);
-			} else {
-				// Never auto-launch into a level the player didn't
-				// press Play for -- cancelling always downgrades to
-				// "just confirm and land on/refresh the main menu",
-				// regardless of what launchOnSuccess originally asked
-				// for as the first-launch fast path.
-				setCachedBaseq2Choice(choice);
-				localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
-				landOnMainMenu();
 			}
 		}
 
@@ -1757,39 +1729,24 @@ function performBaseq2Scan(launchOnSuccess) {
 	});
 }
 
-function startBaseq2Scan() {
-	performBaseq2Scan(false);
-}
-
-// "Play" from the main menu -- baseq2 was already found and confirmed
-// on some earlier launch (that's the only way "Play" is ever enabled
-// at all, see mainMenuItems()), so re-enumerating the *whole* card
-// again just to rediscover the exact same folder is pure waste on a
-// slow SD-card read. Scope the enumerate() to the cached folder's own
-// path on its own cached storage volume instead of every volume's
-// root -- lists only that subtree, not every unrelated file
-// elsewhere. Falls back to a full startBaseq2Scan() (which also
-// refreshes the cache) if there's no cached path yet, the cached
-// volume no longer exists (card removed/swapped), or the scoped
-// listing comes back without a valid pak0.pak in it (folder renamed)
-// -- exactly the "rescan on error" behavior asked for.
-// Every fallback below goes through performBaseq2Scan(true) -- scan,
-// then launch straight into the game on success -- never
-// startBaseq2Scan()/performBaseq2Scan(false), which is the manual
-// "Search baseq2" menu item's own function and deliberately does NOT
-// launch anything, just confirms and returns to the main menu. Play and
-// "Search baseq2" need to stay two different actions with two different
-// outcomes; calling the same non-launching path from here was a real
-// bug -- confirmed on real hardware as Play repeatedly re-scanning and
-// landing back on the main menu without ever actually starting the
-// engine, instead of falling back to a slower-but-still-correct full
-// scan the way a "fast path failed, recover properly" fallback should.
+// "Play" from the main menu -- the only entry point that ever looks for
+// baseq2 (see performBaseq2Scan()'s own comment). If it was already
+// found and confirmed on some earlier launch, re-enumerating the
+// *whole* card again just to rediscover the exact same folder is pure
+// waste on a slow SD-card read -- scope the enumerate() to the cached
+// folder's own path on its own cached storage volume instead of every
+// volume's root, which lists only that subtree, not every unrelated
+// file elsewhere. Falls back to a full performBaseq2Scan() (which also
+// refreshes the cache and, on success, proceeds straight into the game
+// itself) if there's no cached path yet, the cached volume no longer
+// exists (card removed/swapped), or the scoped listing comes back
+// without a valid pak0.pak in it (folder renamed).
 function playFast() {
 	var cached = getCachedBaseq2Choice();
 	var storages = getAllDeviceStorages();
 
 	if (!cached || storages.length === 0) {
-		performBaseq2Scan(true);
+		performBaseq2Scan();
 		return;
 	}
 
@@ -1802,7 +1759,7 @@ function playFast() {
 	}
 
 	if (!storage) {
-		performBaseq2Scan(true);
+		performBaseq2Scan();
 		return;
 	}
 
@@ -1823,7 +1780,7 @@ function playFast() {
 		}
 
 		if (!match) {
-			performBaseq2Scan(true);
+			performBaseq2Scan();
 			return;
 		}
 
@@ -1831,7 +1788,7 @@ function playFast() {
 	}, function () {
 		// Cached path no longer resolves (renamed/removed/card swapped)
 		// -- fall back to a full scan-and-launch rather than a dead end.
-		performBaseq2Scan(true);
+		performBaseq2Scan();
 	});
 }
 
@@ -2291,20 +2248,11 @@ function start() {
 
 	if (isBaseq2Confirmed()) {
 		showBootSkipTimer();
-	} else if (hasEverLaunched()) {
-		// baseq2 was never confirmed, but this isn't the first launch
-		// either (an earlier scan failed, or the player backed out of
-		// it) -- land on the main menu with "Search baseq2" available
-		// rather than auto-scanning silently again.
-		showMainMenu();
 	} else {
-		// The very first launch ever: scan for baseq2 right away,
-		// visibly, and go straight into the game on success -- see
-		// performBaseq2Scan()'s own comment for why first-time setup
-		// skips the "back to the main menu, press Play yourself" step
-		// every later "Search baseq2" still uses.
-		markEverLaunched();
-		performBaseq2Scan(true, true);
+		// No auto-scan here anymore -- baseq2 (if not already confirmed
+		// from an earlier launch) is only ever looked for when the
+		// player actually presses Play, see playFast()/performBaseq2Scan().
+		showMainMenu();
 	}
 }
 
