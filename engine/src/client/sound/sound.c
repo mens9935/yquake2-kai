@@ -1858,7 +1858,7 @@ S_Init(void)
 	 * categories get cut. */
 	s_kaios_skip_prefixes = Cvar_Get("s_kaios_skip_prefixes",
 		"world/ doors/ plats/ switches/ misc/talk", CVAR_ARCHIVE);
-	s_backend = Cvar_Get("s_backend", "sdl", CVAR_ARCHIVE);
+	s_backend = Cvar_Get("s_backend", "custom2", CVAR_ARCHIVE);
 #endif
 
 	Cmd_AddCommand("play", S_Play);
@@ -1871,9 +1871,10 @@ S_Init(void)
 	 * fixed order and silently falling through to the next on failure
 	 * -- the launcher's Audio settings screen sets this explicitly, and
 	 * a forced choice that then silently fell back to something else
-	 * would defeat the point of forcing it. "sdl" is the default and,
-	 * unlike the other two, is expected to always succeed in any real
-	 * browser. */
+	 * would defeat the point of forcing it. "custom2" (webaudio2.c) is
+	 * the default -- gets sfx/cinematics playback off the main thread
+	 * without the old "Custom 1" backend's per-sound-node GC pressure,
+	 * confirmed clean of that backend's stutter on real hardware. */
 	if (strcmp(s_backend->string, "none") == 0)
 	{
 		sound_started = SS_NOT;
@@ -1887,13 +1888,13 @@ S_Init(void)
 		sound_started = SS_NOT;
 #endif
 	}
-	else if (strcmp(s_backend->string, "custom2") == 0)
-	{
-		sound_started = WA2_Init() ? SS_WEBAUDIO2 : SS_NOT;
-	}
-	else /* "sdl" (default), or an unrecognized value */
+	else if (strcmp(s_backend->string, "sdl") == 0)
 	{
 		sound_started = SDL_BackendInit() ? SS_SDL : SS_NOT;
+	}
+	else /* "custom2" (default), or an unrecognized value */
+	{
+		sound_started = WA2_Init() ? SS_WEBAUDIO2 : SS_NOT;
 	}
 
 	if (sound_started == SS_NOT)

@@ -92,12 +92,26 @@ function renderMenuItems(listEl, labels, selectedIndex, disabledFlags) {
 
 		var selectedEl = listEl.children[selectedIndex];
 		if (selectedEl) {
+			// Real-device reports kept showing the selection scrolling
+			// off the *top* of a scrolled-down list and staying there --
+			// hand-rolled scrollTop = selectedEl.offsetTop arithmetic
+			// (the previous approach here) depends on offsetTop/
+			// clientHeight being exactly as trustworthy on this engine as
+			// on any other, which real-device evidence says isn't holding
+			// up. scrollIntoView(alignToTop) -- the plain boolean-argument
+			// form, not the newer {block:'nearest'} options-object form
+			// this file already avoids elsewhere -- hands the actual
+			// scroll math to the browser's own layout code instead,
+			// wherever selectedEl's ancestor chain actually needs it
+			// scrolled from. Still only called when the row is actually
+			// out of view (not on every render), so normal in-view
+			// navigation never fights a touch/manual scroll position.
 			if (selectedEl.offsetTop < listEl.scrollTop) {
-				listEl.scrollTop = selectedEl.offsetTop;
+				selectedEl.scrollIntoView(true);
 			} else {
 				var bottom = selectedEl.offsetTop + selectedEl.offsetHeight;
 				if (bottom > listEl.scrollTop + listEl.clientHeight) {
-					listEl.scrollTop = bottom - listEl.clientHeight;
+					selectedEl.scrollIntoView(false);
 				}
 			}
 		}
@@ -1311,20 +1325,11 @@ function markEverLaunched() {
 // otherwise reads "pak0.pak not found". Cleared on a successful scan.
 var mainMenuError = '';
 
-// Set by showMainMenu() while (and only while) the main menu is the
-// screen on display, so autoScanOnFirstLaunch() can refresh it in
-// place if it finishes while the player is still looking at it.
-// Cleared here since every screen transition -- including back into
-// showMainMenu() itself, which reassigns it -- calls hideAllScreens()
-// first.
-var refreshMainMenuIfShown = null;
-
 function hideAllScreens() {
 	menuEl.style.display = 'none';
 	pickerEl.style.display = 'none';
 	settingsEl.style.display = 'none';
 	statusEl.style.display = 'none';
-	refreshMainMenuIfShown = null;
 }
 
 function mainMenuItems() {
@@ -1403,7 +1408,6 @@ function showMainMenu() {
 	menuEl.style.display = 'block';
 	render();
 	activeMenuKeyHandler = onKeyDown;
-	refreshMainMenuIfShown = render;
 }
 
 // ---------------------------------------------------------------------
@@ -1542,64 +1546,56 @@ function proceedWithChoice(files, choice) {
 	});
 }
 
-// Shared by both the manual "Search baseq2" menu item and the
-// first-launch-only automatic scan below -- searches every storage
-// volume (internal + any inserted SD card, see getAllDeviceStorages())
-// from scratch. Deliberately does NOT copy baseq2 or boot the engine on
-// success: it only confirms a candidate exists and caches its location,
-// same as the old auto-scan-only behavior used to. "Play" (playFast())
-// is the only path that actually loads engine scripts, copies files,
-// and boots -- so a scan (auto or manual) always lands back on the main
-// menu, either with Play now enabled or with an error caption where the
-// "pak0.pak not found" text normally sits.
+// Shared by the manual "Search baseq2" menu item and the
+// first-launch-only automatic scan (start() below) -- searches every
+// storage volume (internal + any inserted SD card, see
+// getAllDeviceStorages()) from scratch, taking over the screen with a
+// visible "Scanning..." status (and, if more than one candidate turns
+// up, the folder picker) -- silently scanning in the background on
+// first launch turned out to just look like nothing was happening at
+// all.
 //
-// `interactive` is true for the manual menu item: it takes over the
-// screen with a "Scanning..." status and (if more than one candidate
-// turns up) the folder picker. The quiet/background first-launch pass
-// does neither -- it only touches the screen at all if the main menu is
-// still what's showing when it finishes (refreshMainMenuIfShown), so it
-// never yanks the player out of Settings or wherever else they've
-// already navigated to.
-function performBaseq2Scan(interactive) {
-	function landOnMainMenu() {
-		if (interactive) {
-			showMainMenu();
-		} else if (typeof refreshMainMenuIfShown === 'function') {
-			refreshMainMenuIfShown();
-		}
-	}
-
+// `launchOnSuccess` controls what a successful scan does next: true
+// (first launch only) goes straight into loading/copying/booting, same
+// as pressing Play immediately after -- first-time setup should feel
+// like one continuous action, not "scan, then go find Play yourself".
+// false (every manual "Search baseq2" press afterward) just confirms
+// the folder and returns to the main menu with Play now enabled,
+// without touching anything already installed -- re-scanning to pick up
+// a changed/reinserted card shouldn't also force a reload the player
+// didn't ask for.
+function performBaseq2Scan(launchOnSuccess) {
 	var storages = getAllDeviceStorages();
 	if (storages.length === 0) {
-		if (interactive) {
-			mainMenuError = 'No Device Storage API on this browser.';
-			landOnMainMenu();
-		}
+		mainMenuError = 'No Device Storage API on this browser.';
+		showMainMenu();
 		return;
 	}
 
-	if (interactive) {
-		hideAllScreens();
-		setStatus('Scanning for baseq2...');
-	}
+	hideAllScreens();
+	setStatus('Scanning for baseq2...');
 
 	discoverBaseq2(storages, '').then(function (result) {
 		var candidates = result.candidates;
 
 		if (candidates.length === 0) {
 			mainMenuError = 'baseq2/pak0.pak not found';
-			landOnMainMenu();
+			showMainMenu();
 			return;
 		}
 
 		function finish(choice) {
-			setCachedBaseq2Choice(choice);
-			localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
 			mainMenuError = '';
-			landOnMainMenu();
+			if (launchOnSuccess) {
+				proceedWithChoice(result.filesByStorage[choice.storageName], choice);
+			} else {
+				setCachedBaseq2Choice(choice);
+				localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
+				showMainMenu();
+			}
 		}
 
-		if (interactive && candidates.length > 1) {
+		if (candidates.length > 1) {
 			pickerEl.style.display = 'block';
 			statusEl.style.display = 'none';
 			showPicker(candidates, finish);
@@ -1608,12 +1604,12 @@ function performBaseq2Scan(interactive) {
 		}
 	}, function (err) {
 		mainMenuError = 'Scan failed: ' + describeError(err);
-		landOnMainMenu();
+		showMainMenu();
 	});
 }
 
 function startBaseq2Scan() {
-	performBaseq2Scan(true);
+	performBaseq2Scan(false);
 }
 
 // "Play" from the main menu -- baseq2 was already found and confirmed
@@ -1677,20 +1673,6 @@ function playFast() {
 		// -- fall back to the full rescan rather than a dead end.
 		startBaseq2Scan();
 	});
-}
-
-// Runs at most once ever, on the very first launch of the app (see
-// EVER_LAUNCHED_KEY and start() below) -- the whole point is letting
-// "Play" light up without the player having to manually press "Search
-// baseq2" first. Every launch after that -- successful or not -- relies
-// on the player pressing that menu item themselves instead of silently
-// re-scanning the SD card in the background again.
-function autoScanOnFirstLaunch() {
-	if (hasEverLaunched()) {
-		return;
-	}
-	markEverLaunched();
-	performBaseq2Scan(false);
 }
 
 // ---------------------------------------------------------------------
@@ -1837,24 +1819,21 @@ var AUDIO_ITEMS = [
 		cvars: ['s_backend'],
 		choices: [
 			{ label: 'OpenAL', values: ['openal'] },
-			// Default: real-device evidence this whole session tied the
-			// old "Custom 1" backend (one AudioBufferSourceNode per sound
-			// play, since removed) to constant mid-combat stutter from
-			// GC pressure -- every shot/step/monster sound was a fresh
-			// JS object. Plain SDL software mixing was confirmed clean
-			// of that stutter on the same hardware.
 			{ label: 'SDL', values: ['sdl'] },
-			// "Custom 2" (s_backend "custom2", webaudio2.c) -- mixes
-			// every channel itself in C (like SDL does) and only touches
-			// WebAudio to queue the already-mixed result in small fixed
-			// chunks, gapless, on a schedule completely decoupled from
-			// how many sounds are actually playing. Gets playback off
-			// the main thread the way the removed backend did, without
-			// its per-sound allocation cost.
-			{ label: 'Custom 2', values: ['custom2'] },
+			// Default: mixes every channel itself in C (like SDL does)
+			// and only touches WebAudio to queue the already-mixed
+			// result in small fixed chunks, gapless, on a schedule
+			// completely decoupled from how many sounds are actually
+			// playing -- gets playback off the main thread the way the
+			// old "Custom 1" backend did (one AudioBufferSourceNode per
+			// sound play, since removed after real-device evidence tied
+			// it to constant mid-combat stutter from GC pressure),
+			// without that per-sound allocation cost. Confirmed clean on
+			// real hardware.
+			{ label: 'Custom (Recommended)', values: ['custom2'] },
 			{ label: 'Off', values: ['none'] }
 		],
-		def: 1
+		def: 2
 	},
 	toggleItem('sound', 'Sound', 's_initsound', true),
 	{
@@ -1917,14 +1896,16 @@ var AUDIO_ITEMS = [
 	}
 ];
 
-// Everything below is KaiOS-only instrumentation/tuning added over the
-// course of this project, not stock yquake2 behavior -- excluding
-// occlusion (s_occlusion_strength), which stays console/in-game-menu
-// only.
+// KaiOS-only tuning added over the course of this project, not stock
+// yquake2 behavior -- excluding occlusion (s_occlusion_strength), which
+// stays console/in-game-menu only. This used to also carry a long run
+// of "Log: ..." console-diagnostic toggles and an entity-count A/B
+// switch built for the mid-combat stutter investigation -- removed now
+// that the investigation is over (the stutter's root cause, the old
+// "Custom 1" WebAudio backend, is gone) and they'd only ever confuse a
+// player who found them, not do anything useful.
 var DEBUG_ITEMS = [
 	toggleItem('prewarm', 'Preload on map load', 'kaios_prewarm_cache', true),
-	toggleItem('speeds', 'Console poly stats', 'r_speeds', false),
-	toggleItem('demopattern', 'Demo pattern test', 'r_demopattern', false),
 	{
 		id: 'distcull',
 		label: 'Draw distance cull',
@@ -1937,55 +1918,22 @@ var DEBUG_ITEMS = [
 		],
 		def: 1
 	},
-	// Console diagnostic logging -- each one below off by default. A
-	// real device log showed frame-time spikes lining up with exactly
-	// these prints (Sys_ConsoleOutput/console.log aren't free on this
-	// hardware, see cl_screen.c's SCR_DrawKaiosStats/KAIOS_STATS gate),
-	// so leaving any of them on for normal play is a real, measurable
-	// performance cost, not just console noise.
-	toggleItem('debugstats', 'Log: perf stats (1/s)', 'kaios_debug_stats', false),
-	toggleItem('debugframespike', 'Log: frame spikes', 'kaios_debug_framespike', false),
-	toggleItem('debugunderwater', 'Log: underwater FBO', 'kaios_debug_underwater', false),
-	toggleItem('debugmem', 'Log: heap usage', 'kaios_debug_mem', false),
-	toggleItem('debugswbuf', 'Log: soft buf stats', 'kaios_debug_swbuf', false),
-	toggleItem('debuggl1buf', 'Log: GL1 buffer trace', 'kaios_debug_gl1buf', false),
-	toggleItem('debuggl1occl', 'Log: GL1 occlusion stats', 'kaios_debug_gl1occl', false),
-	toggleItem('debugprepframe', 'Log: level load phases', 'kaios_debug_prepframe', false),
-	toggleItem('debuggl3upload', 'Log: GL3 texture upload', 'kaios_debug_gl3upload', false),
-	toggleItem('debuggl3vbo', 'Log: GL3 VBO timing', 'kaios_debug_gl3vbo', false),
-	// A/B switch for the mid-gameplay stutter investigation: cl_entities
-	// (stock client cvar, cl_main.c) zeroes r_numentities in V_RenderView
-	// when off, so monsters/items still exist and think server-side but
-	// draw nothing. Flip this Off and replay the same fight to see
-	// whether the frame spikes track entity count or not, with no other
-	// variable changed. Left On by default -- this is a diagnostic knob,
-	// not something a normal playthrough should run with.
-	toggleItem('addentities', 'Render entities (A/B test)', 'cl_entities', true),
 	// See kaios_startcmd's own comment in frame.c/autoexec.cfg -- queued
 	// once, right after SV_Init()/CL_Init() register map/demomap, so it
 	// can hold a full "demomap <name>" console command. Picking a demo
 	// here reruns that same mechanism the very next launch instead of
-	// requiring a manual autoexec.cfg edit, giving a repeatable,
-	// hands-off way to reproduce combat (and therefore entity load)
-	// identically run after run for the A/B toggle above. Off leaves
+	// requiring a manual autoexec.cfg edit. demo3 and the demo1>2>3
+	// cycle option (kaios_democycle, sv_send.c's SV_DemoCompleted())
+	// were dropped -- demo3 doesn't play correctly. Off leaves
 	// kaios_startcmd empty, same as normal play.
-	//
-	// "Cycle demo1>2>3" additionally sets kaios_democycle (read by
-	// SV_DemoCompleted() in sv_send.c) so each completed demo advances
-	// to the next one and loops, instead of stopping after one -- the
-	// three stock demos hit deliberately different map/texture sets, so
-	// looping through all of them unattended gathers much more memory/
-	// perf comparison data per session than repeating a single one.
 	{
 		id: 'demoautoplay',
 		label: 'Autoplay demo',
-		cvars: ['kaios_startcmd', 'kaios_democycle'],
+		cvars: ['kaios_startcmd'],
 		choices: [
-			{ label: 'Off', values: ['', ''] },
-			{ label: 'demo1', values: ['demomap demo1.dm2', ''] },
-			{ label: 'demo2', values: ['demomap demo2.dm2', ''] },
-			{ label: 'demo3', values: ['demomap demo3.dm2', ''] },
-			{ label: 'Cycle demo1>2>3', values: ['demomap demo1.dm2', 'demo1.dm2 demo2.dm2 demo3.dm2'] }
+			{ label: 'Off', values: [''] },
+			{ label: 'demo1', values: ['demomap demo1.dm2'] },
+			{ label: 'demo2', values: ['demomap demo2.dm2'] }
 		],
 		def: 0
 	}
@@ -2183,9 +2131,20 @@ function start() {
 
 	if (isBaseq2Confirmed()) {
 		showBootSkipTimer();
-	} else {
+	} else if (hasEverLaunched()) {
+		// baseq2 was never confirmed, but this isn't the first launch
+		// either (an earlier scan failed, or the player backed out of
+		// it) -- land on the main menu with "Search baseq2" available
+		// rather than auto-scanning silently again.
 		showMainMenu();
-		autoScanOnFirstLaunch();
+	} else {
+		// The very first launch ever: scan for baseq2 right away,
+		// visibly, and go straight into the game on success -- see
+		// performBaseq2Scan()'s own comment for why first-time setup
+		// skips the "back to the main menu, press Play yourself" step
+		// every later "Search baseq2" still uses.
+		markEverLaunched();
+		performBaseq2Scan(true, true);
 	}
 }
 
