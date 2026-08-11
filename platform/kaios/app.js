@@ -1773,12 +1773,23 @@ function startBaseq2Scan() {
 // volume no longer exists (card removed/swapped), or the scoped
 // listing comes back without a valid pak0.pak in it (folder renamed)
 // -- exactly the "rescan on error" behavior asked for.
+// Every fallback below goes through performBaseq2Scan(true) -- scan,
+// then launch straight into the game on success -- never
+// startBaseq2Scan()/performBaseq2Scan(false), which is the manual
+// "Search baseq2" menu item's own function and deliberately does NOT
+// launch anything, just confirms and returns to the main menu. Play and
+// "Search baseq2" need to stay two different actions with two different
+// outcomes; calling the same non-launching path from here was a real
+// bug -- confirmed on real hardware as Play repeatedly re-scanning and
+// landing back on the main menu without ever actually starting the
+// engine, instead of falling back to a slower-but-still-correct full
+// scan the way a "fast path failed, recover properly" fallback should.
 function playFast() {
 	var cached = getCachedBaseq2Choice();
 	var storages = getAllDeviceStorages();
 
 	if (!cached || storages.length === 0) {
-		startBaseq2Scan();
+		performBaseq2Scan(true);
 		return;
 	}
 
@@ -1791,7 +1802,7 @@ function playFast() {
 	}
 
 	if (!storage) {
-		startBaseq2Scan();
+		performBaseq2Scan(true);
 		return;
 	}
 
@@ -1812,15 +1823,15 @@ function playFast() {
 		}
 
 		if (!match) {
-			startBaseq2Scan();
+			performBaseq2Scan(true);
 			return;
 		}
 
 		proceedWithChoice(files, match);
 	}, function () {
 		// Cached path no longer resolves (renamed/removed/card swapped)
-		// -- fall back to the full rescan rather than a dead end.
-		startBaseq2Scan();
+		// -- fall back to a full scan-and-launch rather than a dead end.
+		performBaseq2Scan(true);
 	});
 }
 
