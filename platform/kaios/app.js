@@ -34,6 +34,7 @@ var settingsListEl = document.getElementById('settings-list');
 var statusEl = document.getElementById('status');
 var statusTextEl = document.getElementById('status-text');
 var statusBarEl = document.getElementById('status-bar');
+var statusHintRightEl = document.getElementById('status-hint-right');
 var canvasEl = document.getElementById('canvas');
 
 // Shared by every keyboard-navigable list screen (main menu, baseq2
@@ -935,6 +936,13 @@ function setStatus(text, fraction) {
 	if (typeof fraction === 'number') {
 		statusBarEl.style.width = Math.round(fraction * 100) + '%';
 	}
+	// Cleared by default -- only performBaseq2Scan()'s cancellable scan
+	// currently sets this, and every other setStatus() caller (loading
+	// engine scripts, copying baseq2, ...) has no cancel handler wired
+	// up at all, so leaving old hint text on screen for those would
+	// promise a way out that pressing RSK wouldn't actually do anything
+	// for.
+	statusHintRightEl.textContent = '';
 }
 
 function mkdirTreeFor(path) {
@@ -1356,11 +1364,21 @@ function markEverLaunched() {
 // otherwise reads "pak0.pak not found". Cleared on a successful scan.
 var mainMenuError = '';
 
+// Set by showMainMenu() while (and only while) the main menu is the
+// screen on display, so a scan that finishes after the player has
+// already backed out of it (see performBaseq2Scan()'s cancel handling)
+// can refresh it in place instead of forcing them back to a screen they
+// deliberately left. Cleared here since every screen transition --
+// including back into showMainMenu() itself, which reassigns it --
+// calls hideAllScreens() first.
+var refreshMainMenuIfShown = null;
+
 function hideAllScreens() {
 	menuEl.style.display = 'none';
 	pickerEl.style.display = 'none';
 	settingsEl.style.display = 'none';
 	statusEl.style.display = 'none';
+	refreshMainMenuIfShown = null;
 }
 
 function mainMenuItems() {
@@ -1370,9 +1388,9 @@ function mainMenuItems() {
 	// (see showMainMenu()'s render(), which also surfaces `caption`
 	// underneath) instead of only appearing once confirmed, so first
 	// launch shows *why* Play can't be used yet rather than just not
-	// offering it. autoScanOnFirstLaunch() (see start() below) is what
-	// enables it in the background without the player having to
-	// manually press "Search baseq2" first.
+	// offering it. The first-launch scan (see start() below) is what
+	// enables it, without the player having to manually press "Search
+	// baseq2" first.
 	items.push({
 		label: 'Play',
 		action: playFast,
@@ -1404,10 +1422,11 @@ function showMainMenu() {
 	var selected = 0;
 
 	// mainMenuItems() is recomputed on every render(), not cached once
-	// at screen-entry -- autoScanOnFirstLaunch() finishing in the
-	// background (or a manual "Search baseq2" coming back to this
-	// screen) needs the very next render() to pick up the now-
-	// confirmed state without a full re-entry into showMainMenu().
+	// at screen-entry -- a "Search baseq2" scan finishing after the
+	// player cancelled back to this screen (see performBaseq2Scan()'s
+	// refreshMainMenuIfShown call) needs the very next render() to pick
+	// up the now-confirmed state without a full re-entry into
+	// showMainMenu().
 	function render() {
 		var items = mainMenuItems();
 		var labels = items.map(function (it) { return it.label; });
@@ -1439,6 +1458,7 @@ function showMainMenu() {
 	menuEl.style.display = 'block';
 	render();
 	activeMenuKeyHandler = onKeyDown;
+	refreshMainMenuIfShown = render;
 }
 
 // ---------------------------------------------------------------------
@@ -1605,38 +1625,91 @@ function performBaseq2Scan(launchOnSuccess) {
 
 	hideAllScreens();
 	setStatus('Scanning for baseq2...');
+	statusHintRightEl.textContent = 'Back';
 
-	// A real, populated SD card can take a while to walk in full (every
-	// file on the card, not just baseq2's own -- there's no way to scope
-	// this scan down before knowing where baseq2 even is). Without any
-	// feedback, a plain static "Scanning..." status is indistinguishable
-	// from a hung app for however long that takes. DeviceStorage.enumerate()
-	// already delivers results one file at a time, so a running count is
-	// free to show -- update the status text as it climbs instead of only
-	// once at the very end.
+	// A real, populated SD card can take long enough to walk in full
+	// (every file on it, not just baseq2's own -- there's no way to
+	// scope this down before knowing where baseq2 even is) that a
+	// static "Scanning..." status with no way out and no visible
+	// progress reasonably reads as a hung app, not just a slow one --
+	// confirmed on real hardware. RSK backs out to the main menu without
+	// actually stopping the scan (there's no cancel primitive for a
+	// DeviceStorage cursor) -- it keeps running quietly and updates
+	// state whenever it finishes instead.
+	var cancelled = false;
+
+	function onKeyDown(ev) {
+		if (ev.key === 'SoftRight') {
+			cancelled = true;
+			activeMenuKeyHandler = null;
+			mainMenuError = 'Still searching in the background...';
+			showMainMenu();
+		}
+	}
+	activeMenuKeyHandler = onKeyDown;
+
+	function landOnMainMenu() {
+		activeMenuKeyHandler = null;
+		if (cancelled) {
+			// The player already backed out to (or past) the main menu
+			// -- refresh it in place instead of yanking them back to it
+			// a second time once this finally resolves.
+			if (typeof refreshMainMenuIfShown === 'function') {
+				refreshMainMenuIfShown();
+			}
+		} else {
+			showMainMenu();
+		}
+	}
+
+	// DeviceStorage.enumerate() already delivers results one file at a
+	// time, so a running count is free to show -- update the status
+	// text as it climbs instead of only once at the very end. Stops
+	// updating (but keeps counting internally) once cancelled -- the
+	// status screen isn't on display anymore to show it to.
 	discoverBaseq2(storages, '', function (count) {
-		setStatus('Scanning for baseq2... (' + count + ' files)');
+		if (!cancelled) {
+			// setStatus() clears the hint by default (see its own
+			// comment) -- re-set it on every one of these progress
+			// updates, not just the initial setStatus() call above.
+			setStatus('Scanning for baseq2... (' + count + ' files)');
+			statusHintRightEl.textContent = 'Back';
+		}
 	}).then(function (result) {
 		var candidates = result.candidates;
 
 		if (candidates.length === 0) {
 			mainMenuError = 'baseq2/pak0.pak not found';
-			showMainMenu();
+			landOnMainMenu();
 			return;
 		}
 
 		function finish(choice) {
 			mainMenuError = '';
-			if (launchOnSuccess) {
+			if (launchOnSuccess && !cancelled) {
+				// The cancel-scan RSK handler above has no business
+				// still being live once loading/copying/booting takes
+				// over -- that phase has no cancel of its own (never
+				// did, before this scan-progress screen existed at all).
+				activeMenuKeyHandler = null;
 				proceedWithChoice(result.filesByStorage[choice.storageName], choice);
 			} else {
+				// Never auto-launch into a level the player didn't
+				// press Play for -- cancelling always downgrades to
+				// "just confirm and land on/refresh the main menu",
+				// regardless of what launchOnSuccess originally asked
+				// for as the first-launch fast path.
 				setCachedBaseq2Choice(choice);
 				localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
-				showMainMenu();
+				landOnMainMenu();
 			}
 		}
 
-		if (candidates.length > 1) {
+		// A picker screen popping up after the player already backed out
+		// would be exactly the same "yanked back in" problem cancelling
+		// is meant to avoid -- just take the first candidate silently in
+		// that case, same as the picker-less single-candidate path.
+		if (candidates.length > 1 && !cancelled) {
 			pickerEl.style.display = 'block';
 			statusEl.style.display = 'none';
 			showPicker(candidates, finish);
@@ -1645,7 +1718,7 @@ function performBaseq2Scan(launchOnSuccess) {
 		}
 	}, function (err) {
 		mainMenuError = 'Scan failed: ' + describeError(err);
-		showMainMenu();
+		landOnMainMenu();
 	});
 }
 
