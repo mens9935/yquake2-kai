@@ -170,10 +170,11 @@ typedef struct
  */
 typedef enum
 {
-	SS_NOT = 0,   /* soundsystem not started */
-	SS_SDL,       /* soundsystem started, using SDL */
-	SS_OAL,       /* soundsystem started, using OpenAL */
-	SS_WEBAUDIO   /* soundsystem started, using the browser's native Web Audio API */
+	SS_NOT = 0,    /* soundsystem not started */
+	SS_SDL,        /* soundsystem started, using SDL */
+	SS_OAL,        /* soundsystem started, using OpenAL */
+	SS_WEBAUDIO,   /* soundsystem started, one AudioBufferSourceNode per sound play (webaudio.c) */
+	SS_WEBAUDIO2   /* soundsystem started, one shared C-side mix streamed through WebAudio in fixed chunks (webaudio2.c) */
 } sndstarted_t;
 
 /*
@@ -488,6 +489,33 @@ void WA_PlayMusic(const byte *data, int len);
 void WA_StopMusic(void);
 void WA_PauseMusic(qboolean pause);
 void WA_SetMusicVolume(float vol);
+
+/*
+ * Second Web Audio backend (webaudio2.c) -- same goal as WA_* above
+ * (get playback off the main thread, unlike SDL's ScriptProcessorNode),
+ * different tradeoff: WA_PlayChannel's one-AudioBufferSourceNode-per-
+ * sound-play approach is real, continuous GC pressure during combat
+ * (confirmed on real hardware -- see the KAIOS_HEARTBEAT_GAP/
+ * KAIOS_JS_TICK stutter that went away switching to plain SDL). This
+ * backend mixes every active channel itself, in C, exactly the way
+ * sdl.c's SDL_PaintChannels does (reusing SDL_Cache/SDL_Spatialize/
+ * SDL_DriftBeginofs/SDL_RawSamples directly -- sound.c treats this
+ * backend as "just like SDL" for all the channel/timing bookkeeping
+ * those already handle correctly), and only touches WebAudio to queue
+ * the already-mixed result as fixed-size chunks scheduled back-to-back
+ * on the AudioContext's own clock -- the same gapless-chunk pattern
+ * WA_RawSamples already uses for cinematics, just applied continuously
+ * instead of only for cinematic audio. This still isn't literally "one
+ * node for the whole session" (AudioBufferSourceNode is one-shot by
+ * spec, chunks still need a new one each) -- but the chunk rate is
+ * small (~milliseconds of audio per chunk) and completely decoupled
+ * from how many sounds the game is actually playing, instead of
+ * scaling with combat intensity the way WA_PlayChannel's approach does.
+ */
+qboolean WA2_Init(void);
+void WA2_Shutdown(void);
+void WA2_SoundInfo(void);
+void WA2_Update(void);
 
 #endif /* __EMSCRIPTEN__ */
 

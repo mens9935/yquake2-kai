@@ -665,7 +665,11 @@ S_LoadSound(sfx_t *s)
 	else
 #endif
 	{
-		if (sound_started == SS_SDL)
+		/* SS_WEBAUDIO2 (webaudio2.c) reuses SDL_Cache as-is -- it mixes
+		 * in C exactly the way SDL's own mixer does, so it needs the
+		 * same resampled-PCM-in-a-Z_Malloc'd-sfxcache_t layout SDL_Cache
+		 * already produces, not a separate upload path. */
+		if ((sound_started == SS_SDL) || (sound_started == SS_WEBAUDIO2))
 		{
 			if (!SDL_Cache(s, &info, data + info.dataofs, sound_volume,
 						  begin_length, end_length,
@@ -1236,7 +1240,12 @@ S_IssuePlaysound(playsound_t *ps)
 	else
 #endif
 	{
-		if (sound_started == SS_SDL)
+		/* SS_WEBAUDIO2 (webaudio2.c) mixes channels itself, in C, the
+		 * same way SDL does -- ch->leftvol/rightvol from SDL_Spatialize
+		 * is exactly what its mixer reads, no separate "start playback"
+		 * call needed (the next WA2_Update()'s mix picks this channel
+		 * up automatically once ch->sfx/pos/end are set below). */
+		if ((sound_started == SS_SDL) || (sound_started == SS_WEBAUDIO2))
 		{
 			ch->master_vol = (int)ps->volume;
 			SDL_Spatialize(ch);
@@ -1410,7 +1419,9 @@ S_StartSound(vec3_t origin, int entnum, int entchannel, sfx_t *sfx,
 			// The following may be ugly: cache length in SDL is much, much bigger
 			// than the one in OpenAL, so much that it's definitely not in ms.
 			// If that changes in the future, this must be removed.
-			if (sound_started == SS_SDL)
+			// SS_WEBAUDIO2 uses SDL_Cache for its own sfx cache too (see
+			// S_LoadSound above), same units.
+			if ((sound_started == SS_SDL) || (sound_started == SS_WEBAUDIO2))
 			{
 				effect_duration /= 45;
 			}
@@ -1448,7 +1459,10 @@ S_StartSound(vec3_t origin, int entnum, int entchannel, sfx_t *sfx,
 	else
 #endif
 	{
-		if (sound_started == SS_SDL)
+		/* SS_WEBAUDIO2's paintedtime advances in raw output-sample
+		 * units, same as SDL's -- SDL_DriftBeginofs's assumptions hold
+		 * unchanged. */
+		if ((sound_started == SS_SDL) || (sound_started == SS_WEBAUDIO2))
 		{
 			ps->begin = SDL_DriftBeginofs(timeofs);
 			ps->volume = fvol * 255;
@@ -1635,7 +1649,9 @@ S_RawSamples(int samples, int rate, int width,
 	else
 #endif
 	{
-		if (sound_started == SS_SDL)
+		/* SS_WEBAUDIO2's mixer (webaudio2.c) reads the same
+		 * s_rawsamples/s_rawend ring SDL's own mixer does. */
+		if ((sound_started == SS_SDL) || (sound_started == SS_WEBAUDIO2))
 		{
 			SDL_RawSamples(samples, rate, width, channels, data, volume);
 		}
@@ -1670,6 +1686,10 @@ S_Update(vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 	if (sound_started == SS_WEBAUDIO)
 	{
 		WA_Update();
+	}
+	else if (sound_started == SS_WEBAUDIO2)
+	{
+		WA2_Update();
 	}
 	else
 #endif
@@ -1813,6 +1833,10 @@ S_SoundInfo_f(void)
 	{
 		WA_SoundInfo();
 	}
+	else if (sound_started == SS_WEBAUDIO2)
+	{
+		WA2_SoundInfo();
+	}
 	else
 #endif
 #if USE_OPENAL
@@ -1932,6 +1956,10 @@ S_Init(void)
 	{
 		sound_started = SDL_BackendInit() ? SS_SDL : SS_NOT;
 	}
+	else if (strcmp(s_backend->string, "custom2") == 0)
+	{
+		sound_started = WA2_Init() ? SS_WEBAUDIO2 : SS_NOT;
+	}
 	else /* "custom" (default), or an unrecognized value */
 	{
 		sound_started = WA_Init() ? SS_WEBAUDIO : SS_NOT;
@@ -2037,6 +2065,10 @@ S_Shutdown(void)
 	if (sound_started == SS_WEBAUDIO)
 	{
 		WA_Shutdown();
+	}
+	else if (sound_started == SS_WEBAUDIO2)
+	{
+		WA2_Shutdown();
 	}
 	else
 #endif

@@ -1707,10 +1707,22 @@ var AUDIO_ITEMS = [
 		choices: [
 			{ label: 'OpenAL', values: ['openal'] },
 			{ label: 'SDL', values: ['sdl'] },
-			// "Custom" in the engine (s_backend "custom", sound.c) --
-			// this is our own WebAudio backend (webaudio.c), named
-			// plainly here rather than by that internal cvar spelling.
-			{ label: 'Built-in', values: ['custom'] },
+			// "Custom 1" (s_backend "custom", webaudio.c) -- one
+			// AudioBufferSourceNode per sound play. Real-device evidence
+			// this whole session tied its constant mid-combat stutter
+			// to exactly this: every shot/step/monster sound is a fresh
+			// JS object, real GC pressure. Kept as the default for now
+			// since it's the most-tested path, but SDL has since been
+			// confirmed clean of that stutter on the same hardware.
+			{ label: 'Custom 1', values: ['custom'] },
+			// "Custom 2" (s_backend "custom2", webaudio2.c) -- mixes
+			// every channel itself in C (like SDL does) and only touches
+			// WebAudio to queue the already-mixed result in small fixed
+			// chunks, gapless, on a schedule completely decoupled from
+			// how many sounds are actually playing. Built specifically
+			// to test whether that closes the gap with SDL while still
+			// getting playback off the main thread the way Custom 1 does.
+			{ label: 'Custom 2', values: ['custom2'] },
 			{ label: 'Off', values: ['none'] }
 		],
 		def: 2
