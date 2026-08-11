@@ -91,6 +91,14 @@
 		overflow-y: auto;
 	}
 	#menu li, #picker li, #settings li {
+		/* Set explicitly here (not left to inherit from #menu/#picker/
+		 * #settings above) -- real-device testing showed the h1 logo
+		 * picking up the bundled font while these rows didn't, even
+		 * though inheritance alone should have covered it. Whatever this
+		 * engine's actual reason is, naming the font directly on the
+		 * rows themselves removes the dependency on it working. */
+		font-family: 'Quake2', sans-serif;
+		text-transform: uppercase;
 		padding: 4px 4px 4px 16px;
 		position: relative;
 		white-space: nowrap;
@@ -133,6 +141,8 @@
 		color: #5c8a6d;
 	}
 	#menu-caption {
+		font-family: 'Quake2', sans-serif;
+		text-transform: uppercase;
 		font-size: 11px;
 		color: #888;
 		padding: 2px 4px 0 16px;
@@ -153,6 +163,14 @@
 		display: flex;
 		font-size: 11px;
 		color: #888;
+	}
+	/* Font set here, scoped to just the three menu screens' own hint
+	 * bars -- #status's hint (none currently, but the shared rule above
+	 * still matches it) stays out of this on purpose, same reasoning as
+	 * #menu-caption/li above. */
+	#menu .hint, #picker .hint, #settings .hint {
+		font-family: 'Quake2', sans-serif;
+		text-transform: uppercase;
 	}
 	#menu .hint > span, #picker .hint > span, #settings .hint > span, #status .hint > span {
 		flex: 1;
