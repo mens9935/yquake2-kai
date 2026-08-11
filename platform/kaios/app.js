@@ -2056,16 +2056,19 @@ var DEBUG_ITEMS = [
 		def: 0
 	},
 	// See kaios_narrow_ui's own comment in cl_screen.c -- this screen's
-	// native 240x320 is narrower than the HUD/console/menu's 320x240
-	// reference, so SCR_ClampScale/SCR_GetDefaultScale normally shrink
-	// text and pics to a fractional scale (~0.94x) to keep them from
-	// running off the right edge. That fractional scale is what makes
-	// glyphs look soft -- Quake II's bitmap font is only crisp at
-	// integer pixel scale. On means: draw everything at native 1x
-	// instead (same crispness as setting Resolution to 320x240, without
-	// actually changing the render resolution or squishing the 3D
-	// view) -- at the cost of some HUD/console/menu elements running
-	// closer to, or past, this screen's narrower right/bottom edge.
+	// native 240x320 is narrower than the HUD/console's 320x240
+	// reference, so SCR_GetDefaultScale normally shrinks text and pics
+	// to a fractional scale (~0.94x) to keep them from running off the
+	// right edge. That fractional scale is what makes glyphs look soft
+	// -- Quake II's bitmap font is only crisp at integer pixel scale.
+	// On means: draw HUD/console text at native 1x instead (same
+	// crispness as setting Resolution to 320x240, without actually
+	// changing the render resolution or squishing the 3D view) -- at
+	// the cost of some HUD elements running closer to, or past, this
+	// screen's narrower right/bottom edge. Deliberately does NOT touch
+	// the in-game ESC menu (menu.c) -- forcing that to native scale too
+	// made its submenus overflow/collapse (confirmed on real hardware),
+	// since unlike the HUD, its widget positions assume the shrink.
 	toggleItem('narrowui', 'Narrow interface', 'kaios_narrow_ui', false)
 ];
 

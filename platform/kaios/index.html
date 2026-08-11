@@ -106,16 +106,6 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	/* Main menu only (Play/Settings/Exit -- 3 rows, no scrolling to fit)
-	 * gets a much bigger, bolder treatment than the picker/settings
-	 * screens' own denser lists still need. Padding/marker size and
-	 * position scaled up to match the taller row this produces instead
-	 * of leaving the cursor glyph pinned to its old, now much smaller,
-	 * position within it. */
-	#menu li {
-		font-size: 28px;
-		padding-left: 26px;
-	}
 	/* Quake II's own menu marks the selected row with a cursor glyph to
 	 * its left and a distinct text color, not a solid highlight block --
 	 * same idea here, in the same green as the "qUAKE II" logo mark
@@ -138,14 +128,6 @@
 		font-size: 11px;
 		line-height: 1;
 		color: #3DAB67;
-	}
-	/* Scaled up to match #menu li's much taller 28px rows above --
-	 * placed after the shared rule so it wins the left/top/font-size
-	 * properties both set. */
-	#menu li.selected::before {
-		font-size: 22px;
-		left: 2px;
-		top: 6px;
 	}
 	/* Play before baseq2 has ever been found -- greyed out and
 	   non-actionable (see app.js's showMainMenu()), with #menu-caption

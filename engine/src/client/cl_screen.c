@@ -59,13 +59,18 @@ cvar_t *r_hudscale; /* named for consistency with R1Q2 */
 cvar_t *r_consolescale;
 cvar_t *r_menuscale;
 
-/* KaiOS-only. See SCR_ClampScale()/SCR_GetDefaultScale() for what this
- * actually does -- forces HUD/console/menu text and pics back to native
- * 1:1 pixel scale on this port's narrower-than-320x240 screen, instead
- * of the fractional shrink-to-fit those two functions otherwise apply.
- * Off by default: it trades some of that shrink-to-fit margin away, so
- * elements positioned near the 320-reference right/bottom edge can run
- * closer to (or past) this port's actual, narrower edge. */
+/* KaiOS-only. See SCR_GetHUDScale()/SCR_GetConsoleScale() for what this
+ * actually does -- forces HUD and console text/pics back to native 1:1
+ * pixel scale on this port's narrower-than-320x240 screen, instead of
+ * the fractional shrink-to-fit SCR_GetDefaultScale() otherwise applies.
+ * Deliberately does NOT touch SCR_GetMenuScale() -- menu.c's screens
+ * position individual widgets using formulas that assume that shrink,
+ * not just its glyph/pic size, and forcing scale=1 there without also
+ * reworking every screen's layout made submenus overflow/collapse
+ * (confirmed on real hardware). Off by default: it trades some of the
+ * HUD's shrink-to-fit margin away, so elements positioned near the
+ * 320-reference right/bottom edge can run closer to (or past) this
+ * port's actual, narrower edge. */
 cvar_t *kaios_narrow_ui;
 
 typedef struct
@@ -2028,11 +2033,14 @@ SCR_ClampScale(float scale, qboolean is_crosshair)
 	 * RE_Draw_CharScaled (sw_draw.c) is what actually has to draw at a
 	 * fractional scale for this to do anything.
 	 *
-	 * kaios_narrow_ui skips this whole branch (falling through to the
-	 * shared code below) so text/pics go back to native 1:1 pixels --
-	 * see its own comment where it's declared. */
-	if ((viddef.width < 320 || viddef.height < 240) &&
-	    !(kaios_narrow_ui && kaios_narrow_ui->value))
+	 * kaios_narrow_ui (see its own comment where it's declared) does NOT
+	 * bypass this branch -- unlike SCR_GetConsoleScale/SCR_GetHUDScale,
+	 * menu.c's own layout math (positions, not just glyph size) assumes
+	 * this shrink-to-fit scale; forcing scale=1 here without also
+	 * reworking every menu.c screen's position formulas made submenus
+	 * overflow/collapse (confirmed on real hardware), so
+	 * SCR_GetMenuScale() is deliberately left out of the bypass. */
+	if (viddef.width < 320 || viddef.height < 240)
 	{
 		/* The crosshair is a single small icon centered on its own,
 		 * with no neighboring status-bar elements it could collide
@@ -2109,12 +2117,13 @@ SCR_GetDefaultScale(void)
 	/* Same narrower/shorter-than-reference carve-out as SCR_ClampScale()
 	 * above, using its 320x240 reference (not the 640-wide one just
 	 * below, which is a *different*, high-DPI-oriented reference for
-	 * auto-upscaling that has no bearing on this port). Same
-	 * kaios_narrow_ui bypass as SCR_ClampScale() too -- falls through to
-	 * the shared 640-wide formula below, which on this port's screen
-	 * always resolves to exactly 1 (native pixel scale). */
-	if ((viddef.width < 320 || viddef.height < 240) &&
-	    !(kaios_narrow_ui && kaios_narrow_ui->value))
+	 * auto-upscaling that has no bearing on this port). Not bypassed by
+	 * kaios_narrow_ui -- see SCR_ClampScale()'s comment on why; menu.c
+	 * (the only caller for which that would matter here) doesn't reach
+	 * this path with the bypass anyway since SCR_GetMenuScale() itself
+	 * stays out of it (see SCR_GetHUDScale/SCR_GetConsoleScale instead,
+	 * which apply the bypass themselves before ever calling this). */
+	if (viddef.width < 320 || viddef.height < 240)
 	{
 		float f = viddef.width / 320.0f;
 		float g = viddef.height / 240.0f;
@@ -2205,6 +2214,18 @@ SCR_GetHUDScale(void)
 	{
 		scale = 1;
 	}
+#ifdef __EMSCRIPTEN__
+	/* See kaios_narrow_ui's own comment (cl_screen.c, near its
+	 * declaration) and SCR_ClampScale()'s -- HUD text/pics are safe to
+	 * force to native 1:1 scale this way (unlike menu.c's screens, the
+	 * HUD's own element positions already go through SCR_LayoutXV/YV,
+	 * which compress proportionally to viddef.width/height regardless
+	 * of this scale). */
+	else if (kaios_narrow_ui && kaios_narrow_ui->value)
+	{
+		scale = 1;
+	}
+#endif
 	else if (r_hudscale->value < 0)
 	{
 		scale = SCR_GetDefaultScale();
@@ -2230,6 +2251,15 @@ SCR_GetConsoleScale(void)
 	{
 		scale = 1;
 	}
+#ifdef __EMSCRIPTEN__
+	/* See SCR_GetHUDScale()'s own comment just above -- same reasoning,
+	 * the console is plain line-wrapped text with no per-widget layout
+	 * to break. */
+	else if (kaios_narrow_ui && kaios_narrow_ui->value)
+	{
+		scale = 1;
+	}
+#endif
 	else if (r_consolescale->value < 0)
 	{
 		scale = SCR_GetDefaultScale();
