@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=240, height=320, initial-scale=1, user-scalable=no">
 <title>Quake II</title>
 <style>
-	/* Bundled "QUAKE2" display font (Fonts2u, freeware) -- used for the
-	 * main menu's logo and the selected-row cursor marker below, not for
-	 * body text: its glyph set is uppercase-only display caps (plus
+	/* Bundled "QUAKE2" display font (Fonts2u, freeware) -- scoped to just
+	 * the main menu logo and the selected-row cursor marker (see their
+	 * own rules below), not body text: it read poorly at normal list-item
+	 * sizes, and its glyph set is uppercase-only display caps (plus
 	 * digits/punctuation) except for one deliberate special case --
 	 * lowercase 'q' alone is mapped to the stylized circular Quake mark,
 	 * not a regular letterform, which is why the logo markup below
@@ -17,6 +18,14 @@
 		font-family: 'Quake2';
 		src: url('quake2.ttf');
 	}
+	/* Open Sans (Apache-2.0, bundled the same way as Quake2 above --
+	 * this device has no access to Google Fonts' own CDN) -- everything
+	 * that isn't the logo/cursor mark, normal mixed-case body and menu
+	 * text instead of Quake2's uppercase-only display caps. */
+	@font-face {
+		font-family: 'OpenSans';
+		src: url('open-sans.woff') format('woff');
+	}
 	html, body {
 		margin: 0;
 		padding: 0;
@@ -24,7 +33,7 @@
 		height: 320px;
 		background: #000;
 		color: #fff;
-		font-family: sans-serif;
+		font-family: 'OpenSans', sans-serif;
 		font-size: 13px;
 		overflow: hidden;
 	}
@@ -39,41 +48,31 @@
 		padding: 8px;
 		background: #000;
 	}
-	/* Quake II's actual menus are set entirely in one blocky all-caps
-	 * display face, not a plain system sans mixed in next to it -- the
-	 * bundled font only has uppercase letterforms anyway (see the
-	 * @font-face comment above), so text-transform: uppercase here is
-	 * what makes every label/value/hint in these three screens render
-	 * in it at all instead of falling back to tofu for every lowercase
-	 * letter it doesn't have. #status is deliberately excluded: it shows
-	 * raw loading/error text (including caught exception messages this
-	 * app doesn't control the content of), which needs to stay legible
-	 * in a normal typeface no matter what characters end up in it. */
-	#menu, #picker, #settings {
-		font-family: 'Quake2', sans-serif;
-		text-transform: uppercase;
-	}
 	#menu h1, #picker h1, #settings h1 {
 		font-size: 15px;
 		margin: 0 0 8px 0;
 		color: #fff;
 	}
-	/* Main menu logo -- larger than the other two screens' plain
-	 * h1 titles, with "II" picked out in the launcher's accent green to
-	 * read as a logo mark rather than just another heading. */
+	/* Main menu logo -- the one place the bundled Quake2 display font is
+	 * still used wholesale (see its @font-face comment above), larger
+	 * than the other two screens' plain h1 titles, with "II" picked out
+	 * in the launcher's accent green to read as a logo mark rather than
+	 * just another heading. text-transform: uppercase is needed here
+	 * specifically because Quake2 only has uppercase letterforms at all
+	 * -- unlike OpenSans elsewhere, lowercase text in it just falls back
+	 * to tofu instead of rendering as anything. */
 	#menu h1 {
+		font-family: 'Quake2', sans-serif;
+		text-transform: uppercase;
 		font-size: 22px;
 		letter-spacing: 1px;
 	}
 	#menu h1 .logo-ii {
 		color: #3DAB67;
 	}
-	/* The parent's text-transform: uppercase above would otherwise turn
-	 * this "q" into a capital Q -- the ordinary letterform, not the
-	 * stylized mark it's deliberately lowercase to select (see the
-	 * @font-face comment). Exempted here instead of leaving the whole
-	 * logo out of the uppercase rule, so "UAKE II" still benefits from
-	 * it like every other label in these three screens. */
+	/* The uppercase transform above would otherwise turn this "q" into a
+	 * capital Q -- the ordinary letterform, not the stylized mark it's
+	 * deliberately lowercase to select (see the @font-face comment). */
 	#menu h1 .logo-mark {
 		text-transform: none;
 	}
@@ -91,14 +90,16 @@
 		overflow-y: auto;
 	}
 	#menu li, #picker li, #settings li {
-		/* Set explicitly here (not left to inherit from #menu/#picker/
-		 * #settings above) -- real-device testing showed the h1 logo
-		 * picking up the bundled font while these rows didn't, even
-		 * though inheritance alone should have covered it. Whatever this
-		 * engine's actual reason is, naming the font directly on the
-		 * rows themselves removes the dependency on it working. */
-		font-family: 'Quake2', sans-serif;
-		text-transform: uppercase;
+		/* Set explicitly here rather than left to inherit from body --
+		 * real-device testing of an earlier version of this rule (Quake2,
+		 * back when every menu screen used it) showed the h1 logo picking
+		 * up the bundled font while these rows didn't, even though
+		 * inheritance alone should have covered it, so this stayed
+		 * explicit when the font changed back to OpenSans. Slightly
+		 * larger than the 13px body default -- easier to read as an
+		 * actual list than the logo/marker's display face ever was. */
+		font-family: 'OpenSans', sans-serif;
+		font-size: 14px;
 		padding: 4px 4px 4px 16px;
 		position: relative;
 		white-space: nowrap;
@@ -117,10 +118,10 @@
 	}
 	#menu li.selected::before, #picker li.selected::before, #settings li.selected::before {
 		content: 'q';
-		/* Same reasoning as .logo-mark above -- without this, the parent
-		 * list's text-transform: uppercase turns this into a plain
-		 * capital Q instead of the stylized mark lowercase 'q' selects. */
-		text-transform: none;
+		/* The row itself is OpenSans now (see #menu li above) -- the
+		 * marker needs Quake2 named explicitly again instead of
+		 * inheriting, same reasoning as that rule's own comment. */
+		font-family: 'Quake2', sans-serif;
 		position: absolute;
 		left: 1px;
 		top: 2px;
@@ -141,8 +142,7 @@
 		color: #5c8a6d;
 	}
 	#menu-caption {
-		font-family: 'Quake2', sans-serif;
-		text-transform: uppercase;
+		font-family: 'OpenSans', sans-serif;
 		font-size: 11px;
 		color: #888;
 		padding: 2px 4px 0 16px;
@@ -164,13 +164,8 @@
 		font-size: 11px;
 		color: #888;
 	}
-	/* Font set here, scoped to just the three menu screens' own hint
-	 * bars -- #status's hint (none currently, but the shared rule above
-	 * still matches it) stays out of this on purpose, same reasoning as
-	 * #menu-caption/li above. */
 	#menu .hint, #picker .hint, #settings .hint {
-		font-family: 'Quake2', sans-serif;
-		text-transform: uppercase;
+		font-family: 'OpenSans', sans-serif;
 	}
 	#menu .hint > span, #picker .hint > span, #settings .hint > span, #status .hint > span {
 		flex: 1;
