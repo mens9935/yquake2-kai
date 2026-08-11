@@ -483,6 +483,15 @@ OGG_StartNative(FILE *f)
 	WA_PlayMusic(data, (int)len);
 	free(data);
 
+	/* WA_PlayMusic() itself starts the <audio> element at whatever
+	 * volume was last pushed via WA_SetMusicVolume() (1.0 if this is
+	 * the very first track played this session, nothing ever having
+	 * pushed one yet) -- OGG_Stream()'s own per-frame WA_SetMusicVolume
+	 * call would only correct that a frame later. Push the real current
+	 * value right away instead, so a fresh track never has even a
+	 * one-frame flash at the wrong volume. */
+	WA_SetMusicVolume((ogg_mutemusic == true) ? 0.0f : ogg_volume->value);
+
 	ogg_wa_native = true;
 
 	return true;

@@ -1944,6 +1944,7 @@ var VIDEO_ITEMS = [
 			{ label: '-2', values: ['-2'] },
 			{ label: '-3', values: ['-3'] },
 			{ label: '-5', values: ['-5'] },
+			{ label: '-7', values: ['-7'] },
 			{ label: '-8', values: ['-8'] },
 			{ label: '-12', values: ['-12'] }
 		],

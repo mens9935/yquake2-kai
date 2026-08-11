@@ -28,15 +28,21 @@
 #include "header/client.h"
 
 /* KaiOS-only trial fix: on this port's narrow portrait resolutions
- * (240x320 and similar) the view weapon reads as sitting noticeably
- * higher on screen than intended. Lets the gun's fixed world-space
- * offset (ops/ps->gunoffset, set server-side and otherwise untouched
- * here) be nudged along the view's own "up" vector -- negative moves it
- * down on screen -- instead of guessing a single hardcoded value blind;
- * see CL_AddViewWeapon() below for where it's applied. CVAR_ARCHIVE so
- * whatever the player settles on sticks across launches. Defaults to 0
- * (no change) everywhere except this port, where -3 is a starting
- * guess pending real-device feedback. */
+ * (240x320 and similar), the *software* renderer's view weapon reads as
+ * sitting noticeably higher on screen than intended -- confirmed NOT to
+ * happen on gl1/gl3 (this port's "GLES3" option), so CL_AddViewWeapon()
+ * below only applies this when vid_renderer is "soft". Lets the gun's
+ * fixed world-space offset (ops/ps->gunoffset, set server-side and
+ * otherwise untouched here) be nudged along the view's own "up" vector
+ * -- negative moves it down on screen -- instead of guessing a single
+ * hardcoded value blind. CVAR_ARCHIVE so whatever the player settles on
+ * sticks across launches. Defaults to 0 (no change) everywhere except
+ * this port, where -3 is a starting guess pending real-device feedback
+ * (some weapon models clip out of view or render wrong at the more
+ * aggressive end of this range -- e.g. -8 hides the chaingun entirely,
+ * -5 breaks the railgun/machinegun -- each model's own geometry sits at
+ * a different distance from its origin, so there's no single value
+ * that's simultaneously ideal *and* safe for every weapon). */
 static cvar_t *kaios_gun_yoffset;
 
 void
@@ -658,7 +664,11 @@ CL_AddViewWeapon(player_state_t *ps, player_state_t *ops)
 			ps->gunangles[i], cl.lerpfrac);
 	}
 
-	/* See kaios_gun_yoffset's own comment at the top of this file. */
+	/* See kaios_gun_yoffset's own comment at the top of this file. Only
+	 * the software renderer positions the weapon too high in the first
+	 * place -- gl1/gl3 (this port's "GLES3" option) don't have the bug,
+	 * so applying the same offset there would just push an
+	 * already-correct model out of place. */
 	if (!kaios_gun_yoffset)
 	{
 #ifdef __EMSCRIPTEN__
@@ -668,7 +678,12 @@ CL_AddViewWeapon(player_state_t *ps, player_state_t *ops)
 #endif
 	}
 
+#ifdef __EMSCRIPTEN__
+	if (kaios_gun_yoffset->value != 0 && vid_renderer &&
+	    strcmp(vid_renderer->string, "soft") == 0)
+#else
 	if (kaios_gun_yoffset->value != 0)
+#endif
 	{
 		for (i = 0; i < 3; i++)
 		{
