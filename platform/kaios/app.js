@@ -1662,20 +1662,53 @@ function performBaseq2Scan(launchOnSuccess) {
 		}
 	}
 
-	// DeviceStorage.enumerate() already delivers results one file at a
-	// time, so a running count is free to show -- update the status
-	// text as it climbs instead of only once at the very end. Stops
-	// updating (but keeps counting internally) once cancelled -- the
-	// status screen isn't on display anymore to show it to.
+	// DeviceStorage.enumerate() delivers results one file at a time, and
+	// this scans the whole storage volume (not just baseq2's own) -- a
+	// real card can easily have thousands of entries. A DOM text update
+	// on every single one of them turned out to be exactly the kind of
+	// per-call cost this hardware has shown all session to be genuinely
+	// expensive at high frequency (same lesson as the console.log-costs-
+	// 700ms+ finding this project's whole stutter investigation started
+	// from) -- doing it unthrottled made the scan itself measurably
+	// slower, not just louder, which is the opposite of the point.
+	// Throttled to at most 2/second by wall-clock time instead of by
+	// file count, so it stays cheap regardless of how many files the
+	// card actually has.
+	var lastProgressUpdate = 0;
+
+	console.log('[kaios] baseq2 scan starting on ' + storages.length + ' storage(s): ' +
+		storages.map(function (s) { return s.storageName; }).join(', '));
+
 	discoverBaseq2(storages, '', function (count) {
-		if (!cancelled) {
-			// setStatus() clears the hint by default (see its own
-			// comment) -- re-set it on every one of these progress
-			// updates, not just the initial setStatus() call above.
-			setStatus('Scanning for baseq2... (' + count + ' files)');
-			statusHintRightEl.textContent = 'Back';
+		var now = Date.now();
+		if (now - lastProgressUpdate < 500) {
+			return;
 		}
+		lastProgressUpdate = now;
+		console.log('[kaios] baseq2 scan: ' + count + ' files seen so far' +
+			(cancelled ? ' (after cancel)' : ''));
+
+		if (cancelled) {
+			// Still visible even after backing out -- same "Still
+			// searching..." caption as the cancel keypress itself set,
+			// just kept live instead of static, so there's some sign
+			// this is still doing something without needing devtools
+			// attached to see the console.log above.
+			mainMenuError = 'Still searching... (' + count + ' files)';
+			if (typeof refreshMainMenuIfShown === 'function') {
+				refreshMainMenuIfShown();
+			}
+			return;
+		}
+
+		// setStatus() clears the hint by default (see its own comment)
+		// -- re-set it on every one of these progress updates, not just
+		// the initial setStatus() call above.
+		setStatus('Scanning for baseq2... (' + count + ' files)');
+		statusHintRightEl.textContent = 'Back';
 	}).then(function (result) {
+		console.log('[kaios] baseq2 scan finished: ' + result.candidates.length +
+			' candidate(s) found' + (cancelled ? ' (after cancel)' : ''));
 		var candidates = result.candidates;
 
 		if (candidates.length === 0) {
@@ -1717,6 +1750,8 @@ function performBaseq2Scan(launchOnSuccess) {
 			finish(candidates[0]);
 		}
 	}, function (err) {
+		console.log('[kaios] baseq2 scan failed: ' + describeError(err) +
+			(cancelled ? ' (after cancel)' : ''));
 		mainMenuError = 'Scan failed: ' + describeError(err);
 		landOnMainMenu();
 	});
