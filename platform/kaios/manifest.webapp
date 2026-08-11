@@ -11,8 +11,9 @@
     "name": "yquake2-kai"
   },
   "default_locale": "en",
-  "orientation": ["portrait"],
-  "fullscreen": "true",
+  "orientation": ["portrait-primary"],
+  "fullscreen": true,
+  "version": "1.0.0",
   "chrome": {
     "navigation": false
   },

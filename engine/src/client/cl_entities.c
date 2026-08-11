@@ -37,12 +37,13 @@
  * -- negative moves it down on screen -- instead of guessing a single
  * hardcoded value blind. CVAR_ARCHIVE so whatever the player settles on
  * sticks across launches. Defaults to 0 (no change) everywhere except
- * this port, where -3 is a starting guess pending real-device feedback
- * (some weapon models clip out of view or render wrong at the more
- * aggressive end of this range -- e.g. -8 hides the chaingun entirely,
- * -5 breaks the railgun/machinegun -- each model's own geometry sits at
- * a different distance from its origin, so there's no single value
- * that's simultaneously ideal *and* safe for every weapon). */
+ * this port. Some weapon models clip out of view or render wrong at the
+ * more aggressive end of this range -- e.g. -8 hides the chaingun
+ * entirely, -5 breaks the railgun/machinegun -- each model's own
+ * geometry sits at a different distance from its origin, so there's no
+ * single value that's simultaneously ideal *and* safe for every weapon.
+ * -6 is the current candidate, pending confirmation it doesn't also
+ * hide the chaingun (fall back to -5 if it does). */
 static cvar_t *kaios_gun_yoffset;
 
 void
@@ -672,7 +673,7 @@ CL_AddViewWeapon(player_state_t *ps, player_state_t *ops)
 	if (!kaios_gun_yoffset)
 	{
 #ifdef __EMSCRIPTEN__
-		kaios_gun_yoffset = Cvar_Get("kaios_gun_yoffset", "-3", CVAR_ARCHIVE);
+		kaios_gun_yoffset = Cvar_Get("kaios_gun_yoffset", "-6", CVAR_ARCHIVE);
 #else
 		kaios_gun_yoffset = Cvar_Get("kaios_gun_yoffset", "0", CVAR_ARCHIVE);
 #endif
