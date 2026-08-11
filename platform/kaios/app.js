@@ -492,6 +492,11 @@ var PAK_FILE_RE = /^pak\d+\.pak$/i;
 // decompressed data never sits resident in the page's heap -- only
 // whatever byte range the engine's own fseek()/fread() calls actually
 // touch (the PAK directory at startup, then each asset as it's loaded).
+// installLazyPakFile() is called once per raw pak ARCHIVE (pak0.pak,
+// pak1.pak, ...), not once per embedded asset -- position/length below
+// are raw byte offsets into that one archive file, with the C side
+// doing its own per-asset fseek()/fread() against it (see
+// FS_FOpenFile()'s pak branch, filesystem.c).
 //
 // The tricky part is that this read() must be synchronous: the engine's
 // C fread() has no concept of waiting on a promise, and this build has
@@ -505,6 +510,125 @@ var PAK_FILE_RE = /^pak\d+\.pak$/i;
 // support required. That's also what makes it work on KaiOS's old
 // Gecko-48-class engine, same reasoning as readBlobAsArrayBuffer() above.
 //
+// ---------------------------------------------------------------------
+// Fixed-size block cache (ring buffer, oldest-block eviction)
+// ---------------------------------------------------------------------
+// Without this, every single fread() the C engine issues against a
+// not-yet-cached range re-does the whole Blob.slice()+XHR+decode round
+// trip, even for bytes already fetched earlier this session -- demo-
+// cycling revisits the same handful of maps repeatedly, and each
+// revisit redid the *entire* BSP/texture load (dozens of small lump
+// reads) from scratch. Real-device evidence: KAIOS_HEARTBEAT_GAP (a
+// setInterval, unrelated to rendering) stalling by the same ~20-23s as
+// KAIOS_JS_TICK during a map reload -- proof the whole JS thread was
+// synchronously blocked, not just requestAnimationFrame being
+// deprioritized, right when a previously-visited map got reloaded.
+//
+// Caching every touched byte range forever (keep growing) would fix the
+// re-fetch cost but trades it for unbounded growth across a long
+// session -- exactly the OOM risk this device's tight RAM budget can't
+// absorb (RSS has been observed well past 500MB on this hardware
+// without this). Instead: one fixed-size, pre-allocated ArrayBuffer,
+// carved into fixed-size blocks and reused as a ring buffer. A block
+// gets fetched once on first touch; once the ring wraps back around to
+// a block's slot, that block's old content is simply overwritten in
+// place and its old owner's cache entry evicted -- bounded memory that
+// never grows past LAZY_PAK_CACHE_BYTES no matter how long the session
+// runs, while still turning every revisit of recently-touched content
+// into a plain memory copy instead of a fresh sync-XHR round trip.
+//
+// 24MB, not the ~70MB a fully decompressed pak0.pak can reach: real-
+// device KAIOS_MEM logs never showed more than ~24MB of the (separate,
+// fixed 96MB) C/wasm heap in use at once for a single loaded map's
+// worth of BSP+models+sounds -- so 24MB of raw pak bytes is already
+// enough to cover one full map's working set with room to spare,
+// without pushing this already RAM-constrained device further over the
+// edge the way matching the raw pak size would. Tune this constant
+// alone if later testing shows more headroom is safe/needed.
+var LAZY_PAK_CACHE_BYTES = 24 * 1024 * 1024;
+var LAZY_PAK_BLOCK_BYTES = 256 * 1024;
+var LAZY_PAK_BLOCK_COUNT = LAZY_PAK_CACHE_BYTES / LAZY_PAK_BLOCK_BYTES;
+var lazyPakCache = new Uint8Array(LAZY_PAK_CACHE_BYTES);
+// Ring of block slots -- each holds at most one {node, blockIndex} tag,
+// so evicting a slot just means forgetting that tag (the bytes
+// themselves get overwritten in place by whatever claims the slot
+// next, no separate free/clear step needed).
+var lazyPakSlotTag = new Array(LAZY_PAK_BLOCK_COUNT).fill(null);
+var lazyPakSlotCursor = 0;
+// node -> {blockIndex: slotIndex}, for O(1) hit/miss lookup on read().
+// A plain WeakMap-of-objects instead of a single flat map keyed by
+// "node+blockIndex" string -- avoids building a string key on every
+// single read() call, which runs in the hot path.
+var lazyPakNodeBlocks = new WeakMap();
+
+function lazyPakBlockMapFor(node) {
+	var m = lazyPakNodeBlocks.get(node);
+	if (!m) {
+		m = Object.create(null);
+		lazyPakNodeBlocks.set(node, m);
+	}
+	return m;
+}
+
+function lazyPakEvictSlot(slot) {
+	var tag = lazyPakSlotTag[slot];
+	if (tag) {
+		delete lazyPakBlockMapFor(tag.node)[tag.blockIndex];
+		lazyPakSlotTag[slot] = null;
+	}
+}
+
+function lazyPakStoreBlock(node, blockIndex, bytes) {
+	var slot = lazyPakSlotCursor;
+	lazyPakSlotCursor = (lazyPakSlotCursor + 1) % LAZY_PAK_BLOCK_COUNT;
+	lazyPakEvictSlot(slot);
+	lazyPakCache.set(bytes, slot * LAZY_PAK_BLOCK_BYTES);
+	lazyPakSlotTag[slot] = { node: node, blockIndex: blockIndex };
+	lazyPakBlockMapFor(node)[blockIndex] = slot;
+	return slot;
+}
+
+// Fetches one arbitrary byte range via the retry+sync-XHR machinery,
+// decoded to a plain Uint8Array. One retry on failure: a real device
+// was seen to have this read fail on its *second* use in a session
+// while the very first use (moments earlier) succeeded -- suggestive of
+// a one-off cold-start hiccup in the browser's sync-XHR/blob-URL
+// machinery rather than a real, repeatable fault. A single retry is
+// cheap and turns a transient hiccup into a stall instead of a fatal
+// engine error; a genuinely broken read still fails after the retry
+// same as before.
+function lazyPakFetchRange(file, start, end) {
+	var slice = file.slice(start, end);
+	var text, lastErr;
+
+	for (var attempt = 0; attempt < 2; attempt++) {
+		var url = URL.createObjectURL(slice);
+		try {
+			var xhr = new XMLHttpRequest();
+			xhr.overrideMimeType('text/plain; charset=x-user-defined');
+			xhr.open('GET', url, false);
+			xhr.send(null);
+			text = xhr.responseText;
+			lastErr = null;
+			break;
+		} catch (e) {
+			lastErr = e;
+		} finally {
+			URL.revokeObjectURL(url);
+		}
+	}
+	if (lastErr) {
+		throw lastErr;
+	}
+
+	var n = Math.min(text.length, end - start);
+	var out = new Uint8Array(n);
+	for (var i = 0; i < n; i++) {
+		out[i] = text.charCodeAt(i) & 0xff;
+	}
+	return out;
+}
+
 // MEMFS.ops_table.file.{node,stream} are shared objects reused by every
 // plain-file node it creates -- mutating them in place would break reads
 // for every other file, not just this one. node.stream_ops is replaced
@@ -517,7 +641,6 @@ function installLazyPakFile(dest, file) {
 	// all parse the ES6 0o... form.
 	var node = FS.create(dest, 292);
 	node.usedBytes = file.size;
-	node.contents = null;
 
 	node.stream_ops = {
 		llseek: MEMFS.stream_ops.llseek,
@@ -525,44 +648,36 @@ function installLazyPakFile(dest, file) {
 			if (position >= file.size) {
 				return 0;
 			}
+
 			var end = Math.min(position + length, file.size);
-			var size = end - position;
-			var slice = file.slice(position, end);
+			var total = end - position;
+			var p = position;
 
-			// One retry on failure: a real device was seen to have this
-			// read fail on its *second* use in a session while the very
-			// first use (moments earlier) succeeded -- suggestive of a
-			// one-off cold-start hiccup in the browser's sync-XHR/blob-URL
-			// machinery rather than a real, repeatable fault. A single
-			// retry is cheap and turns a transient hiccup into a stall
-			// instead of a fatal engine error; a genuinely broken read
-			// still fails after the retry same as before.
-			var bytes, lastErr;
-			for (var attempt = 0; attempt < 2; attempt++) {
-				var url = URL.createObjectURL(slice);
-				try {
-					var xhr = new XMLHttpRequest();
-					xhr.overrideMimeType('text/plain; charset=x-user-defined');
-					xhr.open('GET', url, false);
-					xhr.send(null);
-					bytes = xhr.responseText;
-					lastErr = null;
-					break;
-				} catch (e) {
-					lastErr = e;
-				} finally {
-					URL.revokeObjectURL(url);
+			while (p < end) {
+				var blockIndex = Math.floor(p / LAZY_PAK_BLOCK_BYTES);
+				var blockStart = blockIndex * LAZY_PAK_BLOCK_BYTES;
+				var blockEnd = Math.min(blockStart + LAZY_PAK_BLOCK_BYTES, file.size);
+
+				var slot = lazyPakBlockMapFor(node)[blockIndex];
+				if (slot === undefined) {
+					var fetched = lazyPakFetchRange(file, blockStart, blockEnd);
+					slot = lazyPakStoreBlock(node, blockIndex, fetched);
 				}
-			}
-			if (lastErr) {
-				throw lastErr;
+
+				var copyStart = Math.max(p, blockStart);
+				var copyEnd = Math.min(end, blockEnd);
+				var srcOff = slot * LAZY_PAK_BLOCK_BYTES + (copyStart - blockStart);
+				var dstOff = offset + (copyStart - position);
+				var len = copyEnd - copyStart;
+
+				for (var i = 0; i < len; i++) {
+					buffer[dstOff + i] = lazyPakCache[srcOff + i];
+				}
+
+				p = copyEnd;
 			}
 
-			var n = Math.min(bytes.length, size);
-			for (var i = 0; i < n; i++) {
-				buffer[offset + i] = bytes.charCodeAt(i) & 0xff;
-			}
-			return n;
+			return total;
 		},
 		write: function () {
 			// pak files are never written to -- fail loud instead of
