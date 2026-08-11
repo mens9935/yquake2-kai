@@ -546,21 +546,25 @@ var PAK_FILE_RE = /^pak\d+\.pak$/i;
 // edge the way matching the raw pak size would. Tune this constant
 // alone if later testing shows more headroom is safe/needed.
 var LAZY_PAK_CACHE_BYTES = 24 * 1024 * 1024;
-// 1MB, not the original 256KB: real-device evidence (KAIOS_JS_TICK/
-// KAIOS_HEARTBEAT_GAP stalling together, proving a genuine full-thread
-// block) showed a *first-time* visit to a level -- base3 in one
-// capture -- taking a ~1-2.5s hit roughly every 10s throughout play,
-// not just at the initial load, consistent with new (never-cached)
-// content being touched progressively as the player moves through it.
-// Each hit is dominated by the fixed per-call cost of Blob.slice()+
-// sync XHR+decode, not by the byte count moved -- so a single asset
-// spanning several blocks paid that fixed cost several times over.
-// Quadrupling the block size cuts the number of separate round trips
-// per newly-touched asset by roughly the same factor without changing
-// how much stays resident (LAZY_PAK_CACHE_BYTES above is unchanged) --
-// fewer, chunkier stalls instead of frequent small ones, for the same
-// total bytes fetched and the same fixed memory ceiling.
-var LAZY_PAK_BLOCK_BYTES = 1024 * 1024;
+// 256KB. A real-device A/B test tried bumping this to 1MB on the
+// theory that sync-XHR call overhead dominates over bytes moved, so
+// 4x fewer, chunkier fetches should cost less overall -- the opposite
+// happened. Same three cold map loads (Outer Base->base1,
+// ->Installation/base2, ->Comm Center/base3), captured with
+// KAIOS_JS_TICK/KAIOS_HEARTBEAT_GAP both sessions: 256KB blocked for
+// ~16.0s/6.3s/6.4s; 1MB blocked for ~21.8s/10.8s/10.8s on the *same*
+// loads -- worse across the board, not better. Root cause: sync XHR
+// forbids responseType "arraybuffer" on this engine (InvalidAccess-
+// Error), so every byte has to go through the char-by-char
+// text.charCodeAt() decode loop below regardless of block size --
+// that cost scales with total bytes moved, not call count. BSP/model
+// loading does scattered, non-contiguous reads (separate lumps at
+// separate offsets), so a bigger block mostly fetches+decodes bytes
+// that specific read didn't need -- quadrupling the block size
+// roughly quadrupled the wasted decode work per touch. Left at the
+// original, actually-validated size; if anything, *smaller* blocks
+// are the direction later testing should try, not bigger.
+var LAZY_PAK_BLOCK_BYTES = 256 * 1024;
 var LAZY_PAK_BLOCK_COUNT = LAZY_PAK_CACHE_BYTES / LAZY_PAK_BLOCK_BYTES;
 var lazyPakCache = new Uint8Array(LAZY_PAK_CACHE_BYTES);
 // Ring of block slots -- each holds at most one {node, blockIndex} tag,
