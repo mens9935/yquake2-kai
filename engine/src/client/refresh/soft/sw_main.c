@@ -450,7 +450,21 @@ R_RegisterVariables (void)
 	r_mode = ri.Cvar_Get( "r_mode", "0", CVAR_ARCHIVE );
 
 	r_lefthand = ri.Cvar_Get( "hand", "0", CVAR_USERINFO | CVAR_ARCHIVE );
+#ifdef __EMSCRIPTEN__
+	/* Requested bump: on this port's narrow screens the view weapon
+	 * drawn at the stock default (80, matching the classic 90-ish view
+	 * fov closely) reads as noticeably small/hard to make out. R_Draw
+	 * AliasModel (sw_alias.c) derives the weapon's own draw scale from
+	 * this as roughly vrect.width / tan(r_gunfov/2) -- a *lower* value
+	 * here means a narrower "lens" just for the weapon, so it's drawn
+	 * bigger, independent of the main view's own (possibly very
+	 * different, see AdaptFov/CalcFov in cl_view.c) fov. 55 is a
+	 * noticeably bigger, still fully on-screen weapon at this port's
+	 * resolutions. */
+	r_gunfov = ri.Cvar_Get( "r_gunfov", "55", CVAR_ARCHIVE );
+#else
 	r_gunfov = ri.Cvar_Get( "r_gunfov", "80", CVAR_ARCHIVE );
+#endif
 	r_farsee = ri.Cvar_Get("r_farsee", "0", CVAR_LATCH | CVAR_ARCHIVE);
 	r_lightmap = ri.Cvar_Get("r_lightmap", "0", 0);
 	r_colorlight = ri.Cvar_Get("sw_colorlight", "0", CVAR_ARCHIVE);

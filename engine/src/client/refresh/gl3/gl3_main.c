@@ -267,7 +267,14 @@ static void
 GL3_Register(void)
 {
 	gl_lefthand = ri.Cvar_Get("hand", "0", CVAR_USERINFO | CVAR_ARCHIVE);
+#ifdef __EMSCRIPTEN__
+	/* Same reasoning/value as sw_main.c's r_gunfov -- see its comment.
+	 * Kept in sync so the weapon doesn't change apparent size just from
+	 * switching renderers. */
+	r_gunfov = ri.Cvar_Get("r_gunfov", "55", CVAR_ARCHIVE);
+#else
 	r_gunfov = ri.Cvar_Get("r_gunfov", "80", CVAR_ARCHIVE);
+#endif
 	r_farsee = ri.Cvar_Get("r_farsee", "0", CVAR_LATCH | CVAR_ARCHIVE);
 
 	gl_drawbuffer = ri.Cvar_Get("gl_drawbuffer", "GL_BACK", 0);
