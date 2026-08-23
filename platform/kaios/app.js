@@ -569,22 +569,26 @@ var PAK_FILE_RE = /^pak\d+\.pak$/i;
 // runs, while still turning every revisit of recently-touched content
 // into a plain memory copy instead of a fresh sync-XHR round trip.
 //
-// 8MB, not the original 24MB this shipped with. This arena is a flat,
-// permanent allocation from the moment app.js runs -- it doesn't exist
-// in the pre-WebAudio-backend reference build (2026-08-07) at all, and
-// a real-device A/B comparing that build against current HEAD (both on
-// SDL audio, both software-rendered) showed HEAD still growing memory
-// noticeably faster despite the recurring mid-level stutter itself
-// turning out to be the WebAudio backend (see s_backend), not pak
-// cache misses. That undercuts the original sizing rationale: 24MB was
-// picked to survive *revisiting* a whole level's assets without a
-// re-fetch, but revisits turning out not to be the dominant remaining
-// cost means paying for that much headroom by default isn't earning
-// its keep. The one-time first-load freeze this cache was never able
-// to help with either way (nothing's cached yet on a first touch).
-// 8MB still covers plenty of same-block re-touches within a single
-// level; tune this constant alone if later testing wants it back up.
-var LAZY_PAK_CACHE_BYTES = 8 * 1024 * 1024;
+// 4MB, not the original 24MB this shipped with (this whole ring-buffer
+// mechanism was carried over from the same design used for xash3d-kaios
+// -- that project's own 16MB was itself already a bump *up* from an
+// 8MB baseline; this port has independently been trimming the other
+// direction). This arena is a flat, permanent allocation from the
+// moment app.js runs -- it doesn't exist in the pre-WebAudio-backend
+// reference build (2026-08-07) at all, and a real-device A/B comparing
+// that build against current HEAD (both on SDL audio, both
+// software-rendered) showed HEAD still growing memory noticeably
+// faster despite the recurring mid-level stutter itself turning out to
+// be the WebAudio backend (see s_backend), not pak cache misses. That
+// undercuts the original sizing rationale: 24MB was picked to survive
+// *revisiting* a whole level's assets without a re-fetch, but revisits
+// turning out not to be the dominant remaining cost means paying for
+// that much headroom by default isn't earning its keep. The one-time
+// first-load freeze this cache was never able to help with either way
+// (nothing's cached yet on a first touch). 4MB still covers plenty of
+// same-block re-touches within a single level; tune this constant
+// alone if later testing wants it back up.
+var LAZY_PAK_CACHE_BYTES = 4 * 1024 * 1024;
 // 256KB. A real-device A/B test tried bumping this to 1MB on the
 // theory that sync-XHR call overhead dominates over bytes moved, so
 // 4x fewer, chunkier fetches should cost less overall -- the opposite
