@@ -63,6 +63,112 @@ Kaios_LogHeapUsage(const char *label)
 		label, (unsigned)mi.uordblks, (unsigned)heap_size,
 		heap_size ? (100.0f * (float)mi.uordblks / (float)heap_size) : 0.0f);
 }
+
+/* Real prefetch, not just the ring-buffer reset in SV_SpawnServer above
+ * -- accepts a slower/longer loading screen in exchange for the client
+ * registration pass (CL_PrepRefresh/CL_RegisterSounds, which runs
+ * moments after this) never hitting an on-demand lazy pak-cache miss
+ * mid-*gameplay*. sv.configstrings[CS_MODELS/CS_SOUNDS/CS_IMAGES] are
+ * fully populated by the time SpawnEntities() returns (every entity's
+ * spawn function has already called gi.modelindex()/soundindex()/
+ * imageindex() for whatever it needs) -- this is the exact same list
+ * CL_RegisterSounds/CL_PrepRefresh (cl_parse.c/cl_view.c) are about to
+ * walk themselves to actually load everything; reading it a second
+ * time here just turns those same names into pak byte ranges *before*
+ * the client-side registration pass reaches them, instead of after.
+ *
+ * Sound configstrings need the same "sound/" prefix (or '#' meaning
+ * already a full path) S_LoadSound (sound.c) applies right before
+ * opening the file -- replicated here so the names line up with what
+ * the pak's own directory actually has recorded. Models/images are
+ * already full paths as-is (confirmed: CL_PrepRefresh passes
+ * cl.configstrings[CS_MODELS+i] straight to R_RegisterModel()).
+ *
+ * Every name gets handed to JS regardless of whether this build even
+ * *has* the lazy pak-cache installed (a plain sideload with the real
+ * files just on MEMFS instead) -- Module.kaiosPrefetchLevelAssets is
+ * only ever defined by app.js when installLazyPakFile() was actually
+ * used, so this silently no-ops otherwise. Any name JS can't resolve
+ * to a pak entry (a wrong prefix guess, a name that isn't in this pak
+ * at all) is simply skipped there -- falls back to today's on-demand
+ * fetch when CL_PrepRefresh/CL_RegisterSounds actually reach it, same
+ * as if this function didn't exist. Never a correctness risk, only a
+ * missed optimization for that one name. */
+static void
+Kaios_PrefetchLevelAssets(void)
+{
+	static cvar_t *kaios_prefetch_assets;
+	char *buf;
+	size_t bufsize;
+	size_t used;
+	int i;
+
+	if (!kaios_prefetch_assets)
+	{
+		kaios_prefetch_assets = Cvar_Get("kaios_prefetch_assets", "1", CVAR_ARCHIVE);
+	}
+
+	if (!kaios_prefetch_assets->value)
+	{
+		return;
+	}
+
+	/* Worst case: every one of the 3*256 configstring slots this walks
+	 * is a full MAX_QPATH-1 name plus its trailing newline. Comfortably
+	 * affordable as a one-off per-map allocation, freed before this
+	 * function returns. */
+	bufsize = (size_t)(MAX_MODELS + MAX_SOUNDS + MAX_IMAGES) * (MAX_QPATH + 1);
+	buf = malloc(bufsize);
+
+	if (!buf)
+	{
+		return;
+	}
+
+	buf[0] = '\0';
+	used = 0;
+
+	for (i = 1; i < MAX_MODELS && sv.configstrings[CS_MODELS + i][0]; i++)
+	{
+		Com_sprintf(buf + used, bufsize - used, "%s\n",
+			sv.configstrings[CS_MODELS + i]);
+		used += strlen(buf + used);
+	}
+
+	for (i = 1; i < MAX_SOUNDS && sv.configstrings[CS_SOUNDS + i][0]; i++)
+	{
+		const char *name = sv.configstrings[CS_SOUNDS + i];
+
+		if (name[0] == '#')
+		{
+			Com_sprintf(buf + used, bufsize - used, "%s\n", name + 1);
+		}
+		else
+		{
+			Com_sprintf(buf + used, bufsize - used, "sound/%s\n", name);
+		}
+
+		used += strlen(buf + used);
+	}
+
+	for (i = 1; i < MAX_IMAGES && sv.configstrings[CS_IMAGES + i][0]; i++)
+	{
+		Com_sprintf(buf + used, bufsize - used, "%s\n",
+			sv.configstrings[CS_IMAGES + i]);
+		used += strlen(buf + used);
+	}
+
+	if (used > 0)
+	{
+		EM_ASM({
+			if (Module.kaiosPrefetchLevelAssets) {
+				Module.kaiosPrefetchLevelAssets(UTF8ToString($0));
+			}
+		}, buf);
+	}
+
+	free(buf);
+}
 #endif
 
 /* initialize the entities array to at least this many entities */
@@ -405,6 +511,7 @@ SV_SpawnServer(char *server, char *spawnpoint, server_state_t serverstate,
 
 #ifdef __EMSCRIPTEN__
 	Kaios_LogHeapUsage("SV_SpawnServer after ge->SpawnEntities");
+	Kaios_PrefetchLevelAssets();
 #endif
 
 	/* run two frames to allow everything to settle */

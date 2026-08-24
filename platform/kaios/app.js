@@ -777,6 +777,162 @@ function lazyPakFetchAndStoreBlock(node, blockIndex, file, blockStart, blockEnd)
 	return slot;
 }
 
+// Every {node, file} pair installLazyPakFile() has ever created --
+// baseq2 can have more than one pak archive (pak0.pak plus patch/mod
+// paks), and Module.kaiosPrefetchLevelAssets() below needs to search
+// all of them for a given level asset's name.
+var lazyPakInstalled = [];
+
+// node -> parsed pak directory ({name: {pos, len}, ...}), or null if
+// this file turned out not to be a valid PACK archive. Built once per
+// file, the first time anything asks -- the directory itself is a tiny
+// fraction of a multi-MB pak (a few hundred bytes per entry, not the
+// asset data), cheap to read and decode in full up front.
+var lazyPakDirectoryCache = new WeakMap();
+
+function lazyPakDecodeBytes(text, n) {
+	var out = new Uint8Array(n);
+	for (var i = 0; i < n; i++) {
+		out[i] = text.charCodeAt(i) & 0xff;
+	}
+	return out;
+}
+
+function lazyPakBuildDirectory(node, file) {
+	if (lazyPakDirectoryCache.has(node)) {
+		return lazyPakDirectoryCache.get(node);
+	}
+
+	var entries = null;
+	try {
+		// Quake II PAK format: 4-byte magic "PACK", int32 dirofs, int32
+		// dirlen (all little-endian), then dirlen/64 fixed 64-byte
+		// records (56-byte null-terminated name + int32 filepos + int32
+		// filelen) at dirofs. Unchanged since the original id Software
+		// release -- not something this project is guessing at.
+		var header = lazyPakDecodeBytes(lazyPakFetchRangeText(file, 0, 12), 12);
+
+		if (String.fromCharCode(header[0], header[1], header[2], header[3]) !== 'PACK') {
+			throw new Error('not a PACK file');
+		}
+
+		var headerView = new DataView(header.buffer);
+		var dirofs = headerView.getInt32(4, true);
+		var dirlen = headerView.getInt32(8, true);
+		var count = Math.floor(dirlen / 64);
+
+		var dirBytes = lazyPakDecodeBytes(
+			lazyPakFetchRangeText(file, dirofs, dirofs + dirlen), dirlen);
+		var dirView = new DataView(dirBytes.buffer);
+
+		entries = Object.create(null);
+		for (var i = 0; i < count; i++) {
+			var base = i * 64;
+			var nameEnd = base;
+			while (nameEnd < base + 56 && dirBytes[nameEnd] !== 0) {
+				nameEnd++;
+			}
+			var name = '';
+			for (var c = base; c < nameEnd; c++) {
+				name += String.fromCharCode(dirBytes[c]);
+			}
+			entries[name] = {
+				pos: dirView.getInt32(base + 56, true),
+				len: dirView.getInt32(base + 60, true)
+			};
+		}
+	} catch (e) {
+		console.log('[kaios] prefetch: failed to parse pak directory: ' + describeError(e));
+		entries = null;
+	}
+
+	lazyPakDirectoryCache.set(node, entries);
+	return entries;
+}
+
+// Called from the C side (Kaios_PrefetchLevelAssets(), sv_init.c) right
+// after a new map's entities have finished spawning -- see that
+// function's own comment for the full reasoning (accepting a longer
+// loading screen in exchange for the client's own registration pass
+// never missing this cache mid-*gameplay*). `namesText` is every
+// CS_MODELS/CS_SOUNDS/CS_IMAGES configstring for this level, one per
+// line, already resolved to the same pak-relative path S_LoadSound/
+// R_RegisterModel/Draw_FindPic would themselves look up.
+//
+// Deliberately synchronous, not fired off as concurrent async fetches
+// left to resolve in the background: this runs from inside one
+// unbroken, synchronous stretch of C code (SV_SpawnServer, still
+// running server-side, well before CL_PrepRefresh's own client-side
+// reads moments later in that same stretch) -- there is no point in
+// this call stack where the C code yields back to the JS event loop
+// for an in-flight fetch()/XHR promise to actually resolve before the
+// registration pass that's supposed to benefit from it runs. Reaching
+// genuine concurrency here would need either Asyncify (a real rebuild
+// with real code-size/performance cost, not something to take on
+// blind) or restructuring level loading into an explicit multi-tick
+// "wait for JS" state machine -- out of scope for what was asked here,
+// which was trading loading-screen time for zero *gameplay* stutter,
+// not making the loading screen itself faster.
+//
+// Bounded to LAZY_PAK_CACHE_BYTES total -- queuing more than the ring
+// buffer can hold would just mean later prefetches in this same pass
+// evict earlier ones before CL_PrepRefresh ever gets to read them,
+// wasted work for no benefit. Names beyond that budget are left alone
+// entirely and simply fault in on demand later, exactly like today.
+Module.kaiosPrefetchLevelAssets = function (namesText) {
+	if (lazyPakInstalled.length === 0) {
+		return;
+	}
+
+	var names = namesText.split('\n').filter(function (n) { return n.length > 0; });
+	var budgetBytes = LAZY_PAK_CACHE_BYTES;
+	var usedBytes = 0;
+	var queuedBlocks = Object.create(null);
+	var prefetched = 0;
+
+	for (var n = 0; n < names.length && usedBytes < budgetBytes; n++) {
+		var name = names[n];
+
+		for (var f = 0; f < lazyPakInstalled.length; f++) {
+			var installed = lazyPakInstalled[f];
+			var dir = lazyPakBuildDirectory(installed.node, installed.file);
+			var rec = dir && dir[name];
+
+			if (!rec) {
+				continue;
+			}
+
+			var end = rec.pos + rec.len;
+			var blockStart = Math.floor(rec.pos / LAZY_PAK_BLOCK_BYTES) * LAZY_PAK_BLOCK_BYTES;
+
+			for (var p = blockStart; p < end && usedBytes < budgetBytes; p += LAZY_PAK_BLOCK_BYTES) {
+				var blockIndex = Math.floor(p / LAZY_PAK_BLOCK_BYTES);
+				var key = f + ':' + blockIndex;
+
+				if (queuedBlocks[key] || lazyPakBlockMapFor(installed.node)[blockIndex] !== undefined) {
+					continue;
+				}
+				queuedBlocks[key] = true;
+
+				var blockEnd = Math.min(p + LAZY_PAK_BLOCK_BYTES, installed.file.size);
+				try {
+					lazyPakFetchAndStoreBlock(installed.node, blockIndex, installed.file, p, blockEnd);
+					usedBytes += (blockEnd - p);
+					prefetched++;
+				} catch (e) {
+					console.log('[kaios] prefetch: block fetch failed for ' + name + ': ' +
+						describeError(e));
+				}
+			}
+
+			break;
+		}
+	}
+
+	console.log('[kaios] prefetch: ' + prefetched + ' block(s), ' +
+		Math.round(usedBytes / 1024) + 'KB, for ' + names.length + ' asset name(s)');
+};
+
 // MEMFS.ops_table.file.{node,stream} are shared objects reused by every
 // plain-file node it creates -- mutating them in place would break reads
 // for every other file, not just this one. node.stream_ops is replaced
@@ -835,6 +991,13 @@ function installLazyPakFile(dest, file) {
 			throw new FS.ErrnoError(63 /* EPERM */);
 		}
 	};
+
+	// Tracked so Module.kaiosPrefetchLevelAssets() (see its own comment
+	// further down) can search every installed pak archive for a given
+	// level asset's name, not just whichever one happened to be
+	// installed first -- baseq2 can have more than one (pak0.pak plus
+	// patch/mod paks).
+	lazyPakInstalled.push({ node: node, file: file });
 
 	return node;
 }
@@ -2094,6 +2257,14 @@ var DEBUG_ITEMS = [
 		],
 		def: 1
 	},
+	// See Kaios_PrefetchLevelAssets()'s own comment in sv_init.c and
+	// Module.kaiosPrefetchLevelAssets's in app.js -- trades a longer
+	// loading screen (every level asset's pak bytes fetched up front,
+	// synchronously, right after entities spawn) for the client's own
+	// registration pass a moment later never missing the lazy pak
+	// cache mid-gameplay. On by default; off reverts to today's
+	// on-demand-only behavior.
+	toggleItem('prefetchassets', 'Prefetch level assets', 'kaios_prefetch_assets', true),
 	// See kaios_startcmd's own comment in frame.c/autoexec.cfg -- queued
 	// once, right after SV_Init()/CL_Init() register map/demomap, so it
 	// can hold a full "demomap <name>" console command. Picking a demo
