@@ -701,26 +701,25 @@ function lazyPakEvictSlot(slot) {
 	}
 }
 
-function lazyPakStoreBlock(node, blockIndex, bytes) {
-	var slot = lazyPakSlotCursor;
-	lazyPakSlotCursor = (lazyPakSlotCursor + 1) % LAZY_PAK_BLOCK_COUNT;
-	lazyPakEvictSlot(slot);
-	lazyPakCache.set(bytes, slot * LAZY_PAK_BLOCK_BYTES);
-	lazyPakSlotTag[slot] = { node: node, blockIndex: blockIndex };
-	lazyPakBlockMapFor(node)[blockIndex] = slot;
-	return slot;
-}
-
-// Fetches one arbitrary byte range via the retry+sync-XHR machinery,
-// decoded to a plain Uint8Array. One retry on failure: a real device
-// was seen to have this read fail on its *second* use in a session
-// while the very first use (moments earlier) succeeded -- suggestive of
-// a one-off cold-start hiccup in the browser's sync-XHR/blob-URL
-// machinery rather than a real, repeatable fault. A single retry is
-// cheap and turns a transient hiccup into a stall instead of a fatal
-// engine error; a genuinely broken read still fails after the retry
-// same as before.
-function lazyPakFetchRange(file, start, end) {
+// Fetches one arbitrary byte range via the retry+sync-XHR machinery, as
+// a raw response string -- the network part only, no byte decode. One
+// retry on failure: a real device was seen to have this read fail on
+// its *second* use in a session while the very first use (moments
+// earlier) succeeded -- suggestive of a one-off cold-start hiccup in
+// the browser's sync-XHR/blob-URL machinery rather than a real,
+// repeatable fault. A single retry is cheap and turns a transient
+// hiccup into a stall instead of a fatal engine error; a genuinely
+// broken read still fails after the retry same as before.
+//
+// Sync XHR (required here -- this runs inside a blocking C read()
+// call, no callback/await available) restricts responseType to plain
+// text; arraybuffer/blob throw InvalidAccessError synchronously on
+// this engine (confirmed by testing, not just spec reading). The
+// 'x-user-defined' charset override is the standard workaround for
+// getting raw bytes out of a synchronous XHR despite that -- each byte
+// comes back as one UTF-16 code unit, unmangled, recovered below with
+// a plain "& 0xff" per character.
+function lazyPakFetchRangeText(file, start, end) {
 	var slice = file.slice(start, end);
 	var text, lastErr;
 
@@ -744,12 +743,38 @@ function lazyPakFetchRange(file, start, end) {
 		throw lastErr;
 	}
 
-	var n = Math.min(text.length, end - start);
-	var out = new Uint8Array(n);
+	return text;
+}
+
+// Fetches one block and decodes it straight into its ring-buffer slot
+// -- no intermediate Uint8Array in between. The previous version
+// (lazyPakFetchRange() returning a fresh Uint8Array, then a separate
+// lazyPakStoreBlock() copying that into lazyPakCache) allocated and
+// then immediately discarded one full block-sized typed array on
+// *every* cache miss -- up to 512KB of garbage per miss at this
+// setting's upper end, on top of the XHR response string itself (which
+// sync XHR forces regardless, see lazyPakFetchRangeText()'s own
+// comment -- not something this can avoid). Writing charCodeAt()
+// results directly into lazyPakCache at the slot's own offset removes
+// that one allocation+copy per miss for free; the slot is only
+// reserved (cursor advanced, old tag evicted) *after* the network part
+// succeeds, so a failed fetch never corrupts cache bookkeeping.
+function lazyPakFetchAndStoreBlock(node, blockIndex, file, blockStart, blockEnd) {
+	var text = lazyPakFetchRangeText(file, blockStart, blockEnd);
+
+	var slot = lazyPakSlotCursor;
+	lazyPakSlotCursor = (lazyPakSlotCursor + 1) % LAZY_PAK_BLOCK_COUNT;
+	lazyPakEvictSlot(slot);
+
+	var base = slot * LAZY_PAK_BLOCK_BYTES;
+	var n = Math.min(text.length, blockEnd - blockStart);
 	for (var i = 0; i < n; i++) {
-		out[i] = text.charCodeAt(i) & 0xff;
+		lazyPakCache[base + i] = text.charCodeAt(i) & 0xff;
 	}
-	return out;
+
+	lazyPakSlotTag[slot] = { node: node, blockIndex: blockIndex };
+	lazyPakBlockMapFor(node)[blockIndex] = slot;
+	return slot;
 }
 
 // MEMFS.ops_table.file.{node,stream} are shared objects reused by every
@@ -783,8 +808,7 @@ function installLazyPakFile(dest, file) {
 
 				var slot = lazyPakBlockMapFor(node)[blockIndex];
 				if (slot === undefined) {
-					var fetched = lazyPakFetchRange(file, blockStart, blockEnd);
-					slot = lazyPakStoreBlock(node, blockIndex, fetched);
+					slot = lazyPakFetchAndStoreBlock(node, blockIndex, file, blockStart, blockEnd);
 				}
 
 				var copyStart = Math.max(p, blockStart);
