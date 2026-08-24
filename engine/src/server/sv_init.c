@@ -30,6 +30,7 @@
 #ifdef __EMSCRIPTEN__
 #include <malloc.h>
 #include <emscripten/heap.h>
+#include <emscripten/em_asm.h>
 
 /* Chasing an OOM (Aborted(OOM), an Emscripten runtime abort -- malloc
  * itself failing inside the C library, not something our own code
@@ -346,6 +347,22 @@ SV_SpawnServer(char *server, char *spawnpoint, server_state_t serverstate,
 
 #ifdef __EMSCRIPTEN__
 	Kaios_LogHeapUsage(va("SV_SpawnServer(%s) before CM_LoadMap", server));
+
+	/* The one choke point every map change (including the very first
+	 * one and loadgame/changelevel) goes through, regardless of which
+	 * renderer is active -- see Module.kaiosResetLazyPakCache's own
+	 * comment in app.js for why the lazy pak-cache ring buffer wants to
+	 * know this moment specifically: giving the new level's own reads
+	 * the cache's full capacity from a clean slate, instead of
+	 * competing with whatever blocks the *previous* level left
+	 * resident. One trivial EM_ASM call per map load, not per frame or
+	 * per file -- negligible cost regardless of how cheap or expensive
+	 * a single JS call is on this hardware. */
+	EM_ASM({
+		if (Module.kaiosResetLazyPakCache) {
+			Module.kaiosResetLazyPakCache();
+		}
+	});
 #endif
 
 	if (serverstate != ss_game)

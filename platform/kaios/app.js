@@ -656,6 +656,34 @@ var lazyPakSlotCursor = 0;
 // single read() call, which runs in the hot path.
 var lazyPakNodeBlocks = new WeakMap();
 
+// Called from the C side (sv_init.c's SV_SpawnServer, right as a new
+// map starts loading -- the one choke point every map change goes
+// through, regardless of which renderer is active) via a single cheap
+// EM_ASM call, not gated behind any debug cvar. Without this, whatever
+// blocks are still resident from the *previous* level compete with the
+// new one for ring slots until they naturally get evicted -- which
+// might not happen before the new level's own precache pass ends, if
+// the old level's leftovers happened to land in slots the ring doesn't
+// reach again for a while. Wiping the slate here means every map gets
+// this cache's full capacity to itself from its very first read, at
+// the cost of a few blocks the new level might have coincidentally
+// still wanted from the old one (players re-loading the same map back
+// to back, or two maps sharing a common texture/model) now missing
+// once instead of hitting.
+//
+// This is *not* the "prefetch offsets ahead of time" version of the
+// idea -- that needs to know which pak byte ranges this specific map
+// will touch before it touches them (the map's own configstrings list,
+// walked once already by CL_PrepRefresh for asset registration, would
+// have to be walked a second time here to turn asset names back into
+// pak offsets before any of them are actually requested). Plain reset
+// captures most of the same benefit for a fraction of the work.
+Module.kaiosResetLazyPakCache = function () {
+	lazyPakSlotTag.fill(null);
+	lazyPakNodeBlocks = new WeakMap();
+	lazyPakSlotCursor = 0;
+};
+
 function lazyPakBlockMapFor(node) {
 	var m = lazyPakNodeBlocks.get(node);
 	if (!m) {
