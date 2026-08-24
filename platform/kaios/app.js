@@ -1387,21 +1387,11 @@ function isBaseq2Confirmed() {
 // otherwise reads "pak0.pak not found". Cleared on a successful scan.
 var mainMenuError = '';
 
-// Set by showMainMenu() while (and only while) the main menu is the
-// screen on display, so a scan that finishes after the player has
-// already backed out of it (see performBaseq2Scan()'s cancel handling)
-// can refresh it in place instead of forcing them back to a screen they
-// deliberately left. Cleared here since every screen transition --
-// including back into showMainMenu() itself, which reassigns it --
-// calls hideAllScreens() first.
-var refreshMainMenuIfShown = null;
-
 function hideAllScreens() {
 	menuEl.style.display = 'none';
 	pickerEl.style.display = 'none';
 	settingsEl.style.display = 'none';
 	statusEl.style.display = 'none';
-	refreshMainMenuIfShown = null;
 }
 
 function mainMenuItems() {
@@ -1441,11 +1431,8 @@ function showMainMenu() {
 	var selected = 0;
 
 	// mainMenuItems() is recomputed on every render(), not cached once
-	// at screen-entry -- a Play-triggered scan finishing after the
-	// player cancelled back to this screen (see performBaseq2Scan()'s
-	// refreshMainMenuIfShown call) needs the very next render() to pick
-	// up the now-confirmed state without a full re-entry into
-	// showMainMenu().
+	// at screen-entry -- picks up mainMenuError changing (a failed scan)
+	// without needing a full re-entry into showMainMenu().
 	function render() {
 		var items = mainMenuItems();
 		var labels = items.map(function (it) { return it.label; });
@@ -1477,7 +1464,6 @@ function showMainMenu() {
 	menuEl.style.display = 'block';
 	render();
 	activeMenuKeyHandler = onKeyDown;
-	refreshMainMenuIfShown = render;
 }
 
 // ---------------------------------------------------------------------
@@ -1638,43 +1624,20 @@ function performBaseq2Scan() {
 
 	hideAllScreens();
 	setStatus('Scanning for baseq2...');
-	statusHintRightEl.textContent = 'Back';
 
-	// A real, populated SD card can take long enough to walk in full
-	// (every file on it, not just baseq2's own -- there's no way to
-	// scope this down before knowing where baseq2 even is) that a
-	// static "Scanning..." status with no way out and no visible
-	// progress reasonably reads as a hung app, not just a slow one --
-	// confirmed on real hardware. RSK backs out to the main menu without
-	// actually stopping the scan (there's no cancel primitive for a
-	// DeviceStorage cursor) -- it keeps running quietly and updates
-	// state whenever it finishes instead.
-	var cancelled = false;
-
-	function onKeyDown(ev) {
-		if (ev.key === 'SoftRight') {
-			cancelled = true;
-			activeMenuKeyHandler = null;
-			mainMenuError = 'Still searching in the background...';
-			showMainMenu();
-		}
-	}
-	activeMenuKeyHandler = onKeyDown;
-
-	function landOnMainMenu() {
-		activeMenuKeyHandler = null;
-		if (cancelled) {
-			// The player already backed out to (or past) the main menu
-			// -- refresh it in place instead of yanking them back to it
-			// a second time once this finally resolves.
-			if (typeof refreshMainMenuIfShown === 'function') {
-				refreshMainMenuIfShown();
-			}
-		} else {
-			showMainMenu();
-		}
-	}
-
+	// No cancel here on purpose. There used to be one (RSK backed out to
+	// the main menu while the scan kept running in the background and
+	// applied its result whenever it finally resolved), but
+	// DeviceStorage.enumerate() has no real cancel primitive -- "cancel"
+	// only ever meant "stop showing it," not "stop it" -- and pressing
+	// Play again while an old scan was still quietly finishing behind
+	// the scenes could start a second, overlapping scan. Both then
+	// shared the same global activeMenuKeyHandler/screen-visibility
+	// state, so whichever one resolved first could tear down the other
+	// mid-flight -- confirmed on real hardware as the app hanging after
+	// what looked like a *successful* load. A scan the player can't
+	// interrupt at all is a smaller cost than that.
+	//
 	// DeviceStorage.enumerate() delivers results one file at a time, and
 	// this scans the whole storage volume (not just baseq2's own) -- a
 	// real card can easily have thousands of entries. A DOM text update
@@ -1698,63 +1661,25 @@ function performBaseq2Scan() {
 			return;
 		}
 		lastProgressUpdate = now;
-		console.log('[kaios] baseq2 scan: ' + count + ' files seen so far' +
-			(cancelled ? ' (after cancel)' : ''));
-
-		if (cancelled) {
-			// Still visible even after backing out -- same "Still
-			// searching..." caption as the cancel keypress itself set,
-			// just kept live instead of static, so there's some sign
-			// this is still doing something without needing devtools
-			// attached to see the console.log above.
-			mainMenuError = 'Still searching... (' + count + ' files)';
-			if (typeof refreshMainMenuIfShown === 'function') {
-				refreshMainMenuIfShown();
-			}
-			return;
-		}
-
-		// setStatus() clears the hint by default (see its own comment)
-		// -- re-set it on every one of these progress updates, not just
-		// the initial setStatus() call above.
+		console.log('[kaios] baseq2 scan: ' + count + ' files seen so far');
 		setStatus('Scanning for baseq2... (' + count + ' files)');
-		statusHintRightEl.textContent = 'Back';
 	}).then(function (result) {
 		console.log('[kaios] baseq2 scan finished: ' + result.candidates.length +
-			' candidate(s) found' + (cancelled ? ' (after cancel)' : ''));
+			' candidate(s) found');
 		var candidates = result.candidates;
 
 		if (candidates.length === 0) {
 			mainMenuError = 'baseq2/pak0.pak not found';
-			landOnMainMenu();
+			showMainMenu();
 			return;
 		}
 
 		function finish(choice) {
 			mainMenuError = '';
-			if (cancelled) {
-				// Never auto-launch into a level the player didn't
-				// press Play for anymore -- they backed out, so just
-				// confirm and land on/refresh the main menu instead,
-				// same as if this had failed to find anything.
-				setCachedBaseq2Choice(choice);
-				localStorage.setItem(BASEQ2_CONFIRMED_KEY, '1');
-				landOnMainMenu();
-			} else {
-				// The cancel-scan RSK handler above has no business
-				// still being live once loading/copying/booting takes
-				// over -- that phase has no cancel of its own (never
-				// did, before this scan-progress screen existed at all).
-				activeMenuKeyHandler = null;
-				proceedWithChoice(result.filesByStorage[choice.storageName], choice);
-			}
+			proceedWithChoice(result.filesByStorage[choice.storageName], choice);
 		}
 
-		// A picker screen popping up after the player already backed out
-		// would be exactly the same "yanked back in" problem cancelling
-		// is meant to avoid -- just take the first candidate silently in
-		// that case, same as the picker-less single-candidate path.
-		if (candidates.length > 1 && !cancelled) {
+		if (candidates.length > 1) {
 			pickerEl.style.display = 'block';
 			statusEl.style.display = 'none';
 			showPicker(candidates, finish);
@@ -1762,10 +1687,9 @@ function performBaseq2Scan() {
 			finish(candidates[0]);
 		}
 	}, function (err) {
-		console.log('[kaios] baseq2 scan failed: ' + describeError(err) +
-			(cancelled ? ' (after cancel)' : ''));
+		console.log('[kaios] baseq2 scan failed: ' + describeError(err));
 		mainMenuError = 'Scan failed: ' + describeError(err);
-		landOnMainMenu();
+		showMainMenu();
 	});
 }
 
@@ -2124,12 +2048,16 @@ var DEBUG_ITEMS = [
 	// file instead (see LAZY_PAK_CACHE_BYTES/LAZY_PAK_BLOCK_BYTES's own
 	// comments near the top of app.js for what each one actually does
 	// and why). That buffer is allocated once, at script load, before
-	// this screen can ever be reached -- a change here only takes
-	// effect on the *next* full app launch, not immediately.
+	// this screen can ever be reached, so reloadOnChange (see
+	// showSettingsItemsScreen()) reloads the whole page on the way out
+	// of this screen if either one actually changed -- otherwise the
+	// new value would just silently do nothing until some *later*,
+	// unrelated relaunch.
 	{
 		id: 'lazypakcache',
 		label: 'Lazy pak cache',
 		cvars: [],
+		reloadOnChange: true,
 		choices: (function () {
 			var out = [];
 			for (var mb = 1; mb <= 64; mb++) {
@@ -2143,6 +2071,7 @@ var DEBUG_ITEMS = [
 		id: 'lazypakblock',
 		label: 'Lazy pak block',
 		cvars: [],
+		reloadOnChange: true,
 		choices: (function () {
 			var out = [];
 			for (var kb = 4; kb <= 512; kb *= 2) {
@@ -2269,6 +2198,34 @@ function resetLauncherSettings() {
 function showSettingsItemsScreen(group) {
 	var selected = 0;
 
+	// A handful of items (lazypakcache/lazypakblock -- see their own
+	// comment in DEBUG_ITEMS) drive plain JS constants read once at
+	// script load, not an engine cvar picked up on the next normal
+	// launch -- picking a new value here does nothing until the whole
+	// page reloads. Rather than explain that and leave it to the player
+	// to somehow trigger a relaunch themselves, snapshot every
+	// reloadOnChange item's value on entry and just reload the page on
+	// the way out if any of them actually changed. Safe to do
+	// unconditionally: this screen is only ever reachable pre-boot, from
+	// the main menu's own Settings item, so there's no running game
+	// session (or anything else) a reload could lose.
+	var reloadSnapshot = {};
+	for (var i = 0; i < group.items.length; i++) {
+		if (group.items[i].reloadOnChange) {
+			reloadSnapshot[group.items[i].id] = getItemIndex(group.items[i]);
+		}
+	}
+
+	function reloadNeeded() {
+		for (var i = 0; i < group.items.length; i++) {
+			var item = group.items[i];
+			if (item.reloadOnChange && getItemIndex(item) !== reloadSnapshot[item.id]) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	function render() {
 		renderMenuItems(settingsListEl, group.items.map(function (item) {
 			return item.label + ': ' + item.choices[getItemIndex(item)].label;
@@ -2292,7 +2249,11 @@ function showSettingsItemsScreen(group) {
 			render();
 		} else if (ev.key === 'SoftRight') {
 			activeMenuKeyHandler = null;
-			showSettingsGroups();
+			if (reloadNeeded()) {
+				location.reload();
+			} else {
+				showSettingsGroups();
+			}
 		}
 	}
 
