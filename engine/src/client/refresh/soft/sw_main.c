@@ -202,6 +202,7 @@ static cvar_t	*r_lockpvs;
 static cvar_t	*r_palettedtexture;
 cvar_t	*r_cull;
 cvar_t	*r_distcull_dist;
+cvar_t	*r_distcull_behind;
 
 // sw_vars.c
 
@@ -518,8 +519,14 @@ R_RegisterVariables (void)
 	 * IndexedDB by platform/kaios/app.js) remembers whatever the
 	 * player changed it to from then on. */
 	r_distcull_dist = ri.Cvar_Get("r_distcull_dist", "1200", CVAR_ARCHIVE);
+	/* Directional companion to r_distcull_dist -- see
+	 * R_EntityDistCulled()'s own comment for the full reasoning. 0
+	 * disables it (same behavior as before this cvar existed); 200 is
+	 * the requested starting point for real-device testing. */
+	r_distcull_behind = ri.Cvar_Get("r_distcull_behind", "200", CVAR_ARCHIVE);
 #else
 	r_distcull_dist = ri.Cvar_Get("r_distcull_dist", "0", CVAR_ARCHIVE);
+	r_distcull_behind = ri.Cvar_Get("r_distcull_behind", "0", CVAR_ARCHIVE);
 #endif
 
 	vid_fullscreen = ri.Cvar_Get( "vid_fullscreen", "0", CVAR_ARCHIVE );
@@ -918,6 +925,53 @@ R_DrawNullModel(void)
 }
 
 /*
+================
+R_EntityDistCulled
+
+Should this entity be skipped, based on r_distcull_dist/r_distcull_behind?
+`toViewer` is r_origin - <entity origin> (the direction/length already
+computed by both of R_DrawEntitiesOnList's loops for their own
+transform math -- reused here instead of a second subtraction),
+`distSq` its squared length.
+
+Unlike the world BSP walk (R_RecursiveWorldNode, sw_bsp.c), which
+frustum-culls a node before ever reaching its own r_distcull_dist
+check, entities have no frustum cull at all in this renderer -- every
+entity within the server's PVS gets fully transformed, projected, and
+rasterized every frame regardless of whether it's actually on screen,
+with only a plain (direction-agnostic) radius as a backstop. That
+radius has to stay generous enough to not visibly pop things straight
+ahead, which means it does nothing for the specific waste of a monster
+or item sitting directly behind the player, well within that radius,
+that was never going to render a single visible pixel.
+
+r_distcull_behind adds a second, much shorter radius that only applies
+when the entity is roughly behind the viewer -- a plain dot product
+against vpn (the view-forward vector, already computed once per frame)
+rather than a real bounding-sphere-vs-frustum test, cheap enough to run
+unconditionally per entity. Existing r_distcull_dist behavior is
+unchanged for anything in front of the viewer, and completely
+untouched when r_distcull_behind is 0. */
+static qboolean
+R_EntityDistCulled(const vec3_t toViewer, float distSq)
+{
+	if (r_distcull_dist->value > 0 &&
+	    distSq > r_distcull_dist->value * r_distcull_dist->value)
+	{
+		return true;
+	}
+
+	if (r_distcull_behind->value > 0 &&
+	    distSq > r_distcull_behind->value * r_distcull_behind->value &&
+	    DotProduct(toViewer, vpn) > 0)
+	{
+		return true;
+	}
+
+	return false;
+}
+
+/*
 =============
 R_DrawEntitiesOnList
 =============
@@ -963,18 +1017,15 @@ R_DrawEntitiesOnList (void)
 			VectorCopy (currententity->origin, r_entorigin);
 			VectorSubtract (r_origin, r_entorigin, modelorg);
 
-			if (r_distcull_dist->value > 0)
+			/* modelorg is r_origin - r_entorigin already, so its own
+			 * length *is* the distance to this entity, and its
+			 * direction points straight from the entity back to the
+			 * viewer -- exactly what R_EntityDistCulled() needs, no
+			 * extra work beyond what this loop already computed for
+			 * every entity anyway. */
+			if (R_EntityDistCulled(modelorg, DotProduct(modelorg, modelorg)))
 			{
-				float cutoff = r_distcull_dist->value;
-
-				/* modelorg is r_origin - r_entorigin already, so its
-				 * own length *is* the distance to this entity -- no
-				 * extra work beyond what this loop already computed
-				 * for every entity anyway. */
-				if (DotProduct(modelorg, modelorg) > cutoff * cutoff)
-				{
-					continue;
-				}
+				continue;
 			}
 
 			switch (currentmodel->type)
@@ -1031,14 +1082,9 @@ R_DrawEntitiesOnList (void)
 			VectorCopy (currententity->origin, r_entorigin);
 			VectorSubtract (r_origin, r_entorigin, modelorg);
 
-			if (r_distcull_dist->value > 0)
+			if (R_EntityDistCulled(modelorg, DotProduct(modelorg, modelorg)))
 			{
-				float cutoff = r_distcull_dist->value;
-
-				if (DotProduct(modelorg, modelorg) > cutoff * cutoff)
-				{
-					continue;
-				}
+				continue;
 			}
 
 			switch (currentmodel->type)

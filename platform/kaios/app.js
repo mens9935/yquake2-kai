@@ -2076,6 +2076,24 @@ var DEBUG_ITEMS = [
 		],
 		def: 1
 	},
+	// Directional companion to the above -- a much shorter cull radius
+	// that only applies to entities (monsters, items, ...) roughly
+	// behind the player, who was never going to see them anyway. See
+	// R_EntityDistCulled()'s own comment in sw_main.c. Software
+	// renderer only -- gl3 (this port's GLES3 option) has no entity
+	// culling of any kind to extend here.
+	{
+		id: 'distcullbehind',
+		label: 'Behind-player cull',
+		cvars: ['r_distcull_behind'],
+		choices: [
+			{ label: '100', values: ['100'] },
+			{ label: '200', values: ['200'] },
+			{ label: '400', values: ['400'] },
+			{ label: 'Off', values: ['0'] }
+		],
+		def: 1
+	},
 	// See kaios_startcmd's own comment in frame.c/autoexec.cfg -- queued
 	// once, right after SV_Init()/CL_Init() register map/demomap, so it
 	// can hold a full "demomap <name>" console command. Picking a demo
