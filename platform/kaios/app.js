@@ -588,7 +588,32 @@ var PAK_FILE_RE = /^pak\d+\.pak$/i;
 // (nothing's cached yet on a first touch). 4MB still covers plenty of
 // same-block re-touches within a single level; tune this constant
 // alone if later testing wants it back up.
-var LAZY_PAK_CACHE_BYTES = 4 * 1024 * 1024;
+//
+// Both this and the block size below are also exposed as Debug settings
+// (see 'lazypakcache'/'lazypakblock' in DEBUG_ITEMS further down) for
+// on-device A/B testing without a rebuild -- read directly out of
+// localStorage here, using the exact same 'kaios_setting_<id>' key
+// those items' own settingStorageKey()/getItemIndex() read and write,
+// since this code runs at script load, before DEBUG_ITEMS itself
+// exists yet to call those through normally. A value picked there only
+// takes effect on the *next* full app launch -- this whole arena is
+// allocated once, right here, at the top of the very first script tick.
+function readLazyPakStepIndex(id, stepCount, defaultIndex) {
+	var raw = localStorage.getItem('kaios_setting_' + id);
+	if (raw === null) {
+		return defaultIndex;
+	}
+	var idx = parseInt(raw, 10);
+	if (isNaN(idx) || idx < 0 || idx >= stepCount) {
+		return defaultIndex;
+	}
+	return idx;
+}
+
+// 1MB to 64MB, 1MB steps -- index 0 is 1MB, index 63 is 64MB. Default
+// index 3 = 4MB, matching the coded default above.
+var LAZY_PAK_CACHE_MB = readLazyPakStepIndex('lazypakcache', 64, 3) + 1;
+var LAZY_PAK_CACHE_BYTES = LAZY_PAK_CACHE_MB * 1024 * 1024;
 // 256KB. A real-device A/B test tried bumping this to 1MB on the
 // theory that sync-XHR call overhead dominates over bytes moved, so
 // 4x fewer, chunkier fetches should cost less overall -- the opposite
@@ -606,8 +631,17 @@ var LAZY_PAK_CACHE_BYTES = 4 * 1024 * 1024;
 // that specific read didn't need -- quadrupling the block size
 // roughly quadrupled the wasted decode work per touch. Left at the
 // original, actually-validated size; if anything, *smaller* blocks
-// are the direction later testing should try, not bigger.
-var LAZY_PAK_BLOCK_BYTES = 256 * 1024;
+// are the direction later testing should try, not bigger -- hence the
+// Debug setting below rather than just a hand edit here.
+//
+// 4KB to 512KB, power-of-two steps (index 0 = 4KB, index 7 = 512KB).
+// Default index 6 = 256KB, matching the coded default above. 1024KB
+// (1MB) is deliberately excluded as a step -- it's the one size this
+// project's own real-device A/B testing already measured as worse.
+var LAZY_PAK_BLOCK_KB_STEPS = [4, 8, 16, 32, 64, 128, 256, 512];
+var LAZY_PAK_BLOCK_KB = LAZY_PAK_BLOCK_KB_STEPS[
+	readLazyPakStepIndex('lazypakblock', LAZY_PAK_BLOCK_KB_STEPS.length, 6)];
+var LAZY_PAK_BLOCK_BYTES = LAZY_PAK_BLOCK_KB * 1024;
 var LAZY_PAK_BLOCK_COUNT = LAZY_PAK_CACHE_BYTES / LAZY_PAK_BLOCK_BYTES;
 var lazyPakCache = new Uint8Array(LAZY_PAK_CACHE_BYTES);
 // Ring of block slots -- each holds at most one {node, blockIndex} tag,
@@ -2084,6 +2118,39 @@ var DEBUG_ITEMS = [
 			{ label: 'demo2', values: ['demomap demo2.dm2'] }
 		],
 		def: 0
+	},
+	// These two don't drive an engine cvar (cvars: [], choice values all
+	// empty) -- they size the lazy pak-cache ring buffer in this very
+	// file instead (see LAZY_PAK_CACHE_BYTES/LAZY_PAK_BLOCK_BYTES's own
+	// comments near the top of app.js for what each one actually does
+	// and why). That buffer is allocated once, at script load, before
+	// this screen can ever be reached -- a change here only takes
+	// effect on the *next* full app launch, not immediately.
+	{
+		id: 'lazypakcache',
+		label: 'Lazy pak cache',
+		cvars: [],
+		choices: (function () {
+			var out = [];
+			for (var mb = 1; mb <= 64; mb++) {
+				out.push({ label: mb + 'MB', values: [] });
+			}
+			return out;
+		})(),
+		def: 3
+	},
+	{
+		id: 'lazypakblock',
+		label: 'Lazy pak block',
+		cvars: [],
+		choices: (function () {
+			var out = [];
+			for (var kb = 4; kb <= 512; kb *= 2) {
+				out.push({ label: kb + 'KB', values: [] });
+			}
+			return out;
+		})(),
+		def: 6
 	}
 ];
 
